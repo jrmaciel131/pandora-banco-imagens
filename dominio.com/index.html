@@ -1,0 +1,2978 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Banco de Imagens</title>
+<style>
+:root{
+  /* Light */
+  --bg:#f0f0ee;--sf:#ffffff;--bd:rgba(0,0,0,.08);--bds:rgba(0,0,0,.16);
+  --tx:#111110;--tx2:#52524e;--tx3:#8a8a84;
+  --gbg:#dcfce7;--gtx:#166534;--rbg:#fee2e2;--rtx:#991b1b;
+  --bbg:#dbeafe;--btx:#1d4ed8;--abg:#fef9c3;--atx:#713f12;
+  --r:12px;--rs:8px;--accent:#2563eb;
+  --shadow-sm:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.06);
+  --shadow-md:0 4px 12px rgba(0,0,0,.1),0 2px 4px rgba(0,0,0,.06);
+  --shadow-lg:0 12px 32px rgba(0,0,0,.12),0 4px 8px rgba(0,0,0,.08);
+}
+/* Auto: segue o sistema */
+@media(prefers-color-scheme:dark){:root:not([data-theme]){
+  --bg:#0f0f11;--sf:#1a1a1d;--bd:rgba(255,255,255,.1);--bds:rgba(255,255,255,.22);
+  --tx:#f0f0ec;--tx2:#b8b8b2;--tx3:#787872;
+  --gbg:#052e16;--gtx:#86efac;--rbg:#3f0a0a;--rtx:#fca5a5;
+  --bbg:#0c1a3a;--btx:#93c5fd;--abg:#2d1b00;--atx:#fde68a;
+  --accent:#3b82f6;
+  --shadow-sm:0 1px 3px rgba(0,0,0,.4);
+  --shadow-md:0 4px 12px rgba(0,0,0,.5);
+  --shadow-lg:0 12px 32px rgba(0,0,0,.6);
+}}
+/* Forçado escuro */
+[data-theme="dark"]{
+  --bg:#0f0f11;--sf:#1a1a1d;--bd:rgba(255,255,255,.1);--bds:rgba(255,255,255,.22);
+  --tx:#f0f0ec;--tx2:#b8b8b2;--tx3:#787872;
+  --gbg:#052e16;--gtx:#86efac;--rbg:#3f0a0a;--rtx:#fca5a5;
+  --bbg:#0c1a3a;--btx:#93c5fd;--abg:#2d1b00;--atx:#fde68a;
+  --accent:#3b82f6;
+  --shadow-sm:0 1px 3px rgba(0,0,0,.4);
+  --shadow-md:0 4px 12px rgba(0,0,0,.5);
+  --shadow-lg:0 12px 32px rgba(0,0,0,.6);
+}
+/* Forçado claro — já é o :root padrão, apenas sobrescreve se dark estiver ativo */
+[data-theme="light"]{
+  --bg:#f0f0ee;--sf:#ffffff;--bd:rgba(0,0,0,.08);--bds:rgba(0,0,0,.16);
+  --tx:#111110;--tx2:#52524e;--tx3:#8a8a84;
+  --gbg:#dcfce7;--gtx:#166534;--rbg:#fee2e2;--rtx:#991b1b;
+  --bbg:#dbeafe;--btx:#1d4ed8;--abg:#fef9c3;--atx:#713f12;
+  --accent:#2563eb;
+  --shadow-sm:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.06);
+  --shadow-md:0 4px 12px rgba(0,0,0,.1),0 2px 4px rgba(0,0,0,.06);
+  --shadow-lg:0 12px 32px rgba(0,0,0,.12),0 4px 8px rgba(0,0,0,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--tx);font-size:14px;line-height:1.5}
+
+/* ── Login ────────────────────────────────────────────── */
+/* Ambas as telas iniciam ocultas — check_session decide qual mostrar */
+#ls{display:none;align-items:center;justify-content:center;min-height:100vh;padding:1rem}
+#session-loading{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;gap:1rem}
+#session-loading .spin{width:28px;height:28px;border:3px solid var(--bds);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite}
+.lcard{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:2.25rem;width:100%;max-width:380px;box-shadow:var(--shadow-lg)}
+.lcard h1{font-size:20px;font-weight:600;margin-bottom:.15rem}
+.lcard p{color:var(--tx2);font-size:13px;margin-bottom:1.5rem}
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:1rem}
+.field label{font-size:12px;color:var(--tx2);font-weight:500}
+.field input{padding:9px 12px;border:0.5px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:14px;outline:none;transition:border-color .15s,box-shadow .15s}
+.field input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+
+/* ── Botões ───────────────────────────────────────────── */
+.btn{padding:8px 14px;border-radius:var(--rs);font-size:13px;font-weight:500;cursor:pointer;transition:opacity .15s,transform .1s,background .15s;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.btn:active{transform:scale(.98)}
+.bp{background:var(--tx);color:var(--bg);border:none}.bp:hover{opacity:.85}
+.bs{background:transparent;border:0.5px solid var(--bds);color:var(--tx2)}.bs:hover{background:var(--bd)}
+.bd-r{background:transparent;border:0.5px solid var(--rtx);color:var(--rtx)}.bd-r:hover{background:var(--rbg)}
+.btn-icon{padding:7px;border-radius:var(--rs);background:transparent;border:0.5px solid var(--bds);color:var(--tx2);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:background .15s}
+.btn-icon:hover{background:var(--bd)}
+.err{color:var(--rtx);font-size:12px;margin-top:.4rem}
+.warn-box{background:var(--abg);border:0.5px solid #d97706;border-radius:var(--rs);padding:.65rem .85rem;font-size:13px;color:var(--atx);margin-top:.4rem;display:none}
+
+/* ── App shell ────────────────────────────────────────── */
+#as{display:none;min-height:100vh;flex-direction:column}
+
+/* ── Topbar ───────────────────────────────────────────── */
+.topbar{background:var(--sf);border-bottom:1px solid var(--bd);padding:0 1.5rem;display:flex;align-items:center;height:56px;gap:6px;box-shadow:var(--shadow-sm);position:sticky;top:0;z-index:100}
+.tb-brand{font-size:15px;font-weight:600;margin-right:8px;white-space:nowrap}
+.vbadge{font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;background:var(--bbg);color:var(--btx);border:0.5px solid var(--btx)}
+.tb-spacer{flex:1}
+/* Indicador de usuário logado */
+.tb-user{display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;background:var(--bg);border:0.5px solid var(--bd);font-size:12px;font-weight:500;color:var(--tx2);margin-right:4px}
+.tb-user-dot{width:7px;height:7px;border-radius:50%;background:var(--gtx)}
+/* Botões principais (mais usados — visíveis) */
+.tb-main{display:flex;align-items:center;gap:4px}
+/* Botões secundários em menu dropdown */
+.tb-more{position:relative}
+.tb-more-btn{padding:7px 10px;border-radius:var(--rs);background:transparent;border:0.5px solid var(--bds);color:var(--tx2);cursor:pointer;font-size:13px;display:flex;align-items:center;gap:4px}
+.tb-more-btn:hover{background:var(--bd)}
+.tb-dropdown{position:absolute;top:calc(100%+6px);right:0;background:var(--sf);border:0.5px solid var(--bds);border-radius:var(--r);min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:300;display:none}
+.tb-dropdown.open{display:block}
+.tb-drop-item{display:flex;align-items:center;gap:8px;padding:9px 14px;cursor:pointer;font-size:13px;color:var(--tx);transition:background .12s}
+.tb-drop-item:hover{background:var(--bg)}
+.tb-drop-item.danger{color:var(--rtx)}
+.tb-drop-sep{border-top:0.5px solid var(--bd);margin:4px 0}
+
+/* Banners */
+#swarn{background:#7c3aed;color:#fff;padding:.5rem 1.25rem;font-size:13px;display:none;align-items:center;gap:10px}
+#swarn button{padding:4px 12px;border-radius:var(--rs);background:#fff;color:#7c3aed;border:none;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0}
+#na{background:var(--bbg);border-bottom:0.5px solid var(--bd);padding:.5rem 1.25rem;font-size:13px;color:var(--btx);display:none;align-items:center;gap:8px}
+
+.main{padding:1.25rem;max-width:1200px;margin:0 auto;width:100%}
+.view{display:none}.view.active{display:block}
+
+/* ── Diagnóstico ─────────────────────────────────────── */
+#dp{background:var(--sf);border:0.5px solid var(--bd);border-radius:var(--r);margin-bottom:1rem;display:none}
+#dp.open{display:block}
+.dh{display:flex;align-items:center;justify-content:space-between;padding:.8rem 1.25rem;border-bottom:0.5px solid var(--bd);cursor:pointer}
+.db{padding:1rem 1.25rem}
+.dr{display:flex;align-items:flex-start;gap:10px;padding:.4rem 0;border-bottom:0.5px solid var(--bd);font-size:13px}
+.dr:last-child{border-bottom:none}
+.dl{font-weight:500;min-width:160px;color:var(--tx2);flex-shrink:0}
+.dv{flex:1;word-break:break-all}
+.cok{color:var(--gtx)}.cerr{color:var(--rtx)}
+
+/* ── Filtros ─────────────────────────────────────────── */
+.fc{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.1rem 1.4rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)}
+.ft{display:flex;gap:8px;margin-bottom:.75rem;flex-wrap:wrap;align-items:center}
+.tl{font-size:12px;color:var(--tx2);margin-right:4px;font-weight:500}
+.toggle-mode{padding:5px 14px;border-radius:20px;border:0.5px solid var(--bds);background:transparent;cursor:pointer;font-size:12px;color:var(--tx2);transition:all .15s}
+.toggle-mode.active{background:var(--tx);color:var(--bg);border-color:var(--tx)}
+.frow{display:flex;gap:10px;flex-wrap:wrap}
+.fw{display:flex;flex-direction:column;gap:4px;flex:1;min-width:150px;position:relative}
+.fw label{font-size:11px;color:var(--tx2);font-weight:500;text-transform:uppercase;letter-spacing:.04em}
+.fw select,.fw input[type=text]{padding:8px 10px;border:0.5px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none;transition:border-color .15s}
+.fw select:focus,.fw input[type=text]:focus{border-color:var(--accent)}
+.ddw{position:relative}
+.dd{position:absolute;top:calc(100%+2px);left:0;right:0;background:var(--sf);border:0.5px solid var(--bds);border-radius:var(--rs);max-height:200px;overflow-y:auto;z-index:400;display:none;box-shadow:0 4px 16px rgba(0,0,0,.1)}
+.dd.open{display:block}
+.do{padding:7px 12px;cursor:pointer;font-size:13px}
+.do:hover{background:var(--bbg);color:var(--btx)}
+.psug{background:var(--abg);border:0.5px solid #d97706;border-radius:var(--rs);padding:.55rem .85rem;font-size:13px;color:var(--atx);margin-top:.4rem;display:none}
+.psug .sbtn{display:flex;gap:6px;margin-top:.4rem;flex-wrap:wrap}
+
+/* ── Stats ───────────────────────────────────────────── */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:1rem}
+.stat{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:.9rem 1.1rem;box-shadow:var(--shadow-sm)}
+.sn{font-size:24px;font-weight:600}.sl{font-size:11px;color:var(--tx2);margin-top:2px;font-weight:500;text-transform:uppercase;letter-spacing:.04em}
+
+/* ── Bulk bar ────────────────────────────────────────── */
+#bb{background:var(--bbg);border:0.5px solid var(--btx);border-radius:var(--r);padding:.6rem 1rem;margin-bottom:1rem;display:none;align-items:center;gap:8px;flex-wrap:wrap}
+#bb.show{display:flex}
+
+/* ── Grid ────────────────────────────────────────────── */
+/* Grade densa em 6 colunas com cards na proporção 4:5. */
+.cg{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+@media(max-width:1100px){.cg{grid-template-columns:repeat(5,1fr)}}
+@media(max-width:800px){.cg{grid-template-columns:repeat(4,1fr)}}
+@media(max-width:600px){.cg{grid-template-columns:repeat(3,1fr)}}
+.cc{background:var(--sf);border:0.5px solid var(--bd);border-radius:var(--r);overflow:hidden;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.cc:hover{border-color:var(--bds);box-shadow:0 2px 12px rgba(0,0,0,.07)}
+.cc.sel{border-color:var(--accent);box-shadow:0 0 0 2px rgba(37,99,235,.15)}
+.csel{position:absolute;top:6px;left:6px;width:20px;height:20px;border-radius:4px;border:2px solid #fff;background:rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;z-index:2}
+.cc.sel .csel{background:var(--accent);border-color:var(--accent)}
+
+/* Estados visuais da thumbnail (proporção 4:5, ID centralizado). */
+.ct{width:100%;aspect-ratio:4/5;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative}
+.ct img{width:100%;height:100%;object-fit:contain}
+.ct-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:100%;height:100%}
+.ct-loading .spin{width:18px;height:18px;border:2px solid var(--bds);border-top-color:var(--tx2);border-radius:50%;animation:sp .7s linear infinite}
+.ct-error{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--tx3);width:100%;height:100%}
+.ct-error .sad{font-size:22px}
+.ct-error span{font-size:10px;text-align:center;padding:0 6px}
+
+/* carrossel — mesma proporção 4:5 */
+.carousel{position:relative;width:100%;aspect-ratio:4/5;overflow:hidden}
+.carousel-slides{display:flex;height:100%;transition:transform .25s ease}
+.carousel-slide{min-width:100%;height:100%;flex-shrink:0;background:var(--bg);display:flex;align-items:center;justify-content:center;overflow:hidden}
+.carousel-slide img{width:100%;height:100%;object-fit:contain;background:#000}
+.carousel-btn{position:absolute;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.45);color:#fff;border:none;width:22px;height:22px;border-radius:50%;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:3;padding:0}
+.carousel-btn:hover{background:rgba(0,0,0,.65)}
+.carousel-btn.prev{left:4px}.carousel-btn.next{right:4px}
+.carousel-dots{position:absolute;bottom:4px;left:50%;transform:translateX(-50%);display:flex;gap:3px}
+.carousel-dot{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.45)}
+.carousel-dot.active{background:#fff}
+.carousel-ver{position:absolute;top:4px;right:4px;background:rgba(0,0,0,.6);color:#fff;font-size:9px;font-weight:600;padding:1px 5px;border-radius:4px}
+.vid-badge{position:absolute;bottom:5px;right:5px;background:rgba(0,0,0,.65);color:#fff;font-size:9px;font-weight:600;padding:2px 6px;border-radius:4px}
+
+/* ID do caso centralizado no rodapé do card. */
+.cb{padding:.55rem .7rem;text-align:center}
+.ci{font-size:13px;font-weight:700;letter-spacing:.01em}
+.cs{font-size:10px;color:var(--tx2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge{font-size:10px;padding:2px 8px;border-radius:20px;font-weight:600;display:inline-block;margin-top:3px}
+.bok{background:var(--gbg);color:var(--gtx)}.bused{background:var(--rbg);color:var(--rtx)}.bfree{background:var(--bbg);color:var(--btx)}
+/* Bloqueio: badge e estado visual no card */
+.bblock{background:#1f1f1f;color:#fbbf24;border:0.5px solid #fbbf24}
+.cc.blocked .ct{filter:grayscale(.6) brightness(.55)}
+.cc.blocked .ct::after{content:'🔒 BLOQUEADO';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.78);color:#fbbf24;padding:4px 10px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.05em;border:1px solid #fbbf24;pointer-events:none;text-align:center;white-space:nowrap}
+/* Tags chips no rodapé do card */
+.ctags{display:flex;flex-wrap:wrap;gap:3px;justify-content:center;margin-top:4px}
+.ctag{font-size:9px;font-weight:600;padding:1px 7px;border-radius:10px;background:var(--bbg);color:var(--btx);letter-spacing:.02em;text-transform:uppercase}
+/* Badge de versão sobre miniaturas (NA, LH, WEBP, VIDEO etc.) */
+.ver-badge{position:absolute;bottom:5px;right:5px;background:rgba(0,0,0,.72);color:#fff;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:.04em;pointer-events:none}
+
+/* ── Paginação ───────────────────────────────────────── */
+.pager{display:flex;align-items:center;justify-content:center;gap:4px;margin-top:1.5rem;flex-wrap:wrap}
+.pb{min-width:36px;height:36px;padding:0 10px;border:0.5px solid var(--bds);border-radius:var(--rs);background:transparent;cursor:pointer;font-size:13px;color:var(--tx2);display:inline-flex;align-items:center;justify-content:center;transition:all .15s}
+.pb:hover:not(:disabled):not(.active){background:var(--bd);color:var(--tx)}
+.pb.active{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+.pb:disabled{opacity:.3;cursor:default}
+.pb.nav{font-size:16px;font-weight:500}
+.pager-sep{font-size:14px;color:var(--tx3);padding:0 2px;user-select:none}
+.pager-jump{display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--tx2)}
+.pager-jump input{width:52px;height:36px;padding:0 8px;border:0.5px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;text-align:center;outline:none}
+.pager-jump input:focus{border-color:var(--accent)}
+.pager-info{font-size:12px;color:var(--tx3);margin-right:8px}
+.empty{text-align:center;padding:3rem 1rem;color:var(--tx2)}
+
+/* ── Modal ───────────────────────────────────────────── */
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:1.5rem;z-index:500;backdrop-filter:blur(3px)}
+.ov.open{display:flex}
+/* Modal principal com largura ampliada. */
+.modal{background:var(--sf);border-radius:var(--r);border:1px solid var(--bd);width:100%;max-width:660px;max-height:92vh;overflow-y:auto;box-shadow:var(--shadow-lg)}
+/* Painel do caso — modal mais largo */
+.modal.painel{max-width:880px}
+.painel-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:.5rem 1.6rem .25rem}
+.painel-status .pst-pill{font-size:11px;font-weight:700;padding:3px 10px;border-radius:14px;letter-spacing:.04em;text-transform:uppercase}
+.pst-pill.ok{background:var(--gbg);color:var(--gtx)}
+.pst-pill.used{background:var(--rbg);color:var(--rtx)}
+.pst-pill.blocked{background:#1f1f1f;color:#fbbf24;border:0.5px solid #fbbf24}
+.painel-section{padding:.45rem 1.6rem .25rem}
+.painel-section .ps-title{font-size:10px;color:var(--tx2);font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
+.tag-editor{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tag-pill{font-size:11px;font-weight:600;padding:3px 9px;border-radius:14px;background:var(--bbg);color:var(--btx);display:inline-flex;align-items:center;gap:5px}
+.tag-pill .x{cursor:pointer;opacity:.7;font-size:13px;line-height:1}
+.tag-pill .x:hover{opacity:1;color:var(--rtx)}
+.tag-input-wrap{position:relative;flex:1;min-width:160px}
+.tag-input-wrap input{width:100%;padding:5px 10px;border:0.5px solid var(--bds);border-radius:14px;background:var(--sf);color:var(--tx);font-size:12px;outline:none}
+.tag-input-wrap input:focus{border-color:var(--accent)}
+.tag-input-wrap .dd{top:calc(100%+3px)}
+/* Bloco de bloqueio */
+.block-banner{margin:.4rem 1.6rem;padding:.65rem .9rem;background:#1f1f1f;color:#fbbf24;border:1px solid #fbbf24;border-radius:var(--rs);display:flex;align-items:flex-start;gap:8px;font-size:13px}
+.block-banner .ic{font-size:16px;flex-shrink:0}
+.block-banner .reason{flex:1}
+.block-banner .reason b{display:block;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#fbbf24;opacity:.8;margin-bottom:1px}
+/* Grid de fotos no Painel */
+.painel-photos{padding:.4rem 1.6rem 1rem}
+.painel-photos h4{font-size:10px;color:var(--tx2);font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px}
+.photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.photo-card{background:var(--bg);border:1px solid var(--bd);border-radius:var(--rs);overflow:hidden;display:flex;flex-direction:column}
+.photo-thumb-wrap{position:relative;width:100%;aspect-ratio:1/1;background:#000;cursor:zoom-in;overflow:hidden}
+.photo-thumb-wrap img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .2s}
+.photo-thumb-wrap:hover img{transform:scale(1.04)}
+.photo-thumb-wrap.video{background:#1a1a2e;display:flex;align-items:center;justify-content:center;color:#aaa}
+.photo-actions{display:flex;gap:0;border-top:1px solid var(--bd)}
+.photo-actions button{flex:1;padding:7px 4px;border:none;background:transparent;color:var(--tx2);cursor:pointer;font-size:11px;display:inline-flex;align-items:center;justify-content:center;gap:4px;transition:background .15s,color .15s;border-right:1px solid var(--bd)}
+.photo-actions button:last-child{border-right:none}
+.photo-actions button:hover{background:var(--bd);color:var(--tx)}
+.photo-actions button:disabled{opacity:.45;cursor:default}
+.photo-actions button .spin{width:10px;height:10px;border-width:1.5px}
+.photo-name{font-size:10px;color:var(--tx3);padding:5px 8px 6px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Lightbox aprimorado — flutuante com ações */
+#lightbox-flo{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:700;padding:1rem}
+#lightbox-flo.open{display:flex}
+.lf-img{max-width:92vw;max-height:78vh;object-fit:contain;border-radius:6px;box-shadow:0 8px 32px rgba(0,0,0,.5);background:#111}
+.lf-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(0,0,0,.6);border-radius:24px;margin-top:14px;backdrop-filter:blur(4px)}
+.lf-bar button{background:transparent;border:1px solid rgba(255,255,255,.3);color:#fff;padding:7px 14px;border-radius:18px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;gap:5px;transition:background .15s,border-color .15s}
+.lf-bar button:hover{background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.6)}
+.lf-bar button.lf-close{border-color:rgba(255,100,100,.5);color:#fca5a5}
+.lf-bar button.lf-close:hover{background:rgba(255,100,100,.2)}
+.lf-info{position:absolute;top:1rem;left:50%;transform:translateX(-50%);color:#fff;font-size:13px;font-weight:600;background:rgba(0,0,0,.6);padding:6px 14px;border-radius:14px;backdrop-filter:blur(4px);max-width:80vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lf-nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.55);color:#fff;border:none;width:46px;height:46px;border-radius:50%;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s}
+.lf-nav:hover{background:rgba(255,255,255,.18)}
+.lf-nav.prev{left:1rem} .lf-nav.next{right:1rem}
+.lf-nav:disabled{opacity:.25;cursor:default}
+.mh{display:flex;align-items:center;justify-content:space-between;padding:1.4rem 1.6rem 1.1rem;border-bottom:1px solid var(--bd)}
+.mt{font-size:18px;font-weight:700;letter-spacing:-.01em}
+.mx{background:none;border:none;font-size:24px;cursor:pointer;color:var(--tx2);line-height:1;padding:2px 6px;border-radius:6px;transition:background .15s}
+.mx:hover{background:var(--bd)}
+
+/* fotos modal — thumbs maiores */
+.vs{padding:1rem 1.6rem}
+.vg{margin-bottom:.9rem}
+.vl{font-size:10px;color:var(--tx2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.pr{display:flex;gap:9px;flex-wrap:wrap}
+.pt{width:90px;height:90px;border-radius:var(--rs);overflow:hidden;border:1.5px solid var(--bd);cursor:pointer;position:relative;flex-shrink:0;background:var(--bg);transition:border-color .15s,transform .15s,box-shadow .15s}
+.pt:hover{border-color:var(--accent);transform:scale(1.04);box-shadow:var(--shadow-md)}
+.pt img{width:100%;height:100%;object-fit:cover}
+.pt-vid{background:#1a1a2e;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:100%;height:100%}
+.pt-vid span{font-size:9px;color:#aaa;font-weight:500;text-align:center;padding:0 4px}
+.pn{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);color:#fff;font-size:9px;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* modal body */
+.mb{padding:.75rem 1.6rem 1rem}
+.is{margin-bottom:1.1rem}
+.it{font-size:10px;color:var(--tx2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12px;padding:4px 11px;border-radius:20px;border:1px solid var(--bds);color:var(--tx2);font-weight:500}
+.chip.uf{background:var(--bbg);color:var(--btx);border-color:transparent}
+.chip.city{background:var(--gbg);color:var(--gtx);border-color:transparent}
+.chip.person{background:var(--abg);color:var(--atx);border-color:transparent}
+.chip.rm{cursor:pointer;display:inline-flex;align-items:center;gap:4px}.chip.rm:hover{opacity:.72}
+
+.ma{display:flex;gap:8px;padding:1rem 1.6rem 1.4rem;flex-wrap:wrap}
+
+/* form */
+.af{background:var(--bg);border-radius:var(--r);padding:1.2rem 1.4rem;margin:0 1.6rem .9rem;border:1px solid var(--bd)}
+.af h4{font-size:13px;font-weight:600;margin-bottom:.85rem}
+.fg{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.fg.full{grid-template-columns:1fr}
+.ff label{font-size:11px;color:var(--tx2);display:block;margin-bottom:4px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.ff select,.ff input[type=text]{width:100%;padding:8px 11px;border:1px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none;transition:border-color .15s}
+.ff select:focus,.ff input[type=text]:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+
+/* confirm modal */
+#confirm-modal .modal{max-width:440px}
+.confirm-changes{background:var(--bg);border-radius:var(--rs);padding:.75rem 1rem;margin:.5rem 1.25rem;font-size:13px;border:0.5px solid var(--bd)}
+.confirm-row{display:flex;gap:8px;margin-bottom:.35rem}
+.confirm-row:last-child{margin-bottom:0}
+.confirm-label{font-size:11px;color:var(--tx2);min-width:90px;flex-shrink:0;padding-top:2px;font-weight:500}
+.confirm-val{font-weight:600;color:var(--tx)}
+
+/* bulk errors */
+.berrs{background:var(--rbg);border:0.5px solid var(--rtx);border-radius:var(--rs);padding:.6rem .85rem;font-size:12px;color:var(--rtx);max-height:120px;overflow-y:auto;margin-bottom:.5rem}
+
+/* ID chips hover */
+.icw{position:relative;display:inline-block;margin:3px}
+.ic{padding:4px 10px;border-radius:20px;font-size:12px;font-weight:500;cursor:pointer;border:0.5px solid var(--bds);background:var(--sf);color:var(--tx2);display:inline-block;user-select:none;transition:all .15s}
+.ic.sel{background:var(--bbg);color:var(--btx);border-color:var(--btx)}
+.ic.inv{background:var(--rbg);color:var(--rtx);border-color:var(--rtx)}
+.icpop{position:fixed;width:120px;height:120px;border-radius:var(--rs);overflow:hidden;border:1.5px solid var(--bds);background:var(--sf);box-shadow:0 4px 14px rgba(0,0,0,.3);z-index:9999;display:none;pointer-events:none}
+.icpop img{width:100%;height:100%;object-fit:cover}
+.icpop.show{display:block}
+
+/* ── Histórico ───────────────────────────────────────── */
+.hist-header{display:flex;align-items:center;gap:10px;margin-bottom:1.25rem;flex-wrap:wrap}
+.hist-header h2{font-size:18px;font-weight:600;flex:1}
+/* Histórico agrupado por sessão de auditoria. */
+.hist-group{margin-bottom:1.25rem;border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow-sm)}
+.hist-group-header{display:flex;align-items:center;gap:10px;padding:.75rem 1rem;background:var(--bg);border-bottom:1px solid var(--bd);flex-wrap:wrap}
+.hist-group-title{font-size:12px;font-weight:700;color:var(--tx);flex:1}
+.hist-group-meta{font-size:11px;color:var(--tx2)}
+.hist-group-revert{padding:4px 12px;border-radius:var(--rs);background:transparent;border:1px solid var(--rtx);color:var(--rtx);font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;flex-shrink:0}
+.hist-group-revert:hover{background:var(--rbg)}
+.hist-group-revert:disabled{opacity:.4;cursor:default}
+.log-table{width:100%;border-collapse:collapse;font-size:12px}
+.log-table th{text-align:left;padding:.55rem .75rem;border-bottom:1px solid var(--bds);font-size:10px;color:var(--tx2);font-weight:600;text-transform:uppercase;letter-spacing:.04em;background:var(--bg)}
+.log-table td{padding:.6rem .75rem;border-bottom:1px solid var(--bd);vertical-align:top}
+.log-table tr:last-child td{border-bottom:none}
+.log-table tr:hover td{background:var(--bg)}
+.la{padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600}
+.la-add{background:var(--gbg);color:var(--gtx)}.la-rm{background:var(--rbg);color:var(--rtx)}.la-bulk{background:var(--bbg);color:var(--btx)}.la-revert{background:var(--abg);color:var(--atx)}
+.diff-antes{text-decoration:line-through;color:var(--rtx);font-size:11px}
+.diff-depois{color:var(--gtx);font-size:11px}
+/* Botão de reverter uma entrada individual do histórico. */
+.btn-revert{padding:3px 9px;border-radius:var(--rs);background:transparent;border:1px solid var(--rtx);color:var(--rtx);font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .15s}
+.btn-revert:hover{background:var(--rbg)}
+.btn-revert:disabled{opacity:.4;cursor:default}
+
+/* ── Spin / Toast ────────────────────────────────────── */
+.spin{display:inline-block;width:13px;height:13px;border:2px solid var(--bds);border-top-color:var(--tx);border-radius:50%;animation:sp .6s linear infinite;vertical-align:middle}
+@keyframes sp{to{transform:rotate(360deg)}}
+.toast{position:fixed;bottom:1.5rem;right:1.5rem;background:var(--tx);color:var(--bg);padding:.65rem 1rem;border-radius:var(--rs);font-size:13px;z-index:1000;opacity:0;transform:translateY(8px);transition:all .25s;pointer-events:none;max-width:320px;box-shadow:0 4px 16px rgba(0,0,0,.2)}
+.toast.show{opacity:1;transform:translateY(0)}
+#lb{z-index:600}
+#lbi{max-width:92vw;max-height:88vh;border-radius:var(--r);object-fit:contain}
+</style>
+</head>
+<body>
+
+<!-- LOADING INICIAL (exibido enquanto check_session processa) -->
+<div id="session-loading">
+  <div class="spin"></div>
+  <div style="font-size:13px;color:var(--tx2)">Verificando sessão...</div>
+</div>
+
+<!-- LOGIN -->
+<div id="ls">
+  <div class="lcard">
+    <h1>Banco de imagens</h1>
+    <p>Faça login para continuar</p>
+    <div class="field"><label>Usuário</label><input type="text" id="lu" autocomplete="username" placeholder="seu usuário"></div>
+    <div class="field"><label>Senha</label>
+      <div style="position:relative">
+        <input type="password" id="lp" autocomplete="current-password" placeholder="••••••••" style="padding-right:44px">
+        <button type="button" onclick="togglePwd()" id="lpbtn" style="position:absolute;right:1px;top:1px;bottom:1px;width:40px;background:transparent;border:none;cursor:pointer;color:var(--tx3);font-size:16px;display:flex;align-items:center;justify-content:center;border-radius:0 var(--rs) var(--rs) 0" title="Mostrar/ocultar senha">👁</button>
+      </div>
+    </div>
+    <div class="err" id="le" style="display:none"></div>
+    <button class="btn bp" id="lb2" onclick="doLogin()" style="width:100%;margin-top:.75rem;justify-content:center">Entrar</button>
+  </div>
+</div>
+
+<!-- SELEÇÃO DE BASE (aparece após login se nenhuma base ativa) -->
+<div id="bs" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:800;align-items:center;justify-content:center;padding:1rem">
+  <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:2.25rem;width:100%;max-width:420px;box-shadow:var(--shadow-lg);text-align:center">
+    <div style="font-size:32px;margin-bottom:.75rem">📂</div>
+    <h2 style="font-size:20px;font-weight:700;margin-bottom:.35rem">Selecione a base</h2>
+    <p style="font-size:13px;color:var(--tx2);margin-bottom:1.75rem">Escolha qual banco de imagens você quer acessar</p>
+    <div id="base-buttons" style="display:flex;flex-direction:column;gap:10px"></div>
+    <div style="margin-top:1rem;font-size:12px;color:var(--tx3)" id="bs-user"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="as">
+
+  <!-- TOPBAR REDESENHADA -->
+  <div class="topbar">
+    <div class="tb-brand">Banco de imagens <span class="vbadge">v19</span> <span id="tb-base-badge" style="display:none;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--accent);color:#fff;margin-left:4px"></span></div>
+    <div class="tb-spacer"></div>
+
+    <!-- Indicador de usuário logado -->
+    <div class="tb-user">
+      <div class="tb-user-dot"></div>
+      <span id="tu">—</span>
+    </div>
+
+    <!-- Acesso ao histórico de auditoria (todos os usuários) -->
+    <button class="btn bs" style="padding:6px 12px;font-size:12px" onclick="showView('hist')">📋 Histórico</button>
+    <!-- Indicador de progresso do carregamento -->
+    <span id="page-load-timer" style="display:none;font-size:11px;color:var(--tx3);font-weight:600"></span>
+
+    <!-- Demais ações agrupadas no menu dropdown -->
+    <div class="tb-more" id="tb-more">
+      <button class="tb-more-btn" onclick="toggleMoreMenu()">
+        Mais ▾
+      </button>
+      <div class="tb-dropdown" id="tb-dropdown">
+        <div class="tb-drop-item" data-admin onclick="toggleDiag();closeMoreMenu()" style="display:none">🔧 Diagnóstico</div>
+        <div class="tb-drop-item" onclick="syncNow();closeMoreMenu()">↻ Sincronizar dados</div>
+        <div class="tb-drop-sep" data-admin style="display:none"></div>
+        <div class="tb-drop-item" data-admin onclick="showView('admin');closeMoreMenu()" style="display:none">⚡ Admin Mode</div>
+        <div class="tb-drop-item" data-admin id="adminmode-toggle" onclick="toggleGodModeVisual();closeMoreMenu()" style="display:none">👁 Ativar métricas visuais</div>
+        <div class="tb-drop-sep" data-admin style="display:none"></div>
+        <div class="tb-drop-item danger" data-admin onclick="confirmClearAllCache();closeMoreMenu()" style="display:none">🗑 Limpar cache</div>
+        <div class="tb-drop-sep"></div>
+        <!-- Trocar de base -->
+        <div style="padding:4px 14px 2px;font-size:10px;color:var(--tx3);font-weight:700;text-transform:uppercase;letter-spacing:.05em">Base de dados</div>
+        <div id="base-menu-items"></div>
+        <div class="tb-drop-sep"></div>
+        <!-- Tema -->
+        <div style="padding:4px 14px 2px;font-size:10px;color:var(--tx3);font-weight:700;text-transform:uppercase;letter-spacing:.05em">Tema</div>
+        <div class="tb-drop-item" id="theme-auto"  onclick="setTheme('auto');closeMoreMenu()">🖥 Auto (sistema)</div>
+        <div class="tb-drop-item" id="theme-light" onclick="setTheme('light');closeMoreMenu()">☀️ Claro</div>
+        <div class="tb-drop-item" id="theme-dark"  onclick="setTheme('dark');closeMoreMenu()">🌙 Escuro</div>
+        <div class="tb-drop-sep"></div>
+        <div class="tb-drop-item" onclick="openHelp();closeMoreMenu()">📚 Ajuda &amp; tutoriais</div>
+        <div class="tb-drop-item" onclick="startTour();closeMoreMenu()">🎬 Tour guiado</div>
+        <div class="tb-drop-item" onclick="window.open('../export/','_blank');closeMoreMenu()">📤 Exportar casos</div>
+        <div class="tb-drop-sep"></div>
+        <div class="tb-drop-item" onclick="doLogout()">← Sair</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Aviso sessão expirando -->
+  <div id="swarn" style="display:none">
+    <span style="flex:1">⏳ Sessão expira em <b id="swmin">15</b> min.</span>
+    <button onclick="renewSession()">Renovar sessão</button>
+    <button onclick="this.closest('#swarn').style.display='none'" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4)">Dispensar</button>
+  </div>
+
+  <!-- Novos arquivos no Drive -->
+  <div id="na" style="display:none">
+    <span style="width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block"></span>
+    <span id="nat"></span>
+    <button class="btn bs" style="padding:3px 9px;font-size:11px;margin-left:auto" onclick="this.closest('#na').style.display='none'">Dispensar</button>
+  </div>
+
+  <div class="main">
+
+    <!-- VIEW: principal -->
+    <div id="view-main" class="view active">
+
+      <!-- Diagnóstico (recolhível) -->
+      <div id="dp">
+        <div class="dh" onclick="runDiag()">
+          <div style="font-size:14px;font-weight:600">🔧 Diagnóstico de conexão</div>
+          <span id="ds" style="font-size:12px;color:var(--tx2)">Clique para testar</span>
+        </div>
+        <div class="db" id="db" style="display:none"></div>
+      </div>
+
+      <!-- Filtros -->
+      <div class="fc">
+        <div class="ft">
+          <span class="tl">Validar por:</span>
+          <button class="toggle-mode active" id="te" onclick="setMode('estado')">Estado</button>
+          <button class="toggle-mode" id="tc" onclick="setMode('cidade')">Cidade</button>
+          <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <button class="btn bs" id="btn-clf" style="padding:5px 10px;font-size:12px;display:none" onclick="clearFilters()">✕ Limpar filtros</button>
+            <button class="btn bs" id="btn-selall" style="padding:5px 10px;font-size:12px" onclick="toggleSelAll()">☑ Sel. todos</button>
+            <button class="btn bs" id="btn-sel" style="padding:5px 10px;font-size:12px" onclick="toggleSel()">☑ Selecionar</button>
+            <button class="btn bs" style="padding:5px 10px;font-size:12px" onclick="openBulkModal()">📋 Por ID</button>
+          </div>
+        </div>
+        <div class="frow">
+          <div class="fw">
+            <label>Estado</label>
+            <select id="fuf" onchange="onUFChange()"><option value="">Todos os estados</option></select>
+          </div>
+          <div class="fw" id="cw" style="display:none">
+            <label>Cidade</label>
+            <div class="ddw"><input type="text" id="fci" placeholder="Pesquise a cidade..." oninput="onCityInput()" onfocus="openCityDD()" autocomplete="off"><div class="dd" id="cdd"></div></div>
+          </div>
+          <div class="fw">
+            <label>Profissional</label>
+            <div class="ddw"><input type="text" id="fpro" placeholder="Nome do profissional..." oninput="onProfSearch()" onfocus="openProfDD()" autocomplete="off"><div class="dd" id="prodd"></div></div>
+          </div>
+          <div class="fw" style="max-width:140px">
+            <label>Exibir</label>
+            <select id="fshow" onchange="onShowFilterChange()">
+              <option value="todos">Todos</option>
+              <option value="disponivel" selected>Disponíveis</option>
+              <option value="em_uso">Em uso</option>
+              <option value="bloqueado">Bloqueados</option>
+            </select>
+          </div>
+        </div>
+        <!-- Filtro por tags + filtro por IDs -->
+        <div style="margin-top:.65rem;padding-top:.65rem;border-top:0.5px solid var(--bd);display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <div class="fw" style="flex:2;min-width:200px">
+            <label>Tags (categorias)</label>
+            <div class="ddw"><input type="text" id="ftag" placeholder="Adicione tags para filtrar (ex: RINO, BOTOX)..." oninput="onTagFilterInput()" onfocus="openTagFilterDD()" autocomplete="off"><div class="dd" id="ftagdd"></div></div>
+            <div id="ftag-chips" style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px"></div>
+          </div>
+          <div class="fw" style="flex:2;min-width:200px">
+            <label>Filtrar por IDs específicos</label>
+            <input type="text" id="fids" placeholder="Ex: 244, 255, 834 — separados por vírgula" oninput="applyFilter()" autocomplete="off">
+          </div>
+          <button class="btn bs" style="padding:7px 12px;font-size:12px;flex-shrink:0" onclick="document.getElementById('fids').value='';selTags.clear();renderTagFilterChips();applyFilter()">✕</button>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats">
+        <div class="stat"><div class="sn" id="st">—</div><div class="sl">Total</div></div>
+        <div class="stat"><div class="sn" id="sd" style="color:var(--gtx)">—</div><div class="sl">Disponíveis</div></div>
+        <div class="stat"><div class="sn" id="su" style="color:var(--rtx)">—</div><div class="sl">Em uso</div></div>
+      </div>
+
+      <!-- Bulk bar -->
+      <div id="bb">
+        <div style="font-size:13px;font-weight:600;color:var(--btx);flex:1" id="bc">0 selecionados</div>
+        <button class="btn bp" style="padding:6px 13px;font-size:12px" onclick="openBulkApply()">Registrar uso nos selecionados</button>
+        <button class="btn bs" style="padding:6px 13px;font-size:12px" onclick="downloadBulkZip()" title="Até 30 casos por download">📦 Baixar (ZIP)</button>
+        <button class="btn bs" style="padding:6px 13px;font-size:12px" onclick="clearSel()">Limpar seleção</button>
+      </div>
+
+      <div class="cg" id="grid"></div>
+      <div class="empty" id="empty" style="display:none">Nenhum caso encontrado.</div>
+      <div class="pager" id="pager"></div>
+    </div>
+
+    <!-- VIEW: histórico -->
+    <div id="view-hist" class="view">
+      <div class="hist-header">
+        <h2>Histórico de alterações</h2>
+        <select id="hfuser" onchange="loadHistorico()" style="padding:6px 10px;border:0.5px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none">
+          <option value="">Todos os usuários</option>
+        </select>
+        <input type="text" id="hfcaso" placeholder="Caso (ex: 100)..." style="padding:6px 10px;border:0.5px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none;width:140px" oninput="loadHistorico()">
+        <input type="text" id="hfsearch" placeholder="Buscar UF, cidade, profissional..." style="padding:6px 10px;border:0.5px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none;width:210px" oninput="loadHistorico()">
+        <button class="btn bs" style="padding:6px 12px;font-size:12px" onclick="loadHistorico()">↻</button>
+        <button class="btn bs" style="padding:6px 12px;font-size:12px" onclick="showView('main')">← Voltar</button>
+      </div>
+      <div id="hist-body" style="background:var(--sf);border:0.5px solid var(--bd);border-radius:var(--r);overflow:hidden">
+        <div style="padding:2rem;text-align:center;color:var(--tx2)"><span class="spin"></span></div>
+      </div>
+    </div>
+
+    <!-- VIEW: Admin Mode (admin only) -->
+    <div id="view-admin" class="view">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:1.25rem;flex-wrap:wrap">
+        <h2 style="font-size:18px;font-weight:700;flex:1">⚡ Admin Mode <span style="font-size:12px;font-weight:400;color:var(--tx2);margin-left:6px">Acesso restrito a administradores</span></h2>
+        <button class="btn bs" style="padding:6px 12px;font-size:12px" onclick="showView('main')">← Voltar</button>
+      </div>
+
+      <!-- Diagnóstico -->
+      <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);margin-bottom:1rem;box-shadow:var(--shadow-sm)">
+        <div class="dh" onclick="runDiag('admin')">
+          <div style="font-size:14px;font-weight:600">🔧 Diagnóstico de conexão</div>
+          <span id="ds-admin" style="font-size:12px;color:var(--tx2)">Clique para testar</span>
+        </div>
+        <div class="db" id="db-admin" style="display:none"></div>
+      </div>
+
+      <!-- Diagnóstico de performance (admin) -->
+      <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:.75rem">⏱ Teste de velocidade de imagens</h3>
+        <p style="font-size:13px;color:var(--tx2);margin-bottom:.75rem">Compare o tempo de carregamento via cache local vs. Google Drive direto.</p>
+        <div style="display:flex;gap:8px;margin-bottom:.75rem;flex-wrap:wrap">
+          <input type="text" id="speed-id" placeholder="ID do caso (ex: 244)" style="padding:7px 10px;border:1px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none;width:200px">
+          <button class="btn bp" style="padding:7px 14px;font-size:13px" onclick="runSpeedTest()">Testar</button>
+        </div>
+        <div id="speed-result" style="display:none;background:var(--bg);border-radius:var(--rs);padding:.85rem 1rem;font-size:13px"></div>
+      </div>
+
+      <!-- Gerenciamento de usuários (admin) -->
+      <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:.35rem">👥 Gerenciar usuários</h3>
+        <p style="font-size:12px;color:var(--tx2);margin-bottom:.85rem;line-height:1.5">
+          Usuários novos começam em <b style="color:#92400e">🧪 Modo teste</b> — só veem a base sandbox para aprender o sistema.
+          Quando estiverem prontos, clique em <b>"Promover p/ produção"</b> para liberar acesso às bases reais (PH e PO).
+        </p>
+        <div id="users-list" style="margin-bottom:1rem"></div>
+      <div style="background:var(--bg);border-radius:var(--rs);padding:1rem;border:1px solid var(--bd);margin-top:.75rem">
+          <h4 style="font-size:13px;font-weight:600;margin-bottom:.75rem">➕ Adicionar usuário</h4>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+            <input type="text" id="new-user" placeholder="Nome de usuário" style="padding:7px 10px;border:1px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none;flex:1;min-width:140px">
+            <input type="text" id="new-pass" placeholder="Senha (ver requisitos)" style="padding:7px 10px;border:1px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none;flex:2;min-width:180px">
+            <select id="new-role" style="padding:7px 10px;border:1px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none">
+              <option value="user">usuário</option>
+              <option value="admin">admin</option>
+            </select>
+            <button class="btn bp" style="padding:7px 14px;font-size:13px" onclick="addUser()">Criar</button>
+          </div>
+          <div class="err" id="add-user-err"></div>
+        </div>
+        <div style="background:var(--bg);border-radius:var(--rs);padding:1rem;border:1px solid var(--bd);margin-top:.75rem">
+          <h4 style="font-size:13px;font-weight:600;margin-bottom:.75rem">Alterar senha</h4>
+          <p style="font-size:11px;color:var(--tx3);margin-bottom:.6rem">Requisitos: mín. 6 chars, maiúscula, minúscula, número e caractere especial.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <select id="pwd-user" style="padding:7px 10px;border:1px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none;flex:1;min-width:140px"></select>
+            <input type="text" id="pwd-new" placeholder="Nova senha (mín. 6 chars)" style="padding:7px 10px;border:1px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none;flex:2;min-width:180px">
+            <button class="btn bp" style="padding:7px 14px;font-size:13px" onclick="changePassword()">Alterar</button>
+          </div>
+          <div class="err" id="pwd-err" style="margin-top:.4rem"></div>
+        </div>
+      </div>
+
+      <!-- Cron status -->
+      <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.25rem;box-shadow:var(--shadow-sm)">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:.5rem">🕐 Cache automático (Cron)</h3>
+        <p style="font-size:13px;color:var(--tx2);margin-bottom:.75rem">Configure um Cron Job no DreamHost para pré-aquecer todas as thumbs diariamente.</p>
+        <code style="display:block;background:var(--bg);padding:.75rem;border-radius:var(--rs);font-size:12px;word-break:break-all">/usr/local/php83/bin/php /home/SEU_USER/casos.seudominio.com/api/cron.php</code>
+      </div>
+    </div>
+
+  </div><!-- .main -->
+</div><!-- #as -->
+
+<!-- PAINEL DO CASO -->
+<div class="ov" id="ov" onclick="ovClick(event)">
+  <div class="modal painel">
+    <div class="mh">
+      <div>
+        <div style="font-size:10px;color:var(--tx2);font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px">Painel do caso</div>
+        <div class="mt" id="mid"></div>
+      </div>
+      <button class="mx" onclick="closeModal()">×</button>
+    </div>
+    <!-- Status pills (Disponível/Em uso/Bloqueado) -->
+    <div class="painel-status" id="painel-status"></div>
+    <!-- Banner de bloqueio (se aplicável) -->
+    <div id="block-banner-wrap"></div>
+    <!-- Tags (categorias) -->
+    <div class="painel-section">
+      <div class="ps-title">Tags (categorias)</div>
+      <div class="tag-editor" id="tag-editor"></div>
+    </div>
+    <div class="mb">
+      <!-- Chips com X (estados / cidades / profissionais) -->
+      <div class="is">
+        <div class="it">Estados em uso</div>
+        <div class="chips" id="mufs"></div>
+      </div>
+      <div class="is">
+        <div class="it">Cidades em uso</div>
+        <div class="chips" id="mcities"></div>
+      </div>
+      <div class="is">
+        <div class="it">Profissionais</div>
+        <div class="chips" id="mpers"></div>
+      </div>
+      <!-- Entradas registradas com botão de remoção individual -->
+      <div class="is" id="remove-uso-section" style="display:none">
+        <div class="it">Remover uso</div>
+        <div id="remove-uso-list"></div>
+      </div>
+    </div>
+    <!-- Fotos do caso -->
+    <div class="painel-photos">
+      <h4>Fotos / Vídeos</h4>
+      <div id="mps"><div style="padding:.5rem 0;font-size:12px;color:var(--tx2)"><span class="spin"></span> Carregando fotos...</div></div>
+    </div>
+    <div class="af" id="addform" style="display:none">
+      <h4>Registrar novo uso</h4>
+      <div class="fg">
+        <div class="ff"><label>Estado (UF)</label><select id="auf" onchange="onAddUF()"><option value="">Selecione...</option></select></div>
+        <div class="ff"><label>Cidade</label>
+          <div class="ddw"><input type="text" id="aci" placeholder="Selecione estado primeiro..." readonly oninput="onAddCityInp()" onfocus="openAddCityDD()" autocomplete="off" data-val=""><div class="dd" id="acdd"></div></div>
+        </div>
+      </div>
+      <div class="fg full">
+        <div class="ff"><label>Profissional</label>
+          <div class="ddw"><input type="text" id="apro" placeholder="Nome completo..." oninput="onAddProf()" autocomplete="off"><div class="dd" id="aprodd"></div></div>
+          <div class="psug" id="prosug"></div>
+        </div>
+      </div>
+      <div class="warn-box" id="state-warn"></div>
+      <div style="display:flex;gap:8px;margin-top:.5rem;flex-wrap:wrap">
+        <button class="btn bp" style="flex:1;justify-content:center" id="abtn" onclick="prepareConfirm('add')">Registrar uso</button>
+        <button class="btn bs" onclick="document.getElementById('addform').style.display='none'">Cancelar</button>
+      </div>
+      <div class="err" id="aerr"></div>
+    </div>
+    <div class="ma" id="mact" style="flex-wrap:wrap"></div>
+  </div>
+</div>
+
+<!-- MODAL CONFIRMAÇÃO -->
+<div class="ov" id="confirm-modal" onclick="if(event.target===this)this.classList.remove('open')" style="z-index:600">
+  <div class="modal" style="max-width:440px">
+    <div class="mh"><div class="mt" id="confirm-title">Confirmar</div><button class="mx" onclick="document.getElementById('confirm-modal').classList.remove('open')">×</button></div>
+    <p style="padding:.5rem 1.25rem;font-size:13px;color:var(--tx2)" id="confirm-desc"></p>
+    <div class="confirm-changes" id="confirm-changes"></div>
+    <div class="ma">
+      <button class="btn bp" style="flex:1;justify-content:center" id="confirm-ok-btn">Confirmar</button>
+      <button class="btn bs" onclick="document.getElementById('confirm-modal').classList.remove('open')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL BULK GRID -->
+<div class="ov" id="bav" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal">
+    <div class="mh"><div class="mt">Registro em massa</div><button class="mx" onclick="this.closest('.ov').classList.remove('open')">×</button></div>
+    <div style="padding:0 1.25rem .5rem;font-size:13px;color:var(--tx2)" id="bai"></div>
+    <div class="berrs" id="baerrs" style="display:none;margin:0 1.25rem .5rem"></div>
+    <div class="af" style="display:block;margin-top:0">
+      <div class="fg">
+        <div class="ff"><label>Estado</label><select id="bauf" onchange="onBulkUF('ba')"><option value="">Selecione...</option></select></div>
+        <div class="ff"><label>Cidade</label><div class="ddw"><input type="text" id="baci" placeholder="Selecione estado..." readonly oninput="onBulkCityInp('ba')" onfocus="openBulkCityDD('ba')" autocomplete="off" data-val=""><div class="dd" id="bacdd"></div></div></div>
+      </div>
+      <div class="fg full"><div class="ff"><label>Profissional</label><div class="ddw"><input type="text" id="bapro" oninput="onBulkProf('ba')" placeholder="Nome completo..." autocomplete="off"><div class="dd" id="baprodd"></div></div><div class="psug" id="baprosug"></div></div></div>
+      <div style="display:flex;gap:8px;margin-top:.5rem">
+        <button class="btn bp" style="flex:1;justify-content:center" id="babtn" onclick="prepareConfirm('bulk-grid')">Registrar em todos</button>
+        <button class="btn bs" onclick="this.closest('.ov').classList.remove('open')">Cancelar</button>
+      </div>
+      <div class="err" id="baerr"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL BULK POR ID -->
+<div class="ov" id="biv" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal" style="max-width:580px">
+    <div class="mh"><div class="mt">Registro por ID</div><button class="mx" onclick="this.closest('.ov').classList.remove('open')">×</button></div>
+    <div style="padding:0 1.25rem .75rem">
+      <p style="font-size:13px;color:var(--tx2);margin-bottom:.6rem">Números separados por vírgula. Ex: <code style="background:var(--bg);padding:1px 5px;border-radius:4px">100, 200, 350</code></p>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="biinp" placeholder="100, 200, 350..." style="flex:1;padding:8px 10px;border:0.5px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none">
+        <button class="btn bs" style="padding:7px 13px;font-size:12px" onclick="parseBulkIds()">Buscar</button>
+      </div>
+      <div class="err" id="bierr" style="margin-top:.4rem"></div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;padding:0 1.25rem .75rem;max-height:180px;overflow-y:auto" id="bigrid"></div>
+    <div id="biform" style="display:none">
+      <div class="berrs" id="bierrs" style="display:none;margin:0 1.25rem .5rem"></div>
+      <div class="af" style="margin-top:0">
+        <h4 id="biform-t">Aplicar para os casos selecionados</h4>
+        <div class="fg">
+          <div class="ff"><label>Estado</label><select id="biuf" onchange="onBulkUF('bi')"><option value="">Selecione...</option></select></div>
+          <div class="ff"><label>Cidade</label><div class="ddw"><input type="text" id="bici" placeholder="Selecione estado..." readonly oninput="onBulkCityInp('bi')" onfocus="openBulkCityDD('bi')" autocomplete="off" data-val=""><div class="dd" id="bicdd"></div></div></div>
+        </div>
+        <div class="fg full"><div class="ff"><label>Profissional</label><div class="ddw"><input type="text" id="bipro" oninput="onBulkProf('bi')" placeholder="Nome completo..." autocomplete="off"><div class="dd" id="biprodd"></div></div><div class="psug" id="biprosug"></div></div></div>
+        <div style="display:flex;gap:8px;margin-top:.5rem">
+          <button class="btn bp" style="flex:1;justify-content:center" id="bibtn" onclick="prepareConfirm('bulk-id')">Registrar uso</button>
+        </div>
+        <div class="err" id="bierr2"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="ov" id="lb" onclick="this.classList.remove('open')"><img id="lbi" src="" style="max-width:92vw;max-height:88vh;border-radius:var(--r);object-fit:contain"></div>
+
+<!-- Lightbox flutuante: visualizador de fotos com ações -->
+<div id="lightbox-flo" onclick="if(event.target===this)closeLightboxFlo()">
+  <div class="lf-info" id="lf-info"></div>
+  <button class="lf-nav prev" id="lf-prev" onclick="lightboxFloNav(-1)" title="Anterior (←)">‹</button>
+  <img class="lf-img" id="lf-img" alt="">
+  <button class="lf-nav next" id="lf-next" onclick="lightboxFloNav(1)" title="Próximo (→)">›</button>
+  <div class="lf-bar">
+    <button id="lf-cloud" onclick="lightboxFloCloud()" title="Abrir no Google Drive">☁ Drive</button>
+    <button id="lf-download" onclick="lightboxFloDownload()" title="Baixar diretamente">⬇ Baixar</button>
+    <button class="lf-close" onclick="closeLightboxFlo()" title="Fechar (Esc)">✕ Fechar</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API='api/handler.php';
+let PER=24; // mutável — usuário pode alterar quantidade por página
+const MAX_CONCURRENT=4;
+const THUMB_RETRY='retry';
+
+let thumbCache={};
+let pageLoadStart=0;
+let _baseGeneration=0;
+let adminModeVisible=false;
+let thumbSourceMode='auto';
+let _highPriorityIds=new Set();
+let _loadingCount=0;
+let casos=[],filtered=[],page=1;
+let mode='estado',selUF='',selCity='',selProf='';
+let ibgeCities=[],addCities=[],bulkCities={ba:[],bi:[]};
+let allProfs=[];
+let allTags=[];          // todas as tags únicas no sistema (cache local)
+let selTags=new Set();   // tags selecionadas no filtro
+let currentCaso=null;
+let selMode=false,selIds=new Set(),bulkSelIds=new Set();
+let sessionExpires=0,sessionWarnAt=0,sessionWarnShown=false;
+let userRole='user';
+let pendingForce=false;
+const norm=s=>(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+const cap=s=>s?s.charAt(0).toUpperCase()+s.slice(1).toLowerCase():'';
+const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+const ESTADOS=[{s:'AC',n:'Acre'},{s:'AL',n:'Alagoas'},{s:'AP',n:'Amapá'},{s:'AM',n:'Amazonas'},{s:'BA',n:'Bahia'},{s:'CE',n:'Ceará'},{s:'DF',n:'Distrito Federal'},{s:'ES',n:'Espírito Santo'},{s:'GO',n:'Goiás'},{s:'MA',n:'Maranhão'},{s:'MT',n:'Mato Grosso'},{s:'MS',n:'Mato Grosso do Sul'},{s:'MG',n:'Minas Gerais'},{s:'PA',n:'Pará'},{s:'PB',n:'Paraíba'},{s:'PR',n:'Paraná'},{s:'PE',n:'Pernambuco'},{s:'PI',n:'Piauí'},{s:'RJ',n:'Rio de Janeiro'},{s:'RN',n:'Rio Grande do Norte'},{s:'RS',n:'Rio Grande do Sul'},{s:'RO',n:'Rondônia'},{s:'RR',n:'Roraima'},{s:'SC',n:'Santa Catarina'},{s:'SP',n:'São Paulo'},{s:'SE',n:'Sergipe'},{s:'TO',n:'Tocantins'}];
+
+// ── Auth ──────────────────────────────────────────────────
+let currentBase = null;   // base ativa: 'PH' | 'PO'
+let availableBases = []; // lista de bases do servidor
+let pendingActivation = null; // dados do login pendentes de seleção de base
+
+async function doLogin(){
+  const u=document.getElementById('lu').value.trim(),p=document.getElementById('lp').value;
+  const btn=document.getElementById('lb2'),err=document.getElementById('le');
+  btn.innerHTML='<span class="spin"></span> Entrando...'; btn.disabled=true; err.style.display='none';
+  try{
+    const r=await api('login',{user:u,pass:p},'POST');
+    if(r.ok){
+      // Se tem last_base (base da sessão anterior), vai direto; senão mostra seletor
+      if(r.last_base){
+        await selectBase(r.last_base, r);
+      } else {
+        showBaseSelector(r);
+      }
+    } else {
+      err.textContent=r.error||'Usuário ou senha não encontrados.'; err.style.display='block';
+    }
+  }catch(e){ err.textContent='Erro de conexão com o servidor. Tente novamente.'; err.style.display='block'; }
+  btn.innerHTML='Entrar'; btn.disabled=false;
+}
+async function doLogout(){ await api('logout',{},'POST'); location.reload(); }
+document.getElementById('lp').addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); });
+
+// ── Ativa o app após login ou restauração de sessão ────────
+// ── Base selection and switching ──────────────────────────────
+
+function showBaseSelector(loginData){
+  const bases=loginData.bases||[];
+  // Atalho: só uma base disponível → entra direto sem mostrar seletor
+  if(bases.length===1){
+    selectBase(bases[0].key, loginData);
+    return;
+  }
+  document.getElementById('ls').style.display='none';
+  const loader=document.getElementById('session-loading');
+  if(loader) loader.style.display='none';
+  const bs=document.getElementById('bs');
+  bs.style.display='flex';
+  const userEl=document.getElementById('bs-user');
+  if(userEl) userEl.textContent=`Logado como: ${loginData.user}`;
+  const container=document.getElementById('base-buttons');
+  container.innerHTML='';
+  bases.forEach(b=>{
+    const btn=document.createElement('button');
+    btn.className='btn bp';
+    btn.style.cssText='padding:14px 20px;font-size:16px;justify-content:center;border-radius:var(--r)';
+    const tag=b.is_test?'<span style="font-size:10px;font-weight:700;background:#f59e0b;color:#fff;padding:2px 7px;border-radius:10px;margin-left:8px">TESTE</span>':'';
+    btn.innerHTML=`${b.emoji} ${b.label} ${tag}`;
+    btn.onclick=()=>selectBase(b.key, loginData);
+    container.appendChild(btn);
+  });
+}
+
+async function selectBase(baseKey, loginData){
+  // Mostra loading enquanto carrega a base selecionada no login
+  const loader=document.getElementById('session-loading');
+  const loaderMsg=loader ? loader.querySelector('div:last-child') : null;
+  if(loaderMsg) loaderMsg.textContent='Carregando base...';
+  if(loader) loader.style.display='flex';
+  document.getElementById('bs').style.display='none';
+
+  try{
+    const r=await api('switch_base',{base:baseKey},'POST');
+    if(!r.ok){ showToast('Erro ao selecionar base: '+(r.error||'')); return; }
+    currentBase=baseKey;
+    casos=[]; filtered=[];
+    thumbCache={};
+    _baseGeneration++;
+    _pageGeneration++;
+    if(loginData.bases) availableBases=loginData.bases;
+
+    // Se o backend já trouxe os casos, injeta antes de activateApp
+    // para que initApp/loadCasos não faça um request redundante
+    if(r.casos){
+      activateApp({...loginData, base:r.base, base_label:r.label, base_emoji:r.emoji, _casos:r.casos, _profs:r.profissionais||[]});
+    } else {
+      activateApp({...loginData, base:r.base, base_label:r.label, base_emoji:r.emoji});
+    }
+  } finally {
+    if(loader) loader.style.display='none';
+  }
+}
+
+async function switchBase(baseKey){
+  if(baseKey===currentBase){ closeMoreMenu(); return; }
+  closeMoreMenu();
+
+  // Tela de carregamento reutilizando o overlay de sessão
+  const loader=document.getElementById('session-loading');
+  const loaderMsg=loader ? loader.querySelector('div:last-child') : null;
+  if(loaderMsg) loaderMsg.textContent='Trocando de base...';
+  if(loader) loader.style.display='flex';
+
+  try{
+    const r=await api('switch_base',{base:baseKey},'POST');
+    if(!r.ok){ showToast('Erro: '+(r.error||'')); return; }
+    currentBase=baseKey;
+
+    _baseGeneration++;
+    _pageGeneration++;
+    thumbCache={};
+    casos=[]; filtered=[];
+    selUF=''; selCity=''; selProf=''; ibgeCities=[];
+    selMode=false; selIds=new Set(); bulkSelIds=new Set();
+    _highPriorityIds=new Set();
+    currentCaso=null;
+    document.getElementById('ov').classList.remove('open');
+    ['fuf','fci','fpro','fids'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    _userTouchedShow=false;
+    const fshow=document.getElementById('fshow'); if(fshow) fshow.value='disponivel';
+    const cw=document.getElementById('cw'); if(cw) cw.style.display='none';
+    mode='estado';
+    const te=document.getElementById('te'); if(te) te.classList.add('active');
+    const tc=document.getElementById('tc'); if(tc) tc.classList.remove('active');
+
+    const grid=document.getElementById('grid');
+    if(grid) grid.innerHTML='';
+    const empty=document.getElementById('empty');
+    if(empty) empty.style.display='none';
+    page=1;
+
+    updateBaseBadge(r.base, r.label, r.emoji);
+    updateBaseMenu(r.base);
+
+    // O backend já retorna os casos na mesma resposta — sem segundo request.
+    // Isso elimina a race condition onde loadCasos() chegava antes da sessão persistir.
+    if(r.casos){
+      casos=r.casos; allProfs=r.profissionais||[]; applyFilter();
+    } else {
+      // Fallback: casos não vieram (ex: erro no Sheets), faz request normal
+      await loadCasos();
+    }
+
+    showToast(`Base ${r.emoji} ${r.label} ativada!`);
+  } finally {
+    if(loader) loader.style.display='none';
+  }
+}
+
+function updateBaseBadge(base, label, emoji){
+  const badge=document.getElementById('tb-base-badge');
+  if(badge){ badge.textContent=`${emoji} ${label}`; badge.style.display='inline'; }
+  // Banner "MODO TESTE" no topo quando a base ativa é a TESTE
+  const isTest=(base==='TESTE') || !!(availableBases.find(b=>b.key===base)||{}).is_test;
+  let banner=document.getElementById('test-mode-banner');
+  if(isTest){
+    if(!banner){
+      banner=document.createElement('div');
+      banner.id='test-mode-banner';
+      banner.style.cssText='background:#f59e0b;color:#000;padding:6px 14px;font-size:12px;font-weight:600;text-align:center;display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap';
+      banner.innerHTML='🧪 <b>MODO TESTE</b> — você está em uma base sandbox para aprender o sistema. As alterações não afetam a operação real. <button onclick="openHelp()" style="background:#000;color:#fff;border:0;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer">📚 Ver tutorial</button>';
+      const tb=document.querySelector('#as .topbar');
+      if(tb && tb.parentNode) tb.parentNode.insertBefore(banner, tb.nextSibling);
+    }
+    banner.style.display='flex';
+  } else if(banner){ banner.style.display='none'; }
+}
+
+function updateBaseMenu(activeBase){
+  const container=document.getElementById('base-menu-items');
+  if(!container||!availableBases.length) return;
+  container.innerHTML=availableBases.map(b=>{
+    const tag=b.is_test?' <span style="font-size:9px;background:#f59e0b;color:#fff;padding:1px 6px;border-radius:8px;font-weight:700">TESTE</span>':'';
+    return `<div class="tb-drop-item" onclick="switchBase('${b.key}')" style="${b.key===activeBase?'font-weight:700;color:var(--accent)':''}">
+      ${b.emoji} ${b.label}${tag} ${b.key===activeBase?'✓':''}
+    </div>`;
+  }).join('');
+}
+
+function activateApp(r){
+  userRole = r.role || 'user';
+  currentBase = r.base || currentBase;
+  document.getElementById('ls').style.display='none';
+  const bsEl=document.getElementById('bs'); if(bsEl) bsEl.style.display='none';
+  const loader=document.getElementById('session-loading');
+  if(loader) loader.style.display='none';
+  const a=document.getElementById('as'); a.style.display='flex'; a.style.flexDirection='column';
+  document.getElementById('tu').textContent=r.user+(userRole==='admin'?' 👑':'');
+  sessionExpires=r.expires; sessionWarnAt=r.warn_at; sessionWarnShown=false;
+  document.querySelectorAll('[data-admin]').forEach(el=>{ el.style.display=userRole==='admin'?'':'none'; });
+  // Base badge e menu
+  if(r.base_emoji && r.base_label) updateBaseBadge(r.base, r.base_label, r.base_emoji);
+  else if(r.base_emoji) updateBaseBadge(r.base, r.label||r.base, r.base_emoji);
+  if(r.bases){ availableBases=r.bases; updateBaseMenu(r.base); }
+  else if(availableBases.length) updateBaseMenu(r.base||currentBase);
+  startSessionTimer();
+  initApp(r._casos || null, r._profs || null);
+  updateThemeButtons();
+  if(userRole==='admin'){
+    initFAB();
+    const fab=document.getElementById('metrics-fab');
+    if(fab) fab.style.display='none';
+  }
+  // Tour de boas-vindas no 1º acesso ao modo TESTE — fires after a tick so DOM is settled
+  try{
+    const isTest=(r.base==='TESTE') || !!(availableBases.find(b=>b.key===r.base)||{}).is_test;
+    const seen=localStorage.getItem('bi_tour_seen');
+    if(isTest && !seen){ setTimeout(()=>startTour(true), 600); }
+  }catch(e){}
+}
+
+function startSessionTimer(){
+  clearInterval(window._st);
+  window._st=setInterval(()=>{
+    const now=Math.floor(Date.now()/1000);
+    if(now>=sessionExpires){ clearInterval(window._st); alert('Sessão expirada. Faça login novamente.'); location.reload(); return; }
+    if(!sessionWarnShown&&now>=sessionWarnAt){ sessionWarnShown=true; document.getElementById('swmin').textContent=Math.ceil((sessionExpires-now)/60); document.getElementById('swarn').style.display='flex'; }
+  },15000);
+}
+async function renewSession(){ const r=await api('renew_session',{},'POST'); if(r.ok){ sessionExpires=r.expires; sessionWarnAt=r.warn_at; sessionWarnShown=false; document.getElementById('swarn').style.display='none'; showToast('Sessão renovada por mais 4h!'); } }
+
+// ── Verifica sessão ao carregar — elimina flash de tela de login no F5 ──
+async function checkSessionOnLoad(){
+  const loader=document.getElementById('session-loading');
+  try{
+    const resp=await fetch('api/handler.php?action=check_session',{credentials:'same-origin'});
+    const r=await resp.json().catch(()=>({ok:false,authenticated:false}));
+    if(r.ok&&r.authenticated){
+      if(loader) loader.style.display='none';
+      // Se tem base na sessão, vai direto; senão busca a lista e mostra seletor
+      if(r.base){
+        // Busca lista de bases para o menu
+        try{
+          const rb=await api('get_bases');
+          if(rb.ok) availableBases=rb.bases;
+        }catch(e){}
+        activateApp(r);
+      } else {
+        // Sessão sem base — mostra seletor
+        try{
+          const rb=await api('get_bases');
+          if(rb.ok){
+            showBaseSelector({
+              user:r.user, role:r.role,
+              bases:rb.bases, last_base:null,
+              expires:r.expires, warn_at:r.warn_at
+            });
+          }
+        }catch(e){ activateApp(r); }
+      }
+    } else {
+      if(loader) loader.style.display='none';
+      document.getElementById('ls').style.display='flex';
+    }
+  }catch(e){
+    if(loader) loader.style.display='none';
+    document.getElementById('ls').style.display='flex';
+  }
+}
+checkSessionOnLoad();
+
+// ── Menu "Mais" ───────────────────────────────────────────
+function toggleMoreMenu(){ document.getElementById('tb-dropdown').classList.toggle('open'); }
+function closeMoreMenu(){ document.getElementById('tb-dropdown').classList.remove('open'); }
+document.addEventListener('click',e=>{ if(!e.target.closest('#tb-more')) closeMoreMenu(); });
+
+// ── Ajuda & Tour ──────────────────────────────────────────
+function openHelp(){ window.open('ajuda.html','_blank'); }
+
+const TOUR_STEPS=[
+  {emoji:'👋',title:'Bem-vindo(a) ao Banco de Imagens!',text:'Este tour rápido (6 passos) mostra o essencial para você começar. Pode pular a qualquer momento.'},
+  {emoji:'🧪',title:'Você está em modo teste',text:'Tudo o que fizer aqui é sandbox — não afeta dados reais. Pode clicar, errar e refazer à vontade. Quando estiver à vontade, peça ao admin para liberar a produção.'},
+  {emoji:'🔎',title:'Filtros',text:'Use Estado / Cidade / Profissional no topo para encontrar casos. O filtro "Exibir" começa em "Disponíveis" — quando você digita um nome no campo Profissional, ele troca automaticamente para "Em uso".'},
+  {emoji:'🃏',title:'Os cards',text:'Cada card é um caso (CASO-001, etc.). Clique em um para ver fotos, registrar uso, ver o histórico do caso, e muito mais.'},
+  {emoji:'📋',title:'Histórico',text:'Botão Histórico no topo mostra tudo que você ou outras pessoas alteraram. Filtra por usuário, caso ou texto livre.'},
+  {emoji:'📚',title:'Precisa de ajuda?',text:'Clique em Mais ▾ → "Ajuda & tutoriais" para abrir o guia completo a qualquer momento. Boa exploração!'},
+];
+
+function startTour(autoFromFirstLogin=false){
+  closeMoreMenu();
+  let i=0;
+  const ov=document.createElement('div');
+  ov.id='tour-ov';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9990;display:flex;align-items:center;justify-content:center;padding:1rem;backdrop-filter:blur(2px)';
+  function render(){
+    const s=TOUR_STEPS[i];
+    ov.innerHTML=`
+      <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);max-width:460px;width:100%;padding:2rem 2rem 1.5rem;box-shadow:var(--shadow-lg);text-align:center;position:relative">
+        <button onclick="endTour()" style="position:absolute;top:8px;right:10px;background:transparent;border:0;color:var(--tx3);font-size:22px;cursor:pointer;line-height:1">×</button>
+        <div style="font-size:48px;margin-bottom:.5rem">${s.emoji}</div>
+        <h3 style="font-size:18px;font-weight:700;margin-bottom:.5rem">${esc(s.title)}</h3>
+        <p style="color:var(--tx2);font-size:14px;line-height:1.55;margin-bottom:1.25rem">${esc(s.text)}</p>
+        <div style="display:flex;gap:6px;justify-content:center;margin-bottom:1.25rem">
+          ${TOUR_STEPS.map((_,k)=>`<div style="width:8px;height:8px;border-radius:50%;background:${k===i?'var(--accent)':'var(--bd)'}"></div>`).join('')}
+        </div>
+        <div style="display:flex;gap:8px;justify-content:center">
+          ${i>0?'<button class="btn bs" onclick="tourPrev()">← Voltar</button>':'<button class="btn bs" onclick="endTour()">Pular</button>'}
+          ${i<TOUR_STEPS.length-1
+            ? '<button class="btn bp" onclick="tourNext()">Próximo →</button>'
+            : '<button class="btn bp" onclick="endTour(true)">Concluir ✓</button>'}
+        </div>
+        <div style="margin-top:1rem;font-size:11px;color:var(--tx3)">${i+1} de ${TOUR_STEPS.length}</div>
+      </div>`;
+  }
+  window.tourNext=()=>{ if(i<TOUR_STEPS.length-1){ i++; render(); } };
+  window.tourPrev=()=>{ if(i>0){ i--; render(); } };
+  window.endTour=(done)=>{ try{ if(done) localStorage.setItem('bi_tour_seen','1'); }catch(e){} ov.remove(); };
+  document.body.appendChild(ov);
+  render();
+  // Marca como visto sempre que abrir manualmente, para não voltar a aparecer no próximo login
+  if(!autoFromFirstLogin){ try{ localStorage.setItem('bi_tour_seen','1'); }catch(e){} }
+}
+
+// ── Init ──────────────────────────────────────────────────
+async function initApp(preloadedCasos=null, preloadedProfs=null){
+  populateEstados();
+  if(preloadedCasos){
+    // Dados já vieram do switch_base — aplica direto sem request extra
+    casos=preloadedCasos; allProfs=preloadedProfs||[]; applyFilter();
+    checkNewFiles();
+  } else {
+    await loadCasos();
+    checkNewFiles();
+  }
+}
+function populateEstados(){
+  ['fuf','auf','bauf','biuf'].forEach(id=>{ const el=document.getElementById(id); if(!el||el.tagName!=='SELECT') return; el.innerHTML=id==='fuf'?'<option value="">Todos os estados</option>':'<option value="">Selecione...</option>'; ESTADOS.forEach(e=>el.appendChild(new Option(`${e.s} – ${e.n}`,e.s))); });
+}
+
+// ── Views ─────────────────────────────────────────────────
+function showView(n){
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.getElementById('view-'+n).classList.add('active');
+  if(n==='hist') loadHistorico();
+  if(n==='admin') loadAdminPanel();
+}
+
+// ── Admin Mode functions ────────────────────────────────────
+
+// Alterna a exibição das métricas visuais na tela principal.
+function toggleGodModeVisual(){
+  adminModeVisible=!adminModeVisible;
+  const btn=document.getElementById('adminmode-toggle');
+  if(btn) btn.textContent=adminModeVisible?'👁 Desativar métricas visuais':'👁 Ativar métricas visuais';
+  const timer=document.getElementById('page-load-timer');
+  if(timer) timer.style.display=adminModeVisible?'flex':'none';
+
+  // FAB aparece quando as métricas estão ativadas e some caso contrário.
+  const fab=document.getElementById('metrics-fab');
+  if(fab) fab.style.display=adminModeVisible?'flex':'none';
+
+  // Atualiza label no FAB
+  const fabBtn=document.getElementById('fab-metrics-btn');
+  if(fabBtn) fabBtn.textContent=`👁 Métricas visuais: ${adminModeVisible?'ON':'OFF'}`;
+
+  // Barra de origem — acima do FAB no canto direito
+  let srcBar=document.getElementById('adminmode-srcbar');
+  if(adminModeVisible && !srcBar){
+    srcBar=document.createElement('div');
+    srcBar.id='adminmode-srcbar';
+    srcBar.style.cssText='position:fixed;bottom:5.5rem;right:1.5rem;background:var(--sf);border:1px solid var(--bds);border-radius:var(--r);padding:8px 10px;display:flex;flex-direction:column;gap:6px;z-index:399;box-shadow:var(--shadow-md);font-size:12px;min-width:150px';
+    srcBar.innerHTML=`<div style="font-size:10px;color:var(--tx3);font-weight:700;text-transform:uppercase">Origem das imagens</div>
+      <button onclick="setThumbSource('auto')"  id="src-auto"  class="btn bs" style="padding:4px 10px;font-size:11px;justify-content:flex-start">🔄 Auto</button>
+      <button onclick="setThumbSource('cache')" id="src-cache" class="btn bs" style="padding:4px 10px;font-size:11px;justify-content:flex-start">💾 Cache local</button>
+      <button onclick="setThumbSource('drive')" id="src-drive" class="btn bs" style="padding:4px 10px;font-size:11px;justify-content:flex-start">☁️ Google Drive</button>`;
+    document.body.appendChild(srcBar);
+    setThumbSourceHighlight(thumbSourceMode);
+  } else if(!adminModeVisible && srcBar){
+    srcBar.remove();
+  }
+
+  if(adminModeVisible){
+    document.querySelectorAll('[id^="card-"]').forEach(card=>{
+      const id=card.id.replace('card-','');
+      const tc=thumbCache[id];
+      if(tc&&tc.src) showThumbMeta(id, tc.ms||0, tc.src);
+    });
+  } else {
+    document.querySelectorAll('.thumb-meta').forEach(el=>el.remove());
+  }
+}
+
+// Altera a origem das thumbnails (cache vs. Drive) e recarrega a grade.
+function setThumbSource(src){
+  thumbSourceMode=src;
+  setThumbSourceHighlight(src);
+  thumbCache={};
+  renderGrid();
+  showToast(`Origem: ${src==='auto'?'automático':src==='cache'?'cache local':'Google Drive'}`);
+  const menu=document.getElementById('fab-menu');
+  if(menu) menu.style.display='none';
+}
+function setThumbSourceHighlight(src){
+  ['auto','cache','drive'].forEach(s=>{
+    const b=document.getElementById('src-'+s);
+    if(b){ b.style.fontWeight=s===src?'700':''; b.style.background=s===src?'var(--accent)':''; b.style.color=s===src?'#fff':''; b.style.borderColor=s===src?'var(--accent)':''; }
+  });
+}
+
+async function loadAdminPanel(){
+  try{
+    const r=await api('list_users');
+    if(!r.ok) return;
+    const lst=document.getElementById('users-list');
+    const sel=document.getElementById('pwd-user');
+    sel.innerHTML='';
+    lst.innerHTML=r.users.map(u=>{
+      const isAdminRow = u.role==='admin';
+      const prodBadge = isAdminRow
+        ? '<span class="badge bok" title="Admins têm acesso a todas as bases por padrão">🌐 todas as bases</span>'
+        : (u.prod_access
+            ? '<span class="badge bok">✅ Produção</span>'
+            : '<span class="badge bused" style="background:#f59e0b22;color:#92400e;border-color:#f59e0b55">🧪 Modo teste</span>');
+      const promoteBtn = isAdminRow
+        ? ''
+        : (u.prod_access
+            ? `<button class="btn bs" style="padding:3px 9px;font-size:11px;border-color:#f59e0b;color:#92400e" onclick="setProdAccess('${esc(u.user)}', false)">Voltar p/ teste</button>`
+            : `<button class="btn bp" style="padding:3px 9px;font-size:11px" onclick="setProdAccess('${esc(u.user)}', true)">Promover p/ produção</button>`);
+      return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bd);flex-wrap:wrap">
+        <span style="font-weight:600;min-width:110px">${esc(u.user)}</span>
+        <span class="badge ${isAdminRow?'bused':'bok'}">${isAdminRow?'👑 admin':'usuário'}</span>
+        ${prodBadge}
+        <span style="font-size:11px;color:var(--tx3);flex:1;min-width:140px">${u.last_login?('último login: '+new Date(u.last_login.replace(' ','T')).toLocaleString('pt-BR')):'Nunca acessou'}</span>
+        <span style="font-size:11px;color:var(--btx)">${u.changes_30d||0} alt. (30d)</span>
+        ${promoteBtn}
+        ${!isAdminRow?`<button class="btn-revert" style="border-color:var(--rtx);color:var(--rtx);padding:3px 9px;font-size:11px" onclick="confirmRemoveUser('${esc(u.user)}')">Remover</button>`:''}
+      </div>`;
+    }).join('');
+    // Administradores não aparecem como alvo de troca de senha por outros admins.
+    r.users.filter(u=>u.role!=='admin').forEach(u=>sel.appendChild(new Option(u.user,u.user)));
+  }catch(e){}
+}
+
+// Promove ou rebaixa um usuário (acesso à base de produção)
+function setProdAccess(user, allow){
+  const title = allow ? 'Promover para produção' : 'Voltar para modo teste';
+  const desc  = allow
+    ? `Liberar acesso de <b>${esc(user)}</b> às bases de produção (PH e PO)?`
+    : `Restringir <b>${esc(user)}</b> ao modo teste? Ele(a) deixará de ver as bases de produção.`;
+  showConfirm(title, desc,
+    [{label:'Usuário',val:user},{label:'Acesso',val:allow?'✅ Produção liberada':'🧪 Apenas modo teste'}],
+    async ()=>{
+      try{
+        const r=await api('set_production_access',{target_user:user, allow: allow?'1':'0'},'POST');
+        if(r.ok){ showToast(r.msg||'OK'); loadAdminPanel(); }
+        else showToast('Erro: '+(r.error||''));
+      }catch(e){ showToast('Erro de conexão.'); }
+    }
+  );
+}
+
+async function runSpeedTest(){
+  const id=document.getElementById('speed-id').value.trim();
+  const res=document.getElementById('speed-result');
+  if(!id){ res.style.display='block'; res.innerHTML='<span style="color:var(--rtx)">Digite um ID de caso.</span>'; return; }
+  const clean=id.replace(/^CASO-?/i,'').replace(/\D/g,'');
+  const casoId=`CASO-${clean}`;
+  res.style.display='block';
+  res.innerHTML='<span class="spin"></span> Testando...';
+  try{
+    const r=await api(`speed_test&id=${encodeURIComponent(casoId)}`);
+    if(!r.ok){ res.innerHTML=`<span style="color:var(--rtx)">Erro: ${esc(r.error)}</span>`; return; }
+    const winner=r.recommendation==='cache'?'🏆 Cache local é mais rápido':'🏆 Drive direto é mais rápido';
+    res.innerHTML=`
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:.75rem">
+        <div style="text-align:center;padding:.75rem;background:var(--sf);border-radius:var(--rs);border:1px solid var(--bd)">
+          <div style="font-size:22px;font-weight:700;color:var(--btx)">${r.drive_ms}ms</div>
+          <div style="font-size:11px;color:var(--tx2);margin-top:3px">Drive direto</div>
+        </div>
+        <div style="text-align:center;padding:.75rem;background:var(--sf);border-radius:var(--rs);border:1px solid var(--bd)">
+          <div style="font-size:22px;font-weight:700;color:var(--gtx)">${r.cache_ms!=null?r.cache_ms+'ms':'N/A'}</div>
+          <div style="font-size:11px;color:var(--tx2);margin-top:3px">Cache local</div>
+        </div>
+      </div>
+      <div style="font-weight:600;color:var(--gtx)">${winner}</div>
+      <div style="font-size:12px;color:var(--tx2);margin-top:4px">${r.photo_count} foto(s) · thumb local: ${r.has_local_thumb?'✓ sim':'✗ não (rode o cron)'}</div>`;
+  }catch(e){ res.innerHTML=`<span style="color:var(--rtx)">Erro: ${e.message}</span>`; }
+}
+
+// Valida a força da senha digitada antes do submit.
+function validatePassword(pass){
+  const errs=[];
+  if(pass.length<6) errs.push('mínimo 6 caracteres');
+  if(!/[A-Z]/.test(pass)) errs.push('letra maiúscula');
+  if(!/[a-z]/.test(pass)) errs.push('letra minúscula');
+  if(!/[0-9]/.test(pass)) errs.push('número');
+  if(!/[^A-Za-z0-9]/.test(pass)) errs.push('caractere especial (!@#$...)');
+  return errs;
+}
+
+// Confirmação explícita antes de aplicar a alteração de senha.
+function changePassword(){
+  const user=document.getElementById('pwd-user').value;
+  const pass=document.getElementById('pwd-new').value;
+  const err=document.getElementById('pwd-err');
+  err.textContent='';
+  if(!user){ err.textContent='Selecione um usuário.'; return; }
+  const errs=validatePassword(pass);
+  if(errs.length){ err.textContent='Senha inválida: falta '+errs.join(', ')+'.'; return; }
+  showConfirm(
+    'Confirmar alteração de senha',
+    `Alterar senha do usuário <b>${esc(user)}</b>?`,
+    [{label:'Usuário',val:user},{label:'Nova senha',val:'••••••'+pass.slice(-2)}],
+    async ()=>{
+      try{
+        const r=await api('change_password',{target_user:user,new_password:pass},'POST');
+        if(r.ok){ showToast(r.msg); document.getElementById('pwd-new').value=''; }
+        else err.textContent=r.error||'Erro.';
+      }catch(e){ err.textContent='Erro de conexão.'; }
+    }
+  );
+}
+
+// Remove um usuário dinâmico via endpoint `remove_user`.
+function confirmRemoveUser(user){
+  showConfirm('Remover usuário', `Remover permanentemente o usuário <b>${esc(user)}</b>?`,
+    [{label:'Usuário',val:user},{label:'Atenção','val':'Esta ação não pode ser desfeita'}],
+    async ()=>{
+      try{
+        const r=await api('remove_user',{target_user:user},'POST');
+        if(r.ok){ showToast(`Usuário ${user} removido.`); loadAdminPanel(); }
+        else showToast('Erro: '+(r.error||''));
+      }catch(e){ showToast('Erro de conexão.'); }
+    }
+  );
+}
+
+// Adiciona um usuário dinâmico via endpoint `add_user`.
+async function addUser(){
+  const user=document.getElementById('new-user').value.trim();
+  const pass=document.getElementById('new-pass').value;
+  const role=document.getElementById('new-role').value;
+  const err=document.getElementById('add-user-err');
+  err.textContent='';
+  if(!user||!/^[a-z0-9_]{3,30}$/.test(user)){ err.textContent='Nome de usuário inválido (3-30 chars, só letras/números/_.'; return; }
+  const errs=validatePassword(pass);
+  if(errs.length){ err.textContent='Senha inválida: falta '+errs.join(', ')+'.'; return; }
+  try{
+    const r=await api('add_user',{new_user:user,new_password:pass,role},'POST');
+    if(r.ok){ showToast(`Usuário ${user} criado!`); document.getElementById('new-user').value=''; document.getElementById('new-pass').value=''; loadAdminPanel(); }
+    else err.textContent=r.error||'Erro.';
+  }catch(e){ err.textContent='Erro de conexão.'; }
+}
+
+// Remoção em lote de UF/cidade/profissional com diálogo de confirmação.
+let pendingRemovals={ufs:[],cidades:[],clientes:[]};
+
+function toggleRemoval(tipo, valor, idx, btn){
+  const key=`${tipo}:${idx}:${valor}`;
+  if(!pendingRemovals._keys) pendingRemovals._keys=new Set();
+  if(pendingRemovals._keys.has(key)){
+    pendingRemovals._keys.delete(key);
+    pendingRemovals[tipo]=pendingRemovals[tipo].filter(x=>!(x.idx===idx&&x.valor===valor));
+    btn.style.background=''; btn.style.color='var(--rtx)';
+  } else {
+    pendingRemovals._keys.add(key);
+    pendingRemovals[tipo].push({idx,valor});
+    btn.style.background='var(--rtx)'; btn.style.color='#fff';
+  }
+  updateBatchRemoveBtn();
+}
+
+function updateBatchRemoveBtn(){
+  const total=(pendingRemovals.ufs.length+pendingRemovals.cidades.length+pendingRemovals.clientes.length);
+  const btn=document.getElementById('batch-remove-btn');
+  if(!btn) return;
+  btn.style.display=total>0?'inline-flex':'none';
+  btn.textContent=`✕ Remover ${total} selecionado(s)`;
+}
+
+function confirmBatchRemove(){
+  if(!currentCaso) return;
+  const total=(pendingRemovals.ufs.length+pendingRemovals.cidades.length+pendingRemovals.clientes.length);
+  if(!total) return;
+
+  // Verifica desequilíbrio
+  const counts={ufs:pendingRemovals.ufs.length,cidades:pendingRemovals.cidades.length,clientes:pendingRemovals.clientes.length};
+  const maxCount=Math.max(...Object.values(counts));
+  const minCount=Math.min(...Object.values(counts).filter(v=>v>0));
+  const unbalanced=maxCount>1&&maxCount!==minCount;
+
+  const changeList=[
+    ...pendingRemovals.ufs.map(x=>({label:'Estado',val:x.valor})),
+    ...pendingRemovals.cidades.map(x=>({label:'Cidade',val:cap(x.valor)})),
+    ...pendingRemovals.clientes.map(x=>({label:'Profissional',val:x.valor})),
+  ];
+  const extra=unbalanced?`⚠️ Atenção: você está removendo quantidades diferentes por tipo (${counts.ufs} UF, ${counts.cidades} cidade, ${counts.clientes} prof). Confirme que isso é intencional.`:'';
+
+  showConfirm('Confirmar remoções em lote',
+    `Remover ${total} item(ns) de <b>${currentCaso.id}</b>?${extra?'<br><br><span style="color:var(--atx);font-size:12px">'+extra+'</span>':''}`,
+    changeList,
+    async ()=>{
+      // Spinner no modal body
+      document.getElementById('confirm-modal').classList.remove('open');
+      const overlay=document.createElement('div');
+      overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:700;display:flex;align-items:center;justify-content:center';
+      overlay.innerHTML='<div style="background:var(--sf);border-radius:var(--r);padding:2rem 2.5rem;text-align:center"><span class="spin" style="width:28px;height:28px;border-width:3px"></span><div style="margin-top:.75rem;font-size:14px;font-weight:500">Removendo...</div></div>';
+      document.body.appendChild(overlay);
+
+      let errs=[];
+      // Remove UFs
+      for(const {idx,valor} of pendingRemovals.ufs){
+        const r=await api('remove_item',{caso_id:currentCaso.id,row:currentCaso.row,tipo:'uf',valor,idx},'POST').catch(e=>({ok:false,error:e.message}));
+        if(!r.ok) errs.push(`UF ${valor}: ${r.error}`);
+      }
+      // Remove cidades
+      for(const {idx,valor} of pendingRemovals.cidades){
+        const r=await api('remove_item',{caso_id:currentCaso.id,row:currentCaso.row,tipo:'cidade',valor,idx},'POST').catch(e=>({ok:false,error:e.message}));
+        if(!r.ok) errs.push(`Cidade ${cap(valor)}: ${r.error}`);
+      }
+      // Remove clientes
+      for(const {idx,valor} of pendingRemovals.clientes){
+        const r=await api('remove_item',{caso_id:currentCaso.id,row:currentCaso.row,tipo:'cliente',valor,idx},'POST').catch(e=>({ok:false,error:e.message}));
+        if(!r.ok) errs.push(`Prof ${valor}: ${r.error}`);
+      }
+
+      document.body.removeChild(overlay);
+      pendingRemovals={ufs:[],cidades:[],clientes:[],_keys:new Set()};
+      // Usa update local em vez de loadCasos(true) para não bloquear UI
+      const casoId=currentCaso.id;
+      // Recarrega apenas este caso do servidor para sincronizar estado
+      try {
+        const refreshed=await api('casos');
+        if(refreshed.ok){ casos=refreshed.casos||[]; allProfs=refreshed.profissionais||[]; }
+      }catch(e){}
+      currentCaso=casos.find(c=>c.id===casoId);
+      applyFilter();
+      if(currentCaso) renderModalChips();
+      if(errs.length) showToast(`${errs.length} erro(s): ${errs[0]}`);
+      else showToast('Itens removidos com sucesso!');
+    }
+  );
+}
+
+// ── Histórico (pontos 7+8) ───────────────────────────────
+// Agrupa por sessão: entradas do mesmo usuário com menos de 30min de intervalo
+async function loadHistorico(){
+  const body=document.getElementById('hist-body');
+  body.innerHTML='<div style="padding:2rem;text-align:center;color:var(--tx2)"><span class="spin"></span></div>';
+  const cq=document.getElementById('hfcaso').value.trim(), uq=document.getElementById('hfuser').value;
+  const sq=document.getElementById('hfsearch')?.value.trim()||''; // busca por estado/cidade/prof
+  const cid=cq?`CASO-${cq.replace(/^CASO-?/i,'').replace(/\D/g,'')}`:''
+  try{
+    const r=await api(`historico${cid?'&caso_id='+encodeURIComponent(cid):''}${uq?'&usuario='+encodeURIComponent(uq):''}&limit=200`);
+    if(!r.ok) throw new Error(r.error||'Erro');
+
+    // Popula select de usuários com quem aparece no log
+    const sel=document.getElementById('hfuser');
+    const curVal=sel.value;
+    const usersInLog=[...new Set(r.log.map(e=>e.usuario))].sort();
+    sel.innerHTML='<option value="">Todos os usuários</option>';
+    usersInLog.forEach(u=>sel.appendChild(new Option(u,u)));
+    if(curVal) sel.value=curVal;
+
+    // Filtra por busca livre (estado/cidade/profissional)
+    let log=r.log;
+    if(sq){
+      const sqn=sq.toLowerCase();
+      log=log.filter(e=>{
+        const antes=e.antes, depois=e.depois;
+        const searchIn=[
+          ...(antes?.ufs||[]),(depois?.ufs||[]),
+          ...(antes?.cidades||[]),(depois?.cidades||[]),
+          ...(antes?.clientes||[]),(depois?.clientes||[]),
+          e.caso_id, e.usuario
+        ].join(' ').toLowerCase();
+        return searchIn.includes(sqn);
+      });
+    }
+
+    if(!log.length){ body.innerHTML='<div style="padding:2rem;text-align:center;color:var(--tx2)">Nenhum registro encontrado.</div>'; return; }
+
+    const SESSION_GAP_MS = 30 * 60 * 1000;
+    const groups = [];
+    let curGroup = null;
+    for(const e of log){
+      const ts = new Date(e.criado_em.replace(' ','T')).getTime();
+      if(!curGroup || e.usuario !== curGroup.usuario || (curGroup.lastTs - ts) > SESSION_GAP_MS){
+        curGroup = { usuario: e.usuario, entries: [], lastTs: ts };
+        groups.push(curGroup);
+      }
+      curGroup.entries.push({...e, ts});
+      curGroup.lastTs = Math.min(curGroup.lastTs, ts);
+    }
+
+    let html = '';
+    groups.forEach((g, gi) => {
+      const dt0 = new Date(g.entries[0].criado_em.replace(' ','T')).toLocaleString('pt-BR');
+      const dtL = new Date(g.entries[g.entries.length-1].criado_em.replace(' ','T')).toLocaleString('pt-BR');
+      const timeRange = g.entries.length > 1 ? `${dtL} → ${dt0}` : dt0;
+      const canRevertGroup = g.entries.every(e => e.antes && e.depois);
+
+      html += `<div class="hist-group">
+        <div class="hist-group-header">
+          <div>
+            <div class="hist-group-title">👤 ${esc(g.usuario)} — ${g.entries.length} alteração(ões)</div>
+            <div class="hist-group-meta">${esc(timeRange)}</div>
+          </div>
+          ${userRole==='admin'
+            ? `<button class="hist-group-revert" onclick="revertGroup(${gi})" ${canRevertGroup?'':'disabled'} title="${canRevertGroup?'Reverter grupo':'Sem dados suficientes'}">↩ Reverter grupo</button>`
+            : `<span style="font-size:11px;color:var(--tx3)">Reversão: contate um admin</span>`
+          }
+        </div>
+        <table class="log-table">
+          <thead><tr><th>Hora</th><th>Caso</th><th>Ação</th><th>Alteração</th><th></th></tr></thead>
+          <tbody>`;
+
+      g.entries.forEach((e, ei) => {
+        const ac=e.acao||'', cls=ac.includes('remove')?'la-rm':ac.includes('bulk')?'la-bulk':'la-add';
+        const dt=new Date(e.criado_em.replace(' ','T')).toLocaleString('pt-BR');
+        let diff='';
+        if(e.antes&&e.depois){
+          const f=a=>(a||[]).join(', ')||'—', fc=a=>(a||[]).map(cap).join(', ')||'—';
+          diff=`<div><span class="diff-antes">${esc(f(e.antes.ufs))}</span> → <span class="diff-depois">${esc(f(e.depois.ufs))}</span></div>
+                <div><span class="diff-antes">${esc(fc(e.antes.cidades))}</span> → <span class="diff-depois">${esc(fc(e.depois.cidades))}</span></div>
+                <div><span class="diff-antes">${esc(f(e.antes.clientes))}</span> → <span class="diff-depois">${esc(f(e.depois.clientes))}</span></div>`;
+        }
+        const canRevert = !!(e.antes && e.depois);
+        const alreadyReverted = (e.acao||'').includes('revert');
+        const revertBtnDisabled = !canRevert || alreadyReverted || userRole!=='admin';
+        const revertTitle = userRole!=='admin' ? 'Apenas administradores podem reverter. Contate um admin.' : (!canRevert ? 'Sem dados para reverter' : alreadyReverted ? 'Esta entrada já é uma reversão' : 'Reverter esta alteração');
+        const revertCls = alreadyReverted ? 'la-revert' : cls;
+        html += `<tr>
+          <td style="white-space:nowrap;color:var(--tx2);font-size:11px">${esc(dt)}</td>
+          <td style="color:var(--btx);font-weight:600">${esc(e.caso_id)}</td>
+          <td><span class="la ${revertCls}">${esc(ac.replace('_',' '))}</span>${alreadyReverted?' <span style="font-size:9px;color:var(--tx3)">(revertido)</span>':''}</td>
+          <td>${diff}</td>
+          <td>${userRole==='admin'
+            ? `<button class="btn-revert" onclick="revertEntry(${gi},${ei})" ${revertBtnDisabled?'disabled':''} title="${revertTitle}" style="${alreadyReverted?'opacity:.35;cursor:not-allowed':''}">↩ Reverter</button>`
+            : `<span style="font-size:10px;color:var(--tx3)">só admin</span>`
+          }</td>
+        </tr>`;
+      });
+      html += '</tbody></table></div>';
+    });
+
+    body.innerHTML = html;
+    // Salva os grupos para uso nas funções de reverter
+    body._groups = groups;
+  }catch(e){ body.innerHTML=`<div style="padding:2rem;text-align:center;color:var(--rtx)">Erro: ${esc(e.message)}</div>`; }
+}
+
+// ── Revert helpers ────────────────────────────────────────
+// Mostra loading sobre o hist-body durante operação
+function histLoading(show, msg=''){
+  const body=document.getElementById('hist-body');
+  if(show){
+    body._savedContent=body.innerHTML;
+    body.innerHTML=`<div style="padding:3rem;text-align:center;color:var(--tx2)">
+      <div style="margin-bottom:1rem"><span class="spin" style="width:28px;height:28px;border-width:3px"></span></div>
+      <div style="font-size:14px;font-weight:500">${msg||'Aguarde...'}</div>
+    </div>`;
+  } else if(body._savedContent){
+    body.innerHTML=body._savedContent;
+    // Restaura referência _groups que fica no elemento
+    // (será recarregado via loadHistorico() logo após)
+  }
+}
+
+// Mostra tela de sucesso após reversão
+function histSuccess(title, details){
+  const body=document.getElementById('hist-body');
+  body.innerHTML=`<div style="padding:2.5rem;text-align:center">
+    <div style="font-size:2.5rem;margin-bottom:.75rem">✅</div>
+    <div style="font-size:16px;font-weight:700;color:var(--gtx);margin-bottom:.5rem">${esc(title)}</div>
+    <div style="font-size:13px;color:var(--tx2);margin-bottom:1.25rem;white-space:pre-line">${esc(details)}</div>
+    <button class="btn bp" onclick="loadHistorico()" style="margin:0 auto">↻ Ver histórico atualizado</button>
+  </div>`;
+}
+
+// Mostra modal de confirmação antes de reverter
+function confirmRevert(title, details, onConfirm){
+  showConfirm(
+    title,
+    'Deseja reverter para este estado anterior?',
+    details.map(d=>({label:d.label,val:d.val})),
+    onConfirm
+  );
+}
+
+// Ponto: bloqueia reverter se a ação já é uma reversão (acao==='revert')
+// para evitar redundância infinita
+function isAlreadyReverted(e){ return (e.acao||'').includes('revert'); }
+
+// ── Reverte uma entrada individual do histórico ────────────
+async function revertEntry(gi, ei){
+  const body=document.getElementById('hist-body');
+  const groups=body._groups;
+  if(!groups) return;
+  const e=groups[gi].entries[ei];
+  if(!e||!e.antes||!e.depois) return;
+
+  // Bloqueia reverter de uma reversão
+  if(isAlreadyReverted(e)){
+    showToast('Esta entrada já é uma reversão — não pode ser revertida novamente.');
+    return;
+  }
+
+  const caso=casos.find(c=>c.id===e.caso_id);
+  if(!caso){ showToast('Caso não encontrado na planilha atual.'); return; }
+
+  const {ufs,cidades,clientes}=e.antes;
+  const details=[
+    {label:'Caso', val:e.caso_id},
+    {label:'UFs → antes', val:ufs.join(', ')||'(vazio)'},
+    {label:'Cidades → antes', val:cidades.map(cap).join(', ')||'(vazio)'},
+    {label:'Profissionais → antes', val:clientes.join(', ')||'(vazio)'},
+  ];
+
+  confirmRevert('Reverter esta alteração', details, async ()=>{
+    histLoading(true, `Revertendo ${e.caso_id}...`);
+    try{
+      const r=await api('revert_caso',{caso_id:caso.id,row:caso.row,ufs:ufs.join('/'),cidades:cidades.join('/'),clientes:clientes.join('/')},'POST');
+      await loadCasos(true);
+      if(r.ok){
+        histSuccess(
+          `${e.caso_id} revertido com sucesso!`,
+          `UFs: ${ufs.join(', ')||'(vazio)'}\nCidades: ${cidades.map(cap).join(', ')||'(vazio)'}\nProfissionais: ${clientes.join(', ')||'(vazio)'}`
+        );
+      } else {
+        histLoading(false);
+        loadHistorico();
+        showToast('Erro ao reverter: '+(r.error||''));
+      }
+    }catch(err){
+      histLoading(false);
+      loadHistorico();
+      showToast('Erro: '+err.message);
+    }
+  });
+}
+
+// ── Reverte um grupo de entradas (sessão) inteiro ──────────
+async function revertGroup(gi){
+  const body=document.getElementById('hist-body');
+  const groups=body._groups;
+  if(!groups) return;
+  const g=groups[gi];
+
+  // Filtra entradas que podem ser revertidas (exclui reversões já feitas)
+  const revertable=g.entries.filter(e=>e.antes&&e.depois&&!isAlreadyReverted(e));
+  if(!revertable.length){
+    showToast('Nenhuma entrada revertível neste grupo (todas já são reversões).');
+    return;
+  }
+
+  const details=[
+    {label:'Usuário', val:g.usuario},
+    {label:'Entradas', val:`${revertable.length} de ${g.entries.length} (${g.entries.length-revertable.length} já revertidas ignoradas)`},
+    {label:'Casos', val:[...new Set(revertable.map(e=>e.caso_id))].join(', ')},
+  ];
+
+  confirmRevert('Reverter grupo inteiro', details, async ()=>{
+    histLoading(true, `Revertendo ${revertable.length} entrada(s)...`);
+    let ok=0; const errs=[];
+    for(const e of revertable){
+      const caso=casos.find(c=>c.id===e.caso_id);
+      if(!caso){ errs.push(`${e.caso_id}: não encontrado`); continue; }
+      const {ufs,cidades,clientes}=e.antes;
+      try{
+        const r=await api('revert_caso',{caso_id:caso.id,row:caso.row,ufs:ufs.join('/'),cidades:cidades.join('/'),clientes:clientes.join('/')},'POST');
+        if(r.ok) ok++;
+        else errs.push(`${e.caso_id}: ${r.error||'erro'}`);
+      }catch(err){ errs.push(`${e.caso_id}: ${err.message}`); }
+    }
+    await loadCasos(true);
+    if(errs.length){
+      histLoading(false);
+      loadHistorico();
+      showToast(`${ok} revertidos, ${errs.length} erro(s): ${errs.slice(0,3).join('; ')}`);
+    } else {
+      histSuccess(
+        `Grupo revertido com sucesso!`,
+        `${ok} caso(s) revertidos para o estado anterior.`
+      );
+    }
+  });
+}
+// ── Casos ─────────────────────────────────────────────────
+async function loadCasos(silent=false){
+  if(!silent){ document.getElementById('grid').innerHTML='<div style="grid-column:1/-1;text-align:center;padding:2.5rem;color:var(--tx2)"><span class="spin"></span> Carregando...</div>'; document.getElementById('empty').style.display='none'; }
+  try{
+    const r=await api('casos'); if(!r.ok) throw new Error(r.error||'Erro');
+    casos=r.casos||[]; allProfs=r.profissionais||[];
+    // Atualiza cache de tags para autocomplete
+    const tagSet=new Set();
+    casos.forEach(c=>(c.tags||[]).forEach(t=>tagSet.add(t)));
+    allTags=[...tagSet].sort();
+    applyFilter();
+  }catch(e){
+    document.getElementById('grid').innerHTML='';
+    document.getElementById('empty').style.display='block';
+    document.getElementById('empty').innerHTML=`<div style="color:var(--rtx);margin-bottom:.75rem">⚠️ ${esc(e.message)}</div><button class="btn bs" onclick="showView('admin');runDiag()">🔧 Diagnóstico</button>`;
+  }
+}
+
+// Atualiza um caso localmente sem round-trip ao servidor (ponto sério da análise)
+// Chamado após mutações bem-sucedidas para evitar loadCasos(true) bloqueante
+function updateCasoLocal(casoId, patch){
+  const idx=casos.findIndex(c=>c.id===casoId);
+  if(idx===-1) return false;
+  casos[idx]={...casos[idx],...patch};
+  // Re-calcula profissionais únicos
+  const profs=new Set();
+  casos.forEach(c=>c.clientes.forEach(p=>{ if(p) profs.add(p); }));
+  allProfs=[...profs].sort();
+  // Reaplica filtro sem recarregar
+  applyFilter();
+  return true;
+}
+
+// Background sync após mutação: atualiza do servidor sem bloquear a UI
+function bgSyncCaso(casoId){
+  const myBaseGen=_baseGeneration;
+  setTimeout(async()=>{
+    try{
+      if(myBaseGen!==_baseGeneration) return;
+      const r=await api('casos');
+      if(r.ok&&myBaseGen===_baseGeneration){ casos=r.casos||[]; allProfs=r.profissionais||[]; }
+    }catch(e){}
+  }, 2000);
+}
+
+async function syncNow(){ showToast('Sincronizando...'); await loadCasos(); showToast('Dados atualizados!'); }
+async function checkNewFiles(){ try{ const r=await api('new_files'); if(r.ok&&r.count>0){ document.getElementById('nat').textContent=`${r.count} novo(s) arquivo(s) no Drive (últimos 7 dias).`; document.getElementById('na').style.display='flex'; } }catch(e){} }
+
+// ── Diagnóstico ───────────────────────────────────────────
+function toggleDiag(){ document.getElementById('dp').classList.toggle('open'); }
+async function runDiag(panel='admin'){
+  const dbId=panel==='admin'?'db-admin':'db';
+  const dsId=panel==='admin'?'ds-admin':'ds';
+  const db=document.getElementById(dbId),ds=document.getElementById(dsId);
+  db.style.display='block'; db.innerHTML='<div style="padding:.5rem 0;font-size:13px;color:var(--tx2)"><span class="spin"></span> Testando conexões...</div>';
+  try{
+    const r=await api('diagnostico'); const res=r.result;
+    const rows=[
+      ['PHP',`${res.php.version}`],['OpenSSL',res.php.openssl],['allow_url_fopen',res.php.allow_url_fopen],
+      ['PDO MySQL',res.php.pdo_mysql],['Pasta /thumbs/',res.php.thumb_dir],
+      ['MySQL',res.mysql?.msg||'—'],['Tabela audit_log',res.audit_log?.msg||'—'],
+      ['Credenciais',res.credentials?.msg||'—'],
+      ['SPREADSHEET_ID',res.config?.spreadsheet_id||'—'],['DRIVE_FOLDER_ID',res.config?.drive_folder_id||'—'],
+      ['Auth Google',res.google_auth?.msg||'—'],['Sheets',res.sheets?.msg||'—'],['Drive',res.drive?.msg||'—'],
+      ['Cache',res.cache_stats?.msg||'—'],
+    ];
+    const ok=[res.mysql,res.credentials,res.google_auth,res.sheets,res.drive].every(x=>x?.ok);
+    ds.textContent=ok?'✓ Tudo OK':'⚠️ Problemas detectados'; ds.style.color=ok?'var(--gtx)':'var(--rtx)';
+    db.innerHTML=rows.map(([l,v])=>`<div class="dr"><div class="dl">${l}</div><div class="dv ${String(v).includes('❌')?'cerr':'cok'}">${v}</div></div>`).join('')
+      + `<div class="dr"><div class="dl">Teste de log</div><div class="dv"><button class="btn bs" style="padding:4px 10px;font-size:11px" onclick="testLog()">Gravar entrada de teste no histórico</button><span id="test-log-result" style="margin-left:8px;font-size:12px"></span></div></div>`;
+  }catch(e){ ds.textContent='⚠️ Erro'; ds.style.color='var(--rtx)'; db.innerHTML=`<div class="cerr" style="padding:.5rem 0;font-size:13px">Erro: ${esc(e.message)}</div>`; }
+}
+async function testLog(){
+  const res=document.getElementById('test-log-result');
+  res.textContent='Testando...'; res.style.color='var(--tx2)';
+  try{
+    const r=await api('test_log');
+    if(r.ok){ res.textContent='✓ Gravado! Verifique no histórico: caso TESTE-000'; res.style.color='var(--gtx)'; }
+    else{ res.textContent='❌ '+r.error; res.style.color='var(--rtx)'; }
+  }catch(e){ res.textContent='❌ '+e.message; res.style.color='var(--rtx)'; }
+}
+
+// ── Limpar cache ──────────────────────────────────────────
+async function confirmClearAllCache(){
+  if(!confirm('Limpar TODO o cache? As thumbs serão baixadas novamente na próxima visualização.')) return;
+  try{ const r=await api('clear_cache',{},'POST'); thumbCache={}; showToast(r.ok?r.msg:'Erro: '+(r.error||'')); if(r.ok) await loadCasos(true); }catch(e){ showToast('Erro.'); }
+}
+async function clearCaseCache(casoId){
+  try{ const r=await api('clear_cache',{caso_id:casoId},'POST'); delete thumbCache[casoId]; showToast(r.ok?r.msg:'Erro.'); renderGrid(); }catch(e){ showToast('Erro.'); }
+}
+
+// ── Filtros ───────────────────────────────────────────────
+function setMode(m){
+  mode=m;
+  // Limpa estado e cidade ao trocar de aba — evita estado pré-preenchido travar a API
+  selUF=''; selCity=''; ibgeCities=[];
+  document.getElementById('fuf').value='';
+  document.getElementById('fci').value='';
+  document.getElementById('te').classList.toggle('active',m==='estado');
+  document.getElementById('tc').classList.toggle('active',m==='cidade');
+  document.getElementById('cw').style.display=m==='cidade'?'block':'none';
+  applyFilter();
+}
+async function onUFChange(){ selUF=document.getElementById('fuf').value; selCity=''; ibgeCities=[]; document.getElementById('fci').value=''; if(selUF&&mode==='cidade') await loadIBGE(selUF,'filter'); applyFilter(); }
+function onCityInput(){
+  const q=document.getElementById('fci').value;
+  renderDD('cdd',ibgeCities,q,c=>{ selCity=c; document.getElementById('fci').value=cap(c); document.getElementById('cdd').classList.remove('open'); applyFilter(); });
+  if(!q){ selCity=''; applyFilter(); }
+}
+function openCityDD(){ renderDD('cdd',ibgeCities,document.getElementById('fci').value,c=>{ selCity=c; document.getElementById('fci').value=cap(c); document.getElementById('cdd').classList.remove('open'); applyFilter(); }); }
+let _profSearchTimer=null;
+// Flag: usuário trocou manualmente o filtro Exibir? Se sim, não auto-trocamos.
+let _userTouchedShow=false;
+function onShowFilterChange(){ _userTouchedShow=true; applyFilter(); }
+function autoSyncShowFilter(){
+  if(_userTouchedShow) return;
+  const fshow=document.getElementById('fshow'); if(!fshow) return;
+  // Se há profissional digitado → "Em uso"; senão → "Disponíveis"
+  fshow.value = selProf ? 'em_uso' : 'disponivel';
+}
+function onProfSearch(){
+  selProf=document.getElementById('fpro').value.trim();
+  const q=norm(selProf);
+  // Auto-troca o filtro Exibir conforme presença de busca (se usuário não tocou)
+  autoSyncShowFilter();
+  if(!q){ document.getElementById('prodd').classList.remove('open'); applyFilter(); return; }
+  // Debounce 150ms — Levenshtein é O(m×n) e não precisa rodar a cada tecla
+  clearTimeout(_profSearchTimer);
+  _profSearchTimer=setTimeout(()=>{
+    const m=allProfs.filter(p=>norm(p).includes(q)).slice(0,12);
+    if(m.length) renderFormDD('prodd',m,'',c=>{ document.getElementById('fpro').value=c; selProf=c; autoSyncShowFilter(); document.getElementById('prodd').classList.remove('open'); applyFilter(); });
+    else document.getElementById('prodd').classList.remove('open');
+    applyFilter();
+  }, 150);
+}
+function openProfDD(){ onProfSearch(); }
+function clearFilters(){ selUF=''; selCity=''; selProf=''; selTags.clear(); ['fuf','fci','fpro','fids','ftag'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';}); renderTagFilterChips(); _userTouchedShow=false; document.getElementById('fshow').value='disponivel'; document.getElementById('cw').style.display='none'; mode='estado'; document.getElementById('te').classList.add('active'); document.getElementById('tc').classList.remove('active'); document.getElementById('btn-clf').style.display='none'; applyFilter(); }
+
+// ── Bloqueio: detector de marcador (mantém paridade com PHP isBlockMarker) ──
+const BLOCK_MARKERS=['NA','LINDA'];
+function isBlockMarker(v){ return BLOCK_MARKERS.includes((v||'').toString().trim().toUpperCase()); }
+
+// ── Filtro por tags (autocomplete + chips selecionadas) ────
+function getAvailableTagsForFilter(){
+  // Combina cache global (allTags) com tags presentes nos casos carregados
+  const set=new Set(allTags||[]);
+  (casos||[]).forEach(c=>(c.tags||[]).forEach(t=>set.add(t)));
+  return [...set].sort();
+}
+function onTagFilterInput(){
+  const inp=document.getElementById('ftag');
+  const q=inp.value.trim().toUpperCase();
+  const all=getAvailableTagsForFilter().filter(t=>!selTags.has(t));
+  renderDD('ftagdd', all, q, t=>{
+    selTags.add(t); inp.value=''; document.getElementById('ftagdd').classList.remove('open');
+    renderTagFilterChips(); applyFilter();
+  });
+}
+function openTagFilterDD(){ onTagFilterInput(); }
+function renderTagFilterChips(){
+  const box=document.getElementById('ftag-chips'); if(!box) return;
+  box.innerHTML=[...selTags].map(t=>
+    `<span class="tag-pill">${esc(t)}<span class="x" onclick="selTags.delete('${esc(t).replace(/'/g,"\\'")}');renderTagFilterChips();applyFilter()" title="Remover tag do filtro">×</span></span>`
+  ).join('');
+}
+async function loadAllTags(){
+  try{ const r=await api('list_tags'); if(r.ok) allTags=r.tags||[]; }catch(e){}
+}
+
+function renderDD(id,list,q,onSelect){
+  const dd=document.getElementById(id); const fl=q?list.filter(c=>norm(c).includes(norm(q))):list;
+  if(!fl.length){ dd.classList.remove('open'); return; }
+  dd.innerHTML=''; fl.slice(0,50).forEach(c=>{ const d=document.createElement('div'); d.className='do'; d.textContent=cap(c); d.addEventListener('click',()=>onSelect(c)); dd.appendChild(d); }); dd.classList.add('open');
+}
+document.addEventListener('click',e=>{ if(!e.target.closest('.ddw')&&!e.target.closest('.fw')) document.querySelectorAll('.dd').forEach(d=>d.classList.remove('open')); });
+
+// ── PONTOS 1+2: applyFilter — ID independente, tags adicionam, bloqueados ────
+function applyFilter(){
+  const show=document.getElementById('fshow').value;
+  const profQ=norm(selProf);
+  const idsRaw=(document.getElementById('fids')?.value||'').trim();
+  const hasStateFilter=!!(selUF||selProf);
+  const hasTagFilter=selTags.size>0;
+  const hasFilter=!!(hasStateFilter||idsRaw||hasTagFilter);
+  document.getElementById('btn-clf').style.display=hasFilter?'inline-flex':'none';
+
+  // Helper: testa se um caso passa no filtro de tags (TODAS as tags selecionadas precisam estar presentes)
+  const matchesTags=(c)=> !hasTagFilter || [...selTags].every(t => (c.tags||[]).includes(t));
+
+  // O filtro por ID é independente dos demais filtros aplicados.
+  // Quando preenchido, mostra APENAS esses IDs — ignora estado/prof/exibir
+  // (mas tags AINDA refinam a lista, pois tag funciona como filtro complementar)
+  if(idsRaw){
+    const idSet=new Set(
+      idsRaw.split(/[\s,;]+/).map(s=>s.trim()).filter(Boolean).map(n=>{
+        const clean=n.replace(/^CASO-?/i,'').replace(/\D/g,'');
+        return clean?`CASO-${clean}`:'';
+      }).filter(Boolean)
+    );
+    if(idSet.size>0){
+      const list=casos
+        .filter(c=>idSet.has(c.id) && matchesTags(c))
+        .map(c=>({...c,emUso:false}));
+      filtered=list; page=1;
+      document.getElementById('st').textContent=list.length;
+      document.getElementById('sd').textContent='—';
+      document.getElementById('su').textContent='—';
+      renderGrid();
+      return;
+    }
+  }
+
+  // Sem filtro de ID: lógica normal de estado/profissional
+  const allWithStatus=casos.map(c=>{
+    let emUso=false;
+    if(profQ){
+      emUso=c.clientes.some(p=>norm(p).includes(profQ));
+    } else if(selUF){
+      if(mode==='estado') emUso=c.ufs.includes(selUF);
+      else emUso=selCity?c.cidades.includes(selCity):c.ufs.includes(selUF);
+    }
+    return{...c,emUso};
+  });
+
+  // Filtro de tags se aplicado, antes de contar disponível/em-uso
+  const tagFiltered = hasTagFilter ? allWithStatus.filter(matchesTags) : allWithStatus;
+
+  const dispCount=tagFiltered.filter(c=>!c.emUso && !c.bloqueado).length;
+  const usoCount =tagFiltered.filter(c=> c.emUso && !c.bloqueado).length;
+
+  let list=[...tagFiltered];
+  if(show==='disponivel')      list=list.filter(c=>!c.emUso && !c.bloqueado);
+  else if(show==='em_uso')      list=list.filter(c=> c.emUso && !c.bloqueado);
+  else if(show==='bloqueado')   list=list.filter(c=> !!c.bloqueado);
+  // 'todos' não filtra
+
+  filtered=list; page=1;
+  document.getElementById('st').textContent=list.length;
+  document.getElementById('sd').textContent=hasStateFilter?dispCount:'—';
+  document.getElementById('su').textContent=hasStateFilter?usoCount:'—';
+  // Casos do filtro atual recebem prioridade máxima na fila de carregamento.
+  list.slice(0,PER).forEach(c=>_highPriorityIds.add(c.id));
+  renderGrid();
+}
+
+// ── Grid ──────────────────────────────────────────────────
+function renderGrid(){
+  const grid=document.getElementById('grid'),empty=document.getElementById('empty');
+  const slice=filtered.slice((page-1)*PER,page*PER);
+  if(!slice.length){ grid.innerHTML=''; empty.style.display='block'; renderPager(0); return; }
+  empty.style.display='none';
+  const hasFilter=!!(selUF||selProf);
+  pageLoadStart=performance.now(); // inicia timer de página
+
+  grid.innerHTML=slice.map(c=>{
+    const isBlocked=!!c.bloqueado;
+    const nv=!isBlocked && !c.ufs.length && !c.cidades.length;
+    let cls, lbl;
+    if(isBlocked){ cls='bblock'; lbl='🔒 Bloqueado'; }
+    else if(nv){ cls='bfree'; lbl='Nunca usado'; }
+    else if(c.emUso){ cls='bused'; lbl='Em uso'; }
+    else { cls='bok'; lbl='Disponível'; }
+    // Subtítulo: ufs sem o marcador NA/LINDA
+    const realUfs=(c.ufs||[]).filter(u=>!isBlockMarker(u));
+    const sub=isBlocked?'Bloqueado':(realUfs.length?realUfs.slice(0,5).join(', ')+(realUfs.length>5?'…':''):'Sem uso');
+    const isSel=selIds.has(c.id);
+    const tc=thumbCache[c.id];
+
+    let innerHtml;
+    if(tc===undefined){
+      innerHtml='<div class="ct-loading"><div class="spin"></div></div>';
+    } else if(tc===null){
+      innerHtml='<div class="ct-error"><div class="sad">😔</div><span>sem foto</span></div>';
+    } else if(tc.versions&&tc.versions.length>1){
+      const slides=tc.versions.map(v=>`<div class="carousel-slide"><img src="${v.url}" alt="${c.id}" loading="lazy"></div>`).join('');
+      const dots=tc.versions.map((_,i)=>`<div class="carousel-dot${i===0?' active':''}"></div>`).join('');
+      innerHtml=`<div class="carousel" id="car-${c.id}" onclick="event.stopPropagation()">
+        <div class="carousel-slides" id="cslides-${c.id}">${slides}</div>
+        <button class="carousel-btn prev" onclick="carPrev('${c.id}',${tc.versions.length})">‹</button>
+        <button class="carousel-btn next" onclick="carNext('${c.id}',${tc.versions.length})">›</button>
+        <div class="carousel-dots" id="cdots-${c.id}">${dots}</div>
+        <div class="carousel-ver" id="cver-${c.id}">${tc.versions[0].ver}</div>
+      </div>`;
+    } else {
+      innerHtml=`<img src="${tc.url}" alt="${c.id}" loading="lazy">${tc.isVideo?'<div class="vid-badge">▶ Vídeo</div>':''}`;
+    }
+
+    // Tags como chips abaixo do título — limita a 3 com "+N" se passar
+    const tags=Array.isArray(c.tags)?c.tags:[];
+    let tagChips='';
+    if(tags.length){
+      const shown=tags.slice(0,3);
+      const more=tags.length-shown.length;
+      tagChips=`<div class="ctags">${shown.map(t=>`<span class="ctag">${esc(t)}</span>`).join('')}${more>0?`<span class="ctag" style="background:transparent;color:var(--tx3);border:0.5px dashed var(--bds)">+${more}</span>`:''}</div>`;
+    }
+
+    return`<div class="cc${isSel?' sel':''}${isBlocked?' blocked':''}" id="card-${c.id}" style="position:relative" onclick="${selMode?`toggleCardSel('${c.id}',event)`:`openModal('${c.id}')`}" title="${isBlocked&&c.motivo_bloqueio?'Motivo: '+esc(c.motivo_bloqueio):''}">
+      ${selMode?`<div class="csel">${isSel?'✓':''}</div>`:''}
+      <div class="ct" id="ct-${c.id}">${innerHtml}</div>
+      <div class="cb">
+        <div class="ci">${c.id}</div>
+        <div class="cs" title="${esc(sub)}">${esc(sub)}</div>
+        ${hasFilter||isBlocked?`<span class="badge ${cls}">${lbl}</span>`:''}
+        ${tagChips}
+      </div>
+    </div>`;
+  }).join('');
+
+  renderPager(Math.ceil(filtered.length/PER));
+  lazyLoadThumbs(slice);
+  // Pré-carrega a próxima página em segundo plano.
+  setTimeout(()=>preloadNextPage(), 800);
+}
+
+const carIndex={};
+function carNext(id,total){ carIndex[id]=((carIndex[id]||0)+1)%total; updateCar(id); }
+function carPrev(id,total){ carIndex[id]=((carIndex[id]||0)-1+total)%total; updateCar(id); }
+function updateCar(id){ const idx=carIndex[id]||0; const s=document.getElementById('cslides-'+id); if(s) s.style.transform=`translateX(-${idx*100}%)`; const d=document.getElementById('cdots-'+id); if(d) d.querySelectorAll('.carousel-dot').forEach((x,i)=>x.classList.toggle('active',i===idx)); const v=document.getElementById('cver-'+id); const tc=thumbCache[id]; if(v&&tc?.versions) v.textContent=tc.versions[idx].ver; }
+
+// Verifica o cache em lote antes de disparar requests individuais por caso.
+// ── Fetch de uma thumb com medição de tempo e respeito ao thumbSourceMode ──
+async function fetchThumb(casoId){
+  const t0=performance.now();
+  const sourceParam=thumbSourceMode==='auto'?'':`&source=${thumbSourceMode}`;
+  const r=await api(`photos&id=${encodeURIComponent(casoId)}${sourceParam}`);
+  const ms=Math.round(performance.now()-t0);
+  return {r, ms};
+}
+
+// Eleva a prioridade do caso quando o modal é aberto.
+// (openModal já chama fetch de fotos, mas isso prioriza a thumb do grid também)
+function prioritizeCase(id){ _highPriorityIds.add(id); }
+
+// Exibe tempo de carregamento e fonte (cache/Drive) sob o card.
+function showThumbMeta(id, ms, src){
+  const card=document.getElementById('card-'+id);
+  if(!card) return;
+  let meta=card.querySelector('.thumb-meta');
+  if(!meta){ meta=document.createElement('div'); meta.className='thumb-meta'; card.querySelector('.cb')?.appendChild(meta); }
+  const color=src==='cache'?'var(--gtx)':'var(--btx)';
+  const icon=src==='cache'?'💾':'☁️';
+  meta.innerHTML=`<span style="font-size:9px;color:${color};font-weight:600">${icon} ${ms}ms</span>`;
+}
+
+function updatePageTimer(){
+  if(!pageLoadStart) return;
+  const ms=Math.round(performance.now()-pageLoadStart);
+  const el=document.getElementById('page-load-timer');
+  if(el){ el.textContent=`⏱ Página: ${ms}ms`; el.style.display=adminModeVisible?'flex':'none'; }
+  pageLoadStart=0;
+}
+
+function renderThumbEl(el, id, tc){
+  if(!el||!tc) return;
+  if(tc.versions&&tc.versions.length>1){
+    const slides=tc.versions.map(v=>`<div class="carousel-slide"><img src="${v.url}" loading="lazy"></div>`).join('');
+    const dots=tc.versions.map((_,i)=>`<div class="carousel-dot${i===0?' active':''}"></div>`).join('');
+    el.innerHTML=`<div class="carousel" id="car-${id}" onclick="event.stopPropagation()"><div class="carousel-slides" id="cslides-${id}">${slides}</div><button class="carousel-btn prev" onclick="carPrev('${id}',${tc.versions.length})">‹</button><button class="carousel-btn next" onclick="carNext('${id}',${tc.versions.length})">›</button><div class="carousel-dots" id="cdots-${id}">${dots}</div><div class="carousel-ver" id="cver-${id}">${tc.versions[0].ver}</div></div>`;
+  } else {
+    el.innerHTML=`<img src="${tc.url}" alt="${id}" loading="lazy">${tc.isVideo?'<div class="vid-badge">▶ Vídeo</div>':''}`;
+  }
+}
+
+
+// ── Paginação ─────────────────────────────────────────────
+function renderPager(total){
+  const pg=document.getElementById('pager');
+  if(total<=1 && filtered.length<=PER){ pg.innerHTML=''; return; }
+  const cur=page;
+  let h='';
+  h+=`<span class="pager-info">${filtered.length} casos</span>`;
+  if(total>1){
+    h+=`<button class="pb nav" onclick="goPage(${cur-1})" ${cur<=1?'disabled':''} title="Anterior">‹</button>`;
+    const delta=2, start=Math.max(1,cur-delta), end=Math.min(total,cur+delta);
+    if(start>1){ h+=`<button class="pb" onclick="goPage(1)">1</button>`; if(start>2) h+=`<span class="pager-sep">…</span>`; }
+    for(let i=start;i<=end;i++) h+=`<button class="pb${i===cur?' active':''}" onclick="goPage(${i})">${i}</button>`;
+    if(end<total){ if(end<total-1) h+=`<span class="pager-sep">…</span>`; h+=`<button class="pb" onclick="goPage(${total})">${total}</button>`; }
+    h+=`<button class="pb nav" onclick="goPage(${cur+1})" ${cur>=total?'disabled':''} title="Próximo">›</button>`;
+    h+=`<div class="pager-jump"><span>Ir para</span><input type="number" min="1" max="${total}" value="${cur}" onkeydown="if(event.key==='Enter'){const v=parseInt(this.value);if(v>=1&&v<=${total})goPage(v);else this.value='${cur}'}" onblur="this.value='${cur}'"><span>/ ${total}</span></div>`;
+  }
+  // Controle de quantidade de itens por página.
+  h+=`<div class="pager-jump" style="margin-left:auto"><span>Por página:</span><select onchange="setPerPage(parseInt(this.value))" style="padding:4px 8px;border:0.5px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:12px;outline:none">
+    ${[12,24,48,96].map(n=>`<option value="${n}"${n===PER?' selected':''}>${n}</option>`).join('')}
+  </select></div>`;
+  pg.innerHTML=h;
+}
+function goPage(p){
+  const total=Math.ceil(filtered.length/PER); // recalcula com PER atual
+  page=Math.max(1,Math.min(p,total));
+  _pageGeneration++;
+  renderGrid();
+  window.scrollTo(0,0);
+}
+function setPerPage(n){
+  PER=n;
+  page=1;
+  _pageGeneration++;
+  renderGrid();
+  window.scrollTo(0,0);
+}
+
+// ── Painel do caso (modal) ────────────────────────────────
+let currentPhotos=[]; // fotos da última abertura — usado pelo lightbox flutuante
+async function openModal(id){
+  prioritizeCase(id); // Eleva a prioridade da fila para o card clicado.
+  currentCaso=casos.find(c=>c.id===id); if(!currentCaso) return;
+  document.getElementById('addform').style.display='none';
+  document.getElementById('aerr').textContent='';
+  document.getElementById('state-warn').style.display='none';
+  pendingForce=false;
+  document.getElementById('auf').innerHTML='<option value="">Selecione...</option>';
+  ESTADOS.forEach(e=>document.getElementById('auf').appendChild(new Option(`${e.s} – ${e.n}`,e.s)));
+  const aci=document.getElementById('aci'); aci.value=''; aci.dataset.val=''; aci.readOnly=true; aci.placeholder='Selecione o estado primeiro...';
+  document.getElementById('apro').value=''; document.getElementById('prosug').style.display='none';
+
+  document.getElementById('mid').textContent=currentCaso.id;
+  renderPainelStatus();
+  renderBlockBanner();
+  renderTagEditor();
+  renderModalChips();
+  renderPainelActions();
+
+  const sec=document.getElementById('mps');
+  sec.innerHTML='<div style="padding:.5rem 0;font-size:12px;color:var(--tx2)"><span class="spin"></span> Buscando fotos...</div>';
+  document.getElementById('ov').classList.add('open');
+  currentPhotos=[];
+  try{
+    const r=await api(`photos&id=${encodeURIComponent(id)}`);
+    if(!r.photos?.length){ sec.innerHTML='<div style="padding:.5rem 0;font-size:12px;color:var(--tx3)">Nenhuma foto/vídeo no Drive.</div>'; return; }
+    currentPhotos=r.photos;
+    sec.innerHTML='<div class="photo-grid" id="photo-grid"></div>';
+    const grid=document.getElementById('photo-grid');
+    grid.innerHTML=r.photos.map((p,i)=>{
+      const tag=p.version_tag||'';
+      const thumb=p.thumb_url||'';
+      const safeName=esc(p.name);
+      const cloudUrl=esc(p.webViewLink||'#');
+      let body;
+      if(p.isVideo){
+        body=`<div class="photo-thumb-wrap video" onclick="openLightboxFlo(${i})" title="Pré-visualizar vídeo">
+          ${thumb?`<img src="${thumb}" loading="lazy" style="opacity:.55">`:''}
+          <span style="position:absolute;display:flex;flex-direction:column;align-items:center;gap:3px;color:#fff">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5"><polygon points="5,3 19,12 5,21"/></svg>
+            <span style="font-size:10px">Vídeo</span>
+          </span>
+          ${tag?`<div class="ver-badge">${esc(tag)}</div>`:''}
+        </div>`;
+      } else {
+        body=`<div class="photo-thumb-wrap" onclick="openLightboxFlo(${i})" title="Abrir visualizador">
+          ${thumb?`<img src="${thumb}" loading="lazy" onerror="this.style.display='none'">`:'<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--tx3)">sem thumb</div>'}
+          ${tag?`<div class="ver-badge">${esc(tag)}</div>`:''}
+        </div>`;
+      }
+      return `<div class="photo-card" data-pidx="${i}">
+        ${body}
+        <div class="photo-name" title="${safeName}">${safeName}</div>
+        <div class="photo-actions">
+          <button onclick="window.open('${cloudUrl}','_blank')" title="Abrir no Google Drive">☁ Drive</button>
+          <button id="dlbtn-${i}" onclick="downloadSingleFile('${esc(p.id)}', '${safeName.replace(/'/g,"\\'")}', this)" title="Baixar diretamente">⬇ Baixar</button>
+        </div>
+      </div>`;
+    }).join('');
+  }catch(e){ sec.innerHTML=`<div style="padding:.5rem 0;font-size:12px;color:var(--rtx)">Erro: ${esc(e.message)}</div>`; }
+}
+
+// Status pills (Disponível / Em uso / Bloqueado)
+function renderPainelStatus(){
+  const c=currentCaso; if(!c) return;
+  const wrap=document.getElementById('painel-status'); if(!wrap) return;
+  const isBlocked=!!c.bloqueado;
+  const realUfs=(c.ufs||[]).filter(u=>!isBlockMarker(u));
+  const inUse=realUfs.length>0;
+  const tags=Array.isArray(c.tags)?c.tags:[];
+  let pills='';
+  if(isBlocked) pills+='<span class="pst-pill blocked">🔒 Bloqueado</span>';
+  else if(inUse) pills+='<span class="pst-pill used">Em uso</span>';
+  else pills+='<span class="pst-pill ok">Disponível</span>';
+  pills+=`<span style="font-size:11px;color:var(--tx3)">${realUfs.length} UF${realUfs.length===1?'':'s'} · ${(c.cidades||[]).filter((_,i)=>!isBlockMarker((c.ufs||[])[i])).length} cidade(s) · ${tags.length} tag(s)</span>`;
+  wrap.innerHTML=pills;
+}
+
+// Banner de bloqueio com motivo (se bloqueado)
+function renderBlockBanner(){
+  const c=currentCaso; if(!c) return;
+  const wrap=document.getElementById('block-banner-wrap'); if(!wrap) return;
+  if(!c.bloqueado){ wrap.innerHTML=''; return; }
+  const motivo=c.motivo_bloqueio||'(sem motivo registrado — bloqueio antigo)';
+  wrap.innerHTML=`<div class="block-banner">
+    <div class="ic">🔒</div>
+    <div class="reason"><b>Caso bloqueado</b>${esc(motivo)}</div>
+  </div>`;
+}
+
+// Editor de tags (add/remove inline)
+function renderTagEditor(){
+  const c=currentCaso; if(!c) return;
+  const ed=document.getElementById('tag-editor'); if(!ed) return;
+  const tags=Array.isArray(c.tags)?c.tags:[];
+  const chips=tags.map(t=>
+    `<span class="tag-pill">${esc(t)}<span class="x" onclick="removeTagFromCaso('${esc(t).replace(/'/g,"\\'")}')" title="Remover esta tag">×</span></span>`
+  ).join('');
+  ed.innerHTML=`${chips}<div class="tag-input-wrap"><input id="tag-input-modal" type="text" placeholder="+ Adicionar tag (ex: RINO, BOTOX)..." oninput="onTagModalInput()" onfocus="onTagModalInput()" onkeydown="if(event.key==='Enter'){event.preventDefault();addTagFromInput()}" autocomplete="off"><div class="dd" id="tag-modal-dd"></div></div>`;
+}
+function onTagModalInput(){
+  const inp=document.getElementById('tag-input-modal'); if(!inp) return;
+  const q=inp.value.trim().toUpperCase();
+  const cur=new Set(currentCaso?.tags||[]);
+  const all=getAvailableTagsForFilter().filter(t=>!cur.has(t));
+  renderDD('tag-modal-dd', all, q, t=>{
+    inp.value=t; document.getElementById('tag-modal-dd').classList.remove('open');
+    addTagFromInput();
+  });
+}
+async function addTagFromInput(){
+  const inp=document.getElementById('tag-input-modal'); if(!inp||!currentCaso) return;
+  const tag=inp.value.trim().toUpperCase().replace(/[^A-Z0-9 \&\+\-]/g,'').replace(/\s+/g,' ').trim();
+  if(!tag) return;
+  if(tag.length>30){ showToast('Tag muito longa (máx. 30 chars).'); return; }
+  inp.disabled=true;
+  try{
+    const r=await api('add_tag',{caso_id:currentCaso.id,row:currentCaso.row,tag},'POST');
+    if(r.ok){
+      updateCasoLocal(currentCaso.id,{tags:r.tags});
+      currentCaso=casos.find(c=>c.id===currentCaso.id);
+      renderTagEditor(); renderPainelStatus();
+      showToast(r.msg||`Tag "${tag}" adicionada`);
+      // Atualiza cache global de tags
+      if(!allTags.includes(tag)) { allTags.push(tag); allTags.sort(); }
+    } else { showToast('Erro: '+(r.error||'falha')); }
+  }catch(e){ showToast('Erro de conexão.'); }
+  inp.disabled=false; inp.value='';
+  document.getElementById('tag-modal-dd').classList.remove('open');
+  inp.focus();
+}
+async function removeTagFromCaso(tag){
+  if(!currentCaso) return;
+  if(!confirm(`Remover a tag "${tag}" deste caso?`)) return;
+  try{
+    const r=await api('remove_tag',{caso_id:currentCaso.id,row:currentCaso.row,tag},'POST');
+    if(r.ok){
+      updateCasoLocal(currentCaso.id,{tags:r.tags});
+      currentCaso=casos.find(c=>c.id===currentCaso.id);
+      renderTagEditor(); renderPainelStatus();
+      showToast('Tag removida');
+    } else { showToast('Erro: '+(r.error||'falha')); }
+  }catch(e){ showToast('Erro de conexão.'); }
+}
+
+// Botões de ação do painel — varia se bloqueado
+function renderPainelActions(){
+  const c=currentCaso; if(!c) return;
+  const mact=document.getElementById('mact'); if(!mact) return;
+  const isBlocked=!!c.bloqueado;
+  const isAdmin=(typeof userRole!=='undefined' && userRole==='admin');
+  let html='';
+  if(isBlocked){
+    if(isAdmin){
+      html+=`<button class="btn bp" style="flex:1;justify-content:center;background:#fbbf24;color:#1f1f1f" onclick="confirmUnblockCaso()">🔓 Desbloquear caso</button>`;
+    } else {
+      html+=`<button class="btn bs" style="flex:1;justify-content:center" disabled title="Apenas administradores podem desbloquear">🔓 Desbloqueio (apenas admin)</button>`;
+    }
+  } else {
+    html+=`<button class="btn bp" style="flex:1;justify-content:center" onclick="document.getElementById('addform').style.display='block'">+ Registrar uso</button>`;
+    html+=`<button class="btn bd-r" style="padding:8px 12px;font-size:12px" onclick="confirmBlockCaso()" title="Bloquear este caso para uso">🔒 Bloquear</button>`;
+  }
+  html+=`<button class="btn bs" style="padding:8px 12px;font-size:12px" onclick="clearCaseCache('${c.id}')">🗑 Cache</button>`;
+  html+=`<button class="btn bs" onclick="closeModal()">Fechar</button>`;
+  mact.innerHTML=html;
+}
+async function confirmBlockCaso(){
+  if(!currentCaso) return;
+  const motivo=prompt(`Bloquear ${currentCaso.id}?\n\nDigite o MOTIVO do bloqueio (obrigatório, máx. 250 chars):\n\nExemplos: "Cliente solicitou retirar", "Erro de cadastro", "Imagem com problema"`,'');
+  if(motivo===null) return; // cancelou
+  const m=motivo.trim();
+  if(!m){ showToast('Motivo obrigatório.'); return; }
+  try{
+    const r=await api('set_block',{caso_id:currentCaso.id,row:currentCaso.row,motivo:m},'POST');
+    if(r.ok){
+      const patch=r.depois||{};
+      updateCasoLocal(currentCaso.id,{ufs:patch.ufs,cidades:patch.cidades,clientes:patch.clientes,tags:patch.tags,motivo_bloqueio:patch.motivo_bloqueio,bloqueado:patch.bloqueado});
+      currentCaso=casos.find(c=>c.id===currentCaso.id);
+      renderPainelStatus(); renderBlockBanner(); renderModalChips(); renderPainelActions();
+      showToast('Caso bloqueado.');
+      bgSyncCaso(currentCaso.id);
+    } else { showToast('Erro: '+(r.error||'falha')); }
+  }catch(e){ showToast('Erro de conexão.'); }
+}
+async function confirmUnblockCaso(){
+  if(!currentCaso) return;
+  if(!confirm(`Desbloquear ${currentCaso.id}?\n\nO marcador de bloqueio será removido e o caso voltará a ficar disponível.`)) return;
+  try{
+    const r=await api('unblock_case',{caso_id:currentCaso.id,row:currentCaso.row},'POST');
+    if(r.ok){
+      const patch=r.depois||{};
+      updateCasoLocal(currentCaso.id,{ufs:patch.ufs,cidades:patch.cidades,clientes:patch.clientes,tags:patch.tags,motivo_bloqueio:patch.motivo_bloqueio,bloqueado:patch.bloqueado});
+      currentCaso=casos.find(c=>c.id===currentCaso.id);
+      renderPainelStatus(); renderBlockBanner(); renderModalChips(); renderPainelActions();
+      showToast('Caso desbloqueado.');
+      bgSyncCaso(currentCaso.id);
+    } else { showToast('Erro: '+(r.error||'falha')); }
+  }catch(e){ showToast('Erro de conexão.'); }
+}
+
+// ── Lightbox flutuante (visualizador com ações) ───────────
+let _lfIdx=0;
+function openLightboxFlo(idx){
+  if(!currentPhotos||!currentPhotos.length) return;
+  _lfIdx=Math.max(0,Math.min(idx,currentPhotos.length-1));
+  renderLightboxFlo();
+  document.getElementById('lightbox-flo').classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function closeLightboxFlo(){
+  document.getElementById('lightbox-flo').classList.remove('open');
+  document.body.style.overflow='';
+}
+function lightboxFloNav(dir){
+  if(!currentPhotos||!currentPhotos.length) return;
+  _lfIdx=(_lfIdx+dir+currentPhotos.length)%currentPhotos.length;
+  renderLightboxFlo();
+}
+function renderLightboxFlo(){
+  const p=currentPhotos[_lfIdx]; if(!p) return;
+  const img=document.getElementById('lf-img');
+  const info=document.getElementById('lf-info');
+  // Para vídeos, mostra a thumb (não tenta tocar dentro do lightbox simples)
+  img.src=p.thumb_url||'';
+  img.alt=p.name||'';
+  const tag=p.version_tag?` · ${p.version_tag}`:'';
+  info.textContent=`${p.name||''} (${_lfIdx+1}/${currentPhotos.length})${tag}`;
+  document.getElementById('lf-prev').disabled=currentPhotos.length<=1;
+  document.getElementById('lf-next').disabled=currentPhotos.length<=1;
+}
+function lightboxFloCloud(){
+  const p=currentPhotos[_lfIdx]; if(!p) return;
+  if(p.webViewLink) window.open(p.webViewLink,'_blank');
+}
+function lightboxFloDownload(){
+  const p=currentPhotos[_lfIdx]; if(!p) return;
+  downloadSingleFile(p.id,p.name);
+}
+// Atalhos de teclado para o lightbox
+document.addEventListener('keydown',e=>{
+  const lf=document.getElementById('lightbox-flo');
+  if(!lf||!lf.classList.contains('open')) return;
+  if(e.key==='Escape'){ e.preventDefault(); closeLightboxFlo(); }
+  else if(e.key==='ArrowLeft'){ e.preventDefault(); lightboxFloNav(-1); }
+  else if(e.key==='ArrowRight'){ e.preventDefault(); lightboxFloNav(1); }
+});
+
+// Download de UM arquivo (proxy via download_photo)
+async function downloadSingleFile(fileId, filename, btn){
+  if(!fileId) return;
+  if(btn){ btn.disabled=true; btn.innerHTML='<span class="spin"></span>'; }
+  try{
+    // Constrói URL e dispara como link (passa pelo backend autenticado)
+    const url=`${API}?action=download_photo&file_id=${encodeURIComponent(fileId)}`;
+    const a=document.createElement('a');
+    a.href=url; a.download=filename||'arquivo';
+    a.style.display='none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast('Download iniciado...');
+  }catch(e){ showToast('Erro ao baixar.'); }
+  if(btn){ setTimeout(()=>{ btn.disabled=false; btn.innerHTML='⬇ Baixar'; }, 1500); }
+}
+
+// Renderiza chips separadas para profissional, estado e cidade.
+function renderModalChips(){
+  if(!currentCaso) return;
+  const c=currentCaso;
+  // Reset pending removals quando modal abre
+  pendingRemovals={ufs:[],cidades:[],clientes:[],_keys:new Set()};
+
+  // Chips com toggle de seleção para remoção em lote.
+  // Click = seleciona/deseleciona. Botão de remover selecionados aparece embaixo.
+
+  function chipClick(tipo, valor, idx, el){
+    toggleRemoval(tipo, valor, idx, el);
+  }
+
+  // Esconde os marcadores de bloqueio (NA/LINDA) dos chips de UF — quem desbloqueia
+  // é o botão dedicado "Desbloquear", não o X dos chips.
+  const ufChips=c.ufs.map((u,i)=>({u,i})).filter(o=>!isBlockMarker(o.u));
+  document.getElementById('mufs').innerHTML=ufChips.length
+    ?ufChips.map(({u,i})=>`<span class="chip uf rm" id="chip-uf-${i}" onclick="toggleRemoval('ufs','${esc(u)}',${i},this)" title="Clique para selecionar para remoção">${esc(u)} ×</span>`).join('')
+    :'<span style="font-size:12px;color:var(--tx3)">Nenhum</span>';
+
+  document.getElementById('mcities').innerHTML=c.cidades.length
+    ?c.cidades.map((x,i)=>`<span class="chip city rm" id="chip-cid-${i}" onclick="toggleRemoval('cidades','${esc(x)}',${i},this)" title="Clique para selecionar para remoção">${esc(cap(x))} ×</span>`).join('')
+    :'<span style="font-size:12px;color:var(--tx3)">Nenhuma</span>';
+
+  document.getElementById('mpers').innerHTML=c.clientes.length
+    ?c.clientes.map((p,i)=>`<span class="chip person rm" id="chip-cli-${i}" onclick="toggleRemoval('clientes','${esc(p).replace(/'/g,"\\'")}',${i},this)" title="Clique para selecionar para remoção">${esc(p)} ×</span>`).join('')
+    :'<span style="font-size:12px;color:var(--tx3)">Nenhum</span>';
+
+  // Botão para confirmar a remoção dos itens selecionados.
+  const sec=document.getElementById('remove-uso-section');
+  if(sec){
+    sec.style.display='block';
+    document.getElementById('remove-uso-list').innerHTML=
+      `<div style="font-size:12px;color:var(--tx2);margin-bottom:.5rem">Clique nos chips acima para selecionar itens a remover.</div>
+       <button id="batch-remove-btn" class="btn bd-r" style="display:none;font-size:12px" onclick="confirmBatchRemove()">✕ Remover selecionados</button>`;
+  }
+}
+
+// Remove um item individualmente (remoção unitária com loading)
+async function removeItem(tipo, valor, idx){
+  if(!currentCaso) return;
+  const tipoLabel={ufs:'estado',cidades:'cidade',clientes:'profissional'}[tipo]||tipo;
+  const labelValor=tipo==='cidades'?cap(valor):valor;
+  const tipoAPI={ufs:'uf',cidades:'cidade',clientes:'cliente'}[tipo]||tipo;
+
+  showConfirm(
+    `Remover ${tipoLabel}`,
+    `Remover <b>${esc(labelValor)}</b> de <b>${currentCaso.id}</b>?`,
+    [{label:'Caso',val:currentCaso.id},{label:tipoLabel.charAt(0).toUpperCase()+tipoLabel.slice(1),val:labelValor}],
+    async ()=>{
+      try{
+        const r=await api('remove_item',{caso_id:currentCaso.id,row:currentCaso.row,tipo:tipoAPI,valor,idx},'POST');
+        if(r.ok){ showToast(`${tipoLabel} removido!`); if(r.depois) updateCasoLocal(currentCaso.id,{ufs:r.depois.ufs,cidades:r.depois.cidades,clientes:r.depois.clientes}); currentCaso=casos.find(c=>c.id===currentCaso.id); if(currentCaso) renderModalChips(); bgSyncCaso(currentCaso?.id); }
+        else showToast('Erro: '+(r.error||'falha ao remover'));
+      }catch(e){ showToast('Erro de conexão.'); }
+    }
+  );
+}
+
+function closeModal(){ document.getElementById('ov').classList.remove('open'); currentCaso=null; }
+function ovClick(e){ if(e.target===document.getElementById('ov')) closeModal(); }
+function openLB(u){ document.getElementById('lbi').src=u; document.getElementById('lb').classList.add('open'); }
+
+// loadIBGE: o carregamento é assíncrono e não bloqueia o filtro principal.
+// Só aplica readOnly em inputs dentro de modais (add/bulk)
+let _ibgeLoading={};
+async function loadIBGE(uf,t){
+  if(_ibgeLoading[t]) return;
+  _ibgeLoading[t]=true;
+  // Mapeamento apenas para modais — fci (filtro principal) nunca recebe readOnly
+  const modalInputId={add:'aci',ba:'baci',bi:'bici'}[t];
+  const ciEl=modalInputId?document.getElementById(modalInputId):null;
+  if(ciEl){ ciEl.readOnly=true; ciEl.placeholder='Carregando cidades...'; }
+  try{
+    const r=await fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios?orderBy=nome`);
+    const d=await r.json();
+    const c=d.map(x=>x.nome.toUpperCase());
+    if(t==='filter') ibgeCities=c;
+    else if(t==='add') addCities=c;
+    else bulkCities[t]=c;
+  }catch(e){
+    if(t==='filter') ibgeCities=[];
+    else if(t==='add') addCities=[];
+    else bulkCities[t]=[];
+  } finally {
+    _ibgeLoading[t]=false;
+    if(ciEl){ ciEl.readOnly=false; ciEl.placeholder='Pesquise a cidade...'; }
+  }
+}
+async function onAddUF(){ const uf=document.getElementById('auf').value; const aci=document.getElementById('aci'); aci.value=''; aci.dataset.val=''; addCities=[]; aci.readOnly=true; document.getElementById('state-warn').style.display='none'; pendingForce=false; if(uf){ aci.placeholder='Carregando cidades...'; await loadIBGE(uf,'add'); aci.readOnly=false; aci.placeholder='Pesquise a cidade...'; } }
+function onAddCityInp(){ renderFormDD('acdd',addCities,document.getElementById('aci').value,c=>{ const e=document.getElementById('aci'); e.value=cap(c); e.dataset.val=c; document.getElementById('acdd').classList.remove('open'); }); }
+function openAddCityDD(){ if(!document.getElementById('aci').readOnly) onAddCityInp(); }
+async function onBulkUF(t){ const si=t==='ba'?'bauf':'biuf',ci=t==='ba'?'baci':'bici'; const uf=document.getElementById(si).value; const el=document.getElementById(ci); el.value=''; el.dataset.val=''; bulkCities[t]=[]; el.readOnly=true; if(uf){ el.placeholder='Carregando...'; await loadIBGE(uf,t); el.readOnly=false; el.placeholder='Pesquise a cidade...'; } }
+function onBulkCityInp(t){ const ci=t==='ba'?'baci':'bici',dd=t==='ba'?'bacdd':'bicdd'; renderFormDD(dd,bulkCities[t],document.getElementById(ci).value,c=>{ const e=document.getElementById(ci); e.value=cap(c); e.dataset.val=c; document.getElementById(dd).classList.remove('open'); }); }
+function openBulkCityDD(t){ const ci=t==='ba'?'baci':'bici'; if(!document.getElementById(ci).readOnly) onBulkCityInp(t); }
+function renderFormDD(id,list,q,onSelect){ const dd=document.getElementById(id); const fl=q?list.filter(c=>norm(c).includes(norm(q))):list; if(!fl.length){ dd.classList.remove('open'); return; } dd.innerHTML=''; fl.slice(0,50).forEach(c=>{ const div=document.createElement('div'); div.className='do'; div.textContent=cap(c); div.addEventListener('click',()=>onSelect(c)); dd.appendChild(div); }); dd.classList.add('open'); }
+
+// ── Autocomplete profissional ─────────────────────────────
+function buildProfAC(inp,ddId,sugId){ const q=document.getElementById(inp).value.trim(),qn=norm(q),sugEl=document.getElementById(sugId); if(!q){ document.getElementById(ddId).classList.remove('open'); sugEl.style.display='none'; return; } const starts=allProfs.filter(p=>norm(p).startsWith(qn)); renderFormDD(ddId,starts,'',c=>{ document.getElementById(inp).value=c; document.getElementById(ddId).classList.remove('open'); sugEl.style.display='none'; }); const sug=allProfs.find(p=>norm(p)!==qn&&lev(norm(p),qn)<=3); if(sug&&!starts.length){ sugEl.style.display='block'; sugEl.innerHTML=`Você quis dizer <b>${esc(sug)}</b>?<div class="sbtn"><button class="btn bp" style="padding:4px 12px;font-size:12px" onclick="document.getElementById('${inp}').value='${sug.replace(/'/g,"\\'")}';document.getElementById('${sugId}').style.display='none'">Sim</button><button class="btn bs" style="padding:4px 12px;font-size:12px" onclick="document.getElementById('${sugId}').style.display='none'">Manter</button></div>`; } else sugEl.style.display='none'; }
+function onAddProf(){ buildProfAC('apro','aprodd','prosug'); }
+function onBulkProf(t){ if(t==='ba') buildProfAC('bapro','baprodd','baprosug'); else buildProfAC('bipro','biprodd','biprosug'); }
+function lev(a,b){ const m=a.length,n=b.length,d=Array.from({length:m+1},(_,i)=>Array.from({length:n+1},(_,j)=>i?j?0:j:i)); for(let i=1;i<=m;i++) for(let j=1;j<=n;j++) d[i][j]=a[i-1]===b[j-1]?d[i-1][j-1]:1+Math.min(d[i-1][j],d[i][j-1],d[i-1][j-1]); return d[m][n]; }
+
+// ── Confirmação ───────────────────────────────────────────
+function prepareConfirm(type){
+  const getErr=t=>document.getElementById(t==='add'?'aerr':t==='bulk-grid'?'baerr':'bierr2');
+  const err=getErr(type); if(err) err.textContent='';
+  if(type==='add'){
+    const uf=document.getElementById('auf').value,city=document.getElementById('aci').dataset.val||'',prof=document.getElementById('apro').value.trim();
+    if(!uf){if(err)err.textContent='Selecione o estado.';return;}
+    if(!city){if(err)err.textContent='Selecione a cidade.';return;}
+    if(!prof){if(err)err.textContent='Informe o profissional.';return;}
+    showConfirm('Confirmar registro',`Registrar uso do <b>${currentCaso?.id}</b>?`,[{label:'Caso',val:currentCaso?.id||''},{label:'Estado',val:uf},{label:'Cidade',val:cap(city)},{label:'Profissional',val:prof}],()=>submitUso());
+  } else if(type==='bulk-grid'){
+    const uf=document.getElementById('bauf').value,city=document.getElementById('baci').dataset.val||'',prof=document.getElementById('bapro').value.trim();
+    if(!uf||!city||!prof){if(err)err.textContent='Preencha todos os campos.';return;}
+    showConfirm('Confirmar registro em massa',`Aplicar para <b>${selIds.size}</b> casos: ${[...selIds].join(', ')}`,[{label:'Estado',val:uf},{label:'Cidade',val:cap(city)},{label:'Profissional',val:prof}],()=>submitBulkApply());
+  } else if(type==='bulk-id'){
+    const uf=document.getElementById('biuf').value,city=document.getElementById('bici').dataset.val||'',prof=document.getElementById('bipro').value.trim();
+    if(!uf||!city||!prof){if(err)err.textContent='Preencha todos os campos.';return;}
+    if(!bulkSelIds.size){if(err)err.textContent='Nenhum caso selecionado.';return;}
+    showConfirm('Confirmar registro por ID',`Aplicar para <b>${bulkSelIds.size}</b> casos: ${[...bulkSelIds].join(', ')}`,[{label:'Estado',val:uf},{label:'Cidade',val:cap(city)},{label:'Profissional',val:prof}],()=>submitBulkById());
+  }
+}
+function prepareRemoveUso(idx){
+  if(!currentCaso) return;
+  showConfirm('Confirmar remoção',`Remover uso do <b>${currentCaso.id}</b>?`,
+    [{label:'Estado',val:currentCaso.ufs[idx]||''},{label:'Cidade',val:cap(currentCaso.cidades[idx]||'')},{label:'Profissional',val:currentCaso.clientes[idx]||''}],
+    ()=>removeUso(idx));
+}
+function showConfirm(title,desc,changes,onOk){ document.getElementById('confirm-title').textContent=title; document.getElementById('confirm-desc').innerHTML=desc; document.getElementById('confirm-changes').innerHTML=changes.map(c=>`<div class="confirm-row"><div class="confirm-label">${esc(c.label)}</div><div class="confirm-val">${esc(c.val)}</div></div>`).join(''); document.getElementById('confirm-ok-btn').onclick=()=>{ document.getElementById('confirm-modal').classList.remove('open'); onOk(); }; document.getElementById('confirm-modal').classList.add('open'); }
+
+// ── Submit ────────────────────────────────────────────────
+async function submitUso(force=false){
+  const uf=document.getElementById('auf').value,city=(document.getElementById('aci').dataset.val||'').toUpperCase(),prof=document.getElementById('apro').value.trim();
+  const err=document.getElementById('aerr'),btn=document.getElementById('abtn'),warnEl=document.getElementById('state-warn');
+  err.textContent=''; warnEl.style.display='none';
+  btn.innerHTML='<span class="spin"></span> Salvando...'; btn.disabled=true;
+  try{
+    const params={caso_id:currentCaso.id,row:currentCaso.row,uf,cidade:city,profissional:prof};
+    if(force||pendingForce) params.force='1';
+    const r=await api('add_uso',params,'POST');
+    if(r.ok){ showToast('Uso registrado com sucesso!'); pendingForce=false; const patch=r.depois||null; if(patch) updateCasoLocal(currentCaso.id,{ufs:patch.ufs,cidades:patch.cidades,clientes:patch.clientes}); currentCaso=casos.find(c=>c.id===currentCaso.id); if(currentCaso){ renderModalChips(); document.getElementById('addform').style.display='none'; } bgSyncCaso(currentCaso?.id); }
+    else if(r.warn){ warnEl.style.display='block'; warnEl.innerHTML=`⚠️ ${esc(r.msg)}<div style="display:flex;gap:8px;margin-top:.5rem"><button class="btn bp" style="padding:5px 12px;font-size:12px" onclick="pendingForce=true;document.getElementById('state-warn').style.display='none';submitUso(true)">Sim, continuar</button><button class="btn bs" style="padding:5px 12px;font-size:12px" onclick="document.getElementById('state-warn').style.display='none'">Cancelar</button></div>`; pendingForce=false; }
+    else err.textContent=r.error||'Erro.';
+  }catch(e){err.textContent='Erro de conexão.';}
+  btn.innerHTML='Registrar uso'; btn.disabled=false;
+}
+
+async function removeUso(idx){
+  try{ const r=await api('remove_uso',{caso_id:currentCaso.id,row:currentCaso.row,idx},'POST'); if(r.ok){ showToast('Uso removido!'); if(r.depois) updateCasoLocal(currentCaso.id,{ufs:r.depois.ufs,cidades:r.depois.cidades,clientes:r.depois.clientes}); currentCaso=casos.find(c=>c.id===currentCaso.id); if(currentCaso) renderModalChips(); bgSyncCaso(currentCaso?.id); } else showToast('Erro: '+(r.error||'')); }catch(e){ showToast('Erro.'); }
+}
+
+// ── Seleção ───────────────────────────────────────────────
+function toggleSelAll(){ const allIds=filtered.map(c=>c.id); const allSel=allIds.every(id=>selIds.has(id)); if(allSel){ allIds.forEach(id=>selIds.delete(id)); } else { allIds.forEach(id=>selIds.add(id)); selMode=true; } if(!selIds.size) selMode=false; updateBulkBar(); renderGrid(); document.getElementById('btn-selall').textContent=selIds.size>0?'☐ Desmarcar todos':'☑ Sel. todos'; }
+function toggleSel(){ selMode=!selMode; if(!selMode) clearSel(); else updateBulkBar(); renderGrid(); document.getElementById('btn-sel').textContent=selMode?'✕ Cancelar':'☑ Selecionar'; }
+function toggleCardSel(id,e){ e.stopPropagation(); if(selIds.has(id)) selIds.delete(id); else selIds.add(id); const c=document.getElementById('card-'+id); if(c){ c.classList.toggle('sel',selIds.has(id)); const s=c.querySelector('.csel'); if(s) s.textContent=selIds.has(id)?'✓':''; } updateBulkBar(); }
+function clearSel(){ selIds.clear(); selMode=false; updateBulkBar(); renderGrid(); document.getElementById('btn-sel').textContent='☑ Selecionar'; document.getElementById('btn-selall').textContent='☑ Sel. todos'; }
+
+// ── Download em lote (até 30 casos como ZIP) ──────────────
+async function downloadBulkZip(){
+  if(!selIds.size){ showToast('Selecione pelo menos 1 caso.'); return; }
+  if(selIds.size>30){ showToast(`Máximo 30 casos por download. Selecionados: ${selIds.size}.`); return; }
+  const ids=[...selIds].join(',');
+  const count=selIds.size;
+  showToast(`Gerando ZIP de ${count} caso(s)... pode demorar 30s+`);
+  try{
+    const resp=await fetch(`${API}?action=download_bulk`,{
+      method:'POST',
+      credentials:'same-origin',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:new URLSearchParams({ids}).toString()
+    });
+    const ct=resp.headers.get('Content-Type')||'';
+    if(!resp.ok || !ct.includes('zip')){
+      // Erro: backend devolveu JSON com mensagem
+      let msg='Falha ao gerar ZIP.';
+      try{ const j=await resp.json(); if(j.error) msg=j.error; }catch(e){}
+      showToast('Erro: '+msg); return;
+    }
+    const blob=await resp.blob();
+    const url=URL.createObjectURL(blob);
+    // Tenta extrair filename do Content-Disposition
+    const cd=resp.headers.get('Content-Disposition')||'';
+    const m=cd.match(/filename="?([^";]+)"?/);
+    const filename=m?m[1]:`casos_${count}.zip`;
+    const a=document.createElement('a');
+    a.href=url; a.download=filename; a.style.display='none';
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 1500);
+    showToast(`✅ ZIP com ${count} caso(s) baixado.`);
+  }catch(e){ showToast('Erro de conexão: '+e.message); }
+}
+function updateBulkBar(){ const n=selIds.size,bar=document.getElementById('bb'); if(n>0&&selMode){ bar.classList.add('show'); document.getElementById('bc').textContent=`${n} caso${n>1?'s':''} selecionado${n>1?'s':''}`; } else bar.classList.remove('show'); }
+
+function openBulkApply(){
+  if(!selIds.size) return;
+  document.getElementById('bai').textContent=`Aplicar para ${selIds.size} caso(s): ${[...selIds].join(', ')}`;
+  document.getElementById('baerrs').style.display='none'; document.getElementById('baerr').textContent='';
+  document.getElementById('bauf').innerHTML='<option value="">Selecione...</option>'; ESTADOS.forEach(e=>document.getElementById('bauf').appendChild(new Option(`${e.s} – ${e.n}`,e.s)));
+  const baci=document.getElementById('baci'); baci.value=''; baci.dataset.val=''; baci.readOnly=true;
+  document.getElementById('bapro').value=''; document.getElementById('baprosug').style.display='none';
+  document.getElementById('bav').classList.add('open');
+}
+async function submitBulkApply(){
+  const uf=document.getElementById('bauf').value;
+  const city=(document.getElementById('baci').dataset.val||'').toUpperCase();
+  const prof=document.getElementById('bapro').value.trim();
+
+  if(!uf||!city||!prof){
+    document.getElementById('baerr').textContent='Preencha todos os campos.'; return;
+  }
+  if(!selIds.size){ document.getElementById('baerr').textContent='Nenhum caso selecionado.'; return; }
+
+  const ids=[...selIds];
+  const total=ids.length;
+
+  // Substitui conteúdo do modal por tela de loading com progresso
+  const modal=document.querySelector('#bav .modal');
+  const savedHTML=modal.innerHTML;
+  modal.innerHTML=`<div style="padding:3rem 2rem;text-align:center">
+    <div style="margin-bottom:1.25rem"><span class="spin" style="width:32px;height:32px;border-width:3px"></span></div>
+    <div style="font-size:15px;font-weight:600;margin-bottom:.5rem">Registrando usos...</div>
+    <div style="font-size:13px;color:var(--tx2);margin-bottom:.5rem" id="ba-progress">0 de ${total} processados</div>
+    <div style="width:100%;max-width:240px;margin:0 auto;height:4px;background:var(--bd);border-radius:2px;overflow:hidden">
+      <div id="ba-bar" style="height:100%;background:var(--accent);width:0%;transition:width .2s;border-radius:2px"></div>
+    </div>
+  </div>`;
+
+  const errors=[];
+  let done=0;
+  for(const id of ids){
+    const caso=casos.find(c=>c.id===id);
+    if(!caso){ errors.push(`${id}: não encontrado na planilha`); done++; }
+    else {
+      try{
+        const r=await api('add_uso',{caso_id:id,row:caso.row,uf,cidade:city,profissional:prof,force:'1'},'POST');
+        if(!r.ok&&!r.warn) errors.push(`${id}: ${r.error||'erro desconhecido'}`);
+      }catch(e){ errors.push(`${id}: falha de conexão`); }
+      done++;
+    }
+    // Atualiza progresso
+    const prog=document.getElementById('ba-progress');
+    const bar=document.getElementById('ba-bar');
+    if(prog) prog.textContent=`${done} de ${total} processados`;
+    if(bar) bar.style.width=`${Math.round(done/total*100)}%`;
+  }
+
+  await loadCasos(true);
+  const ok=total-errors.length;
+
+  if(errors.length){
+    // Tela de falha parcial — mostra erros com motivo
+    modal.innerHTML=`<div style="padding:2rem 1.5rem">
+      <div style="font-size:2rem;text-align:center;margin-bottom:.75rem">${ok>0?'⚠️':'❌'}</div>
+      <div style="font-size:15px;font-weight:700;text-align:center;margin-bottom:1rem;color:${ok>0?'var(--atx)':'var(--rtx)'}">
+        ${ok>0?`${ok} registrados, ${errors.length} com erro`:'Falha ao registrar'}
+      </div>
+      ${ok>0?`<div style="font-size:12px;color:var(--tx2);text-align:center;margin-bottom:.75rem">Estado: <b>${esc(uf)}</b> · Cidade: <b>${esc(cap(city))}</b> · Profissional: <b>${esc(prof)}</b></div>`:''}
+      <div style="background:var(--rbg);border:1px solid var(--rtx);border-radius:var(--rs);padding:.75rem;font-size:12px;color:var(--rtx);max-height:180px;overflow-y:auto;margin-bottom:1rem">
+        <div style="font-weight:700;margin-bottom:.4rem">Erros (${errors.length}):</div>
+        ${errors.map(e=>`<div style="padding:2px 0">• ${esc(e)}</div>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;justify-content:center">
+        <button class="btn bp" onclick="document.getElementById('bav').classList.remove('open');clearSel()">Fechar</button>
+        <button class="btn bs" onclick="document.getElementById('bav').classList.remove('open')">Manter seleção</button>
+      </div>
+    </div>`;
+  } else {
+    // Tela de sucesso
+    modal.innerHTML=`<div style="padding:3rem 2rem;text-align:center">
+      <div style="font-size:2.5rem;margin-bottom:.75rem">✅</div>
+      <div style="font-size:16px;font-weight:700;color:var(--gtx);margin-bottom:.75rem">${ok} caso(s) registrados com sucesso!</div>
+      <div style="font-size:13px;color:var(--tx2);margin-bottom:.25rem">Estado: <b>${esc(uf)}</b></div>
+      <div style="font-size:13px;color:var(--tx2);margin-bottom:.25rem">Cidade: <b>${esc(cap(city))}</b></div>
+      <div style="font-size:13px;color:var(--tx2);margin-bottom:1.25rem">Profissional: <b>${esc(prof)}</b></div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin-bottom:1.5rem;max-height:120px;overflow-y:auto">
+        ${ids.map(id=>`<span style="padding:2px 8px;background:var(--gbg);color:var(--gtx);border-radius:10px;font-size:11px">${esc(id)}</span>`).join('')}
+      </div>
+      <button class="btn bp" onclick="document.getElementById('bav').classList.remove('open');clearSel()" style="margin:0 auto">Concluir</button>
+    </div>`;
+    bulkSelIds=new Set();
+  }
+}
+
+function openBulkModal(){
+  document.getElementById('biinp').value=''; document.getElementById('bierr').textContent='';
+  document.getElementById('bigrid').innerHTML=''; document.getElementById('biform').style.display='none';
+  document.getElementById('biuf').innerHTML='<option value="">Selecione...</option>'; ESTADOS.forEach(e=>document.getElementById('biuf').appendChild(new Option(`${e.s} – ${e.n}`,e.s)));
+  const bici=document.getElementById('bici'); bici.value=''; bici.dataset.val=''; bici.readOnly=true;
+  document.getElementById('bipro').value=''; document.getElementById('biprosug').style.display='none';
+  document.getElementById('bierrs').style.display='none'; bulkSelIds=new Set();
+  document.getElementById('biv').classList.add('open');
+}
+function parseBulkIds(){
+  const raw=document.getElementById('biinp').value,err=document.getElementById('bierr'); err.textContent='';
+  const nums=raw.split(/[\s,;]+/).map(s=>s.trim()).filter(Boolean);
+  if(!nums.length){err.textContent='Digite ao menos um ID.';return;}
+  const grid=document.getElementById('bigrid'); grid.innerHTML=''; bulkSelIds=new Set(); let found=0;
+  nums.forEach(n=>{ const clean=n.replace(/^CASO-?/i,'').replace(/\D/g,''); if(!clean) return; const fid=`CASO-${clean}`,ex=casos.some(c=>c.id===fid); if(ex) bulkSelIds.add(fid); const wrap=document.createElement('div'); wrap.className='icw'; const chip=document.createElement('div'); chip.className=`ic ${ex?'sel':'inv'}`; chip.textContent=fid;
+
+    // Popup ancorado na posição do cursor (position: fixed).
+    const pop=document.createElement('div'); pop.className='icpop';
+    if(ex){
+      if(thumbCache[fid]?.url) pop.innerHTML=`<img src="${thumbCache[fid].url}">`;
+      chip.addEventListener('mouseenter',async(evt)=>{
+        if(!thumbCache[fid]?.url){
+          try{ const r=await api(`photos&id=${encodeURIComponent(fid)}`); const p=r.photos?.find(x=>x.thumb_url); if(p){ thumbCache[fid]={url:p.thumb_url,isVideo:p.isVideo}; pop.innerHTML=`<img src="${p.thumb_url}">`; } }catch(e){}
+        } else { pop.innerHTML=`<img src="${thumbCache[fid].url}">`; }
+        // Posição fixa acima do cursor
+        const rect=chip.getBoundingClientRect();
+        pop.style.left=(rect.left+rect.width/2-60)+'px';
+        pop.style.top=(rect.top-130)+'px';
+        pop.classList.add('show');
+      });
+      chip.addEventListener('mouseleave',()=>pop.classList.remove('show'));
+      chip.addEventListener('click',()=>{ if(bulkSelIds.has(fid)){bulkSelIds.delete(fid);chip.classList.remove('sel');chip.classList.add('inv');}else{bulkSelIds.add(fid);chip.classList.add('sel');chip.classList.remove('inv');} const cnt=[...bulkSelIds].length; document.getElementById('biform').style.display=cnt>0?'block':'none'; document.getElementById('biform-t').textContent=`Aplicar para ${cnt} caso(s)`; });
+      found++;
+    }
+    wrap.appendChild(chip); document.body.appendChild(pop); // append to body for correct z-index
+    wrap.addEventListener('mouseleave',()=>pop.classList.remove('show'));
+    grid.appendChild(wrap);
+  });
+  if(!found){err.textContent='Nenhum ID encontrado.';document.getElementById('biform').style.display='none';return;}
+  document.getElementById('biform').style.display='block'; document.getElementById('biform-t').textContent=`Aplicar para ${found} caso(s)`;
+}
+async function submitBulkById(){
+  const uf=document.getElementById('biuf').value;
+  const city=(document.getElementById('bici').dataset.val||'').toUpperCase();
+  const prof=document.getElementById('bipro').value.trim();
+  const errsEl=document.getElementById('bierrs'),btn=document.getElementById('bibtn');
+  errsEl.style.display='none';
+
+  if(!bulkSelIds.size){ document.getElementById('bierr2').textContent='Nenhum caso selecionado.'; return; }
+
+  const ids=[...bulkSelIds];
+  const total=ids.length;
+
+  // Loading dentro do modal
+  const modal=document.querySelector('#biv .modal');
+  const savedHTML=modal.innerHTML;
+  modal.innerHTML=`<div style="padding:3rem 2rem;text-align:center">
+    <div style="margin-bottom:1.25rem"><span class="spin" style="width:32px;height:32px;border-width:3px"></span></div>
+    <div style="font-size:15px;font-weight:600;margin-bottom:.5rem">Registrando usos...</div>
+    <div style="font-size:13px;color:var(--tx2)" id="bi-progress">0 de ${total} processados</div>
+  </div>`;
+
+  const errors=[];
+  let done=0;
+  for(const id of ids){
+    const caso=casos.find(c=>c.id===id);
+    if(!caso){ errors.push(`${id}: não encontrado`); done++; continue; }
+    try{
+      const r=await api('add_uso',{caso_id:id,row:caso.row,uf,cidade:city,profissional:prof,force:'1'},'POST');
+      if(!r.ok&&!r.warn) errors.push(`${id}: ${r.error||'erro'}`);
+    }catch(e){ errors.push(`${id}: conexão`); }
+    done++;
+    const prog=document.getElementById('bi-progress');
+    if(prog) prog.textContent=`${done} de ${total} processados`;
+  }
+  await loadCasos(true);
+
+  const ok=total-errors.length;
+  if(errors.length){
+    // Mostra erros mas também o que funcionou
+    modal.innerHTML=`<div style="padding:2rem 1.5rem">
+      <div style="font-size:1.75rem;text-align:center;margin-bottom:.75rem">${ok>0?'⚠️':'❌'}</div>
+      <div style="font-size:15px;font-weight:700;text-align:center;margin-bottom:1rem;color:var(--rtx)">${ok>0?`${ok} registrados, ${errors.length} com erro`:'Falha no registro'}</div>
+      <div style="background:var(--rbg);border-radius:var(--rs);padding:.75rem;font-size:12px;color:var(--rtx);max-height:150px;overflow-y:auto;margin-bottom:1rem">
+        ${errors.map(e=>`<div>• ${esc(e)}</div>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;justify-content:center">
+        <button class="btn bp" onclick="document.getElementById('biv').classList.remove('open')">Fechar</button>
+      </div>
+    </div>`;
+  } else {
+    // Tela de sucesso
+    modal.innerHTML=`<div style="padding:3rem 2rem;text-align:center">
+      <div style="font-size:2.5rem;margin-bottom:.75rem">✅</div>
+      <div style="font-size:16px;font-weight:700;color:var(--gtx);margin-bottom:.5rem">${ok} caso(s) registrados com sucesso!</div>
+      <div style="font-size:13px;color:var(--tx2);margin-bottom:.35rem">Estado: <b>${esc(uf)}</b></div>
+      <div style="font-size:13px;color:var(--tx2);margin-bottom:.35rem">Cidade: <b>${esc(cap(city))}</b></div>
+      <div style="font-size:13px;color:var(--tx2);margin-bottom:1.5rem">Profissional: <b>${esc(prof)}</b></div>
+      <div style="font-size:12px;color:var(--tx3);margin-bottom:1.5rem">${ids.map(id=>`<span style="display:inline-block;padding:2px 8px;background:var(--gbg);color:var(--gtx);border-radius:10px;font-size:11px;margin:2px">${esc(id)}</span>`).join('')}</div>
+      <button class="btn bp" onclick="document.getElementById('biv').classList.remove('open')" style="margin:0 auto">Concluir</button>
+    </div>`;
+    bulkSelIds=new Set();
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────
+async function api(action,data={},method='GET'){
+  const resp=await fetch(`${API}?action=${action}`,{method,credentials:'same-origin',headers:method==='POST'?{'Content-Type':'application/x-www-form-urlencoded'}:{},body:method==='POST'?new URLSearchParams(data).toString():undefined});
+  if(resp.status===401){ const d=await resp.json().catch(()=>{}); if(d?.expired||d?.error?.includes('expirada')){ alert('Sessão expirada.'); location.reload(); } throw new Error(d?.error||'Não autenticado'); }
+  return resp.json();
+}
+function showToast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),3000); }
+
+// Alterna a visibilidade do campo de senha.
+function togglePwd(){
+  const inp=document.getElementById('lp'), btn=document.getElementById('lpbtn');
+  const show=inp.type==='password';
+  inp.type=show?'text':'password';
+  btn.textContent=show?'🙈':'👁';
+}
+
+// Pré-carrega thumbnails da próxima página em segundo plano.
+// Marcador especial para falhas temporárias — permite retry quando o usuário chega na página
+function preloadNextPage(){
+  const total=Math.ceil(filtered.length/PER);
+  if(page>=total) return;
+  const nextSlice=filtered.slice(page*PER,(page+1)*PER);
+  const toPreload=nextSlice.filter(c=>thumbCache[c.id]===undefined);
+  if(!toPreload.length) return;
+
+  const myBaseGen=_baseGeneration;
+  const run=async()=>{
+    for(let i=0;i<toPreload.length;i+=2){
+      if(myBaseGen!==_baseGeneration) return;
+      const batch=toPreload.slice(i,i+2);
+      await Promise.all(batch.map(async c=>{
+        if(thumbCache[c.id]!==undefined||myBaseGen!==_baseGeneration) return;
+        try{
+          const r=await api(`photos&id=${encodeURIComponent(c.id)}`);
+          if(myBaseGen!==_baseGeneration) return;
+          if(!r.ok||!r.photos?.length){ thumbCache[c.id]=THUMB_RETRY; return; }
+          const allVideo=r.photos.every(p=>p.isVideo);
+          const sorted=[...r.photos].sort((a,b)=>(b.isWebp?1:0)-(a.isWebp?1:0));
+          const best=sorted.find(p=>!p.isVideo&&p.thumb_url)||sorted.find(p=>p.thumb_url);
+          if(!best){ thumbCache[c.id]=allVideo?{url:null,isVideo:true,versions:null}:THUMB_RETRY; return; }
+          const versioned=r.photos.filter(p=>!p.isVideo&&p.version&&p.thumb_url);
+          let versions=null;
+          if(versioned.length>1){ const vMap={}; versioned.forEach(p=>{ if(!vMap[p.version]) vMap[p.version]=p; }); versions=Object.entries(vMap).sort((a,b)=>a[0].localeCompare(b[0])).map(([ver,p])=>({ver,url:p.thumb_url})); }
+          thumbCache[c.id]={url:best.thumb_url,isVideo:allVideo,versions:versions&&versions.length>1?versions:null};
+        }catch(e){}
+      }));
+      if(i+2<toPreload.length) await new Promise(res=>setTimeout(res,300));
+    }
+  };
+
+  setTimeout(()=>run(), 2000);
+}
+
+// lazyLoadThumbs também deve tratar THUMB_RETRY como undefined (tenta novamente)
+
+// Cancela requests pendentes quando o usuário muda de página.
+// AbortController por "geração" de página — ao mudar de página, aborta a anterior
+let _pageGeneration = 0;
+
+// Wrap do semáforo para respeitar geração
+function makeSemaphore(gen, baseGen){
+  return {
+    count:0, queue:[],
+    acquire(){ return new Promise(r=>{ if(this.count<MAX_CONCURRENT){this.count++;r();}else this.queue.push(r); }); },
+    release(){ if(this.queue.length){this.queue.shift()();}else this.count--; },
+    stale(){ return gen!==_pageGeneration || baseGen!==_baseGeneration; }
+  };
+}
+
+// Mede o tempo real da requisição cache_status (evita zerar a métrica).
+// primeThumbCacheFromServer mede seu próprio tempo e o propaga
+async function primeThumbCacheFromServer(slice, myBaseGen){
+  const unknownIds=slice.filter(c=>thumbCache[c.id]===undefined).map(c=>c.id);
+  if(!unknownIds.length) return;
+  const t0=performance.now();
+  try{
+    const r=await fetch(`api/handler.php?action=cache_status&ids=${encodeURIComponent(unknownIds.join(','))}`,{credentials:'same-origin'});
+    const d=await r.json();
+    if(myBaseGen!==_baseGeneration) return;
+    const ms=Math.round(performance.now()-t0);
+    if(!d.ok) return;
+    for(const [id, thumbUrl] of Object.entries(d.cache)){
+      if(thumbCache[id]===undefined && thumbUrl){
+        thumbCache[id]={url:thumbUrl, isVideo:false, versions:null, src:'cache', ms, preloaded:true};
+        const el=document.getElementById('ct-'+id);
+        if(el) renderThumbEl(el, id, thumbCache[id]);
+        if(adminModeVisible) showThumbMeta(id, ms, 'cache');
+      }
+    }
+  }catch(e){}
+}
+
+// lazyLoadThumbs com suporte a cancelamento por geração (geração crescente).
+async function lazyLoadThumbs(slice){
+  const myGen=_pageGeneration;
+  const myBaseGen=_baseGeneration;
+  const stale=()=>myGen!==_pageGeneration||myBaseGen!==_baseGeneration;
+  await primeThumbCacheFromServer(slice, myBaseGen);
+  if(stale()) return;
+
+  slice.filter(c=>{ const tc=thumbCache[c.id]; return tc&&tc!=='loading'&&tc!==THUMB_RETRY; }).forEach(c=>{
+    if(stale()) return;
+    const el=document.getElementById('ct-'+c.id);
+    if(!el||el.querySelector('img,canvas,.carousel')) return;
+    renderThumbEl(el, c.id, thumbCache[c.id]);
+    if(adminModeVisible) showThumbMeta(c.id, thumbCache[c.id].ms||0, thumbCache[c.id].src||'cache');
+  });
+
+  const toLoad=slice.filter(c=>thumbCache[c.id]===undefined||thumbCache[c.id]===THUMB_RETRY);
+  if(!toLoad.length){ updatePageTimer(); return; }
+  toLoad.forEach(c=>thumbCache[c.id]='loading');
+
+  const sorted=[
+    ...toLoad.filter(c=>_highPriorityIds.has(c.id)),
+    ...toLoad.filter(c=>!_highPriorityIds.has(c.id)),
+  ];
+
+  const sem=makeSemaphore(myGen, myBaseGen);
+
+  await Promise.all(sorted.map(async c=>{
+    await sem.acquire();
+    if(sem.stale()){ thumbCache[c.id]=undefined; sem.release(); return; }
+    try{
+      const {r,ms}=await fetchThumb(c.id);
+      if(sem.stale()){ thumbCache[c.id]=undefined; return; }
+      const el=document.getElementById('ct-'+c.id);
+      if(!r.ok||!r.photos?.length){ thumbCache[c.id]=null; if(el) el.innerHTML='<div class="ct-error"><div class="sad">😔</div><span>sem foto</span></div>'; return; }
+      const allVideo=r.photos.every(p=>p.isVideo);
+      const sorted2=[...r.photos].sort((a,b)=>(b.isWebp?1:0)-(a.isWebp?1:0));
+      const best=sorted2.find(p=>!p.isVideo&&p.thumb_url)||sorted2.find(p=>p.thumb_url);
+      if(!best){
+        if(allVideo){ thumbCache[c.id]={url:null,isVideo:true,versions:null,src:'drive',ms}; if(el) el.innerHTML='<div class="ct-error"><div style="font-size:22px">▶</div><span>Vídeo</span></div>'; }
+        else { thumbCache[c.id]=null; if(el) el.innerHTML='<div class="ct-error"><div class="sad">😔</div><span>sem foto</span></div>'; }
+        return;
+      }
+      const versioned=r.photos.filter(p=>!p.isVideo&&p.version&&p.thumb_url);
+      let versions=null;
+      if(versioned.length>1){ const vMap={}; versioned.forEach(p=>{ if(!vMap[p.version]) vMap[p.version]=p; }); versions=Object.entries(vMap).sort((a,b)=>a[0].localeCompare(b[0])).map(([ver,p])=>({ver,url:p.thumb_url})); }
+      const src=r.source||(best.thumb_url?.startsWith('/thumbs/')?'cache':'drive');
+      thumbCache[c.id]={url:best.thumb_url,isVideo:allVideo,versions:versions&&versions.length>1?versions:null,src,ms,preloaded:false};
+      if(el){ renderThumbEl(el,c.id,thumbCache[c.id]); if(adminModeVisible) showThumbMeta(c.id,ms,src); }
+      _highPriorityIds.delete(c.id);
+    }catch(e){
+      thumbCache[c.id]=THUMB_RETRY;
+      const el=document.getElementById('ct-'+c.id);
+      if(el) el.innerHTML='<div class="ct-error"><div class="sad">😔</div><span>retry</span></div>';
+    } finally { sem.release(); }
+  }));
+  if(!stale()) updatePageTimer();
+}
+
+// FAB flutuante exibido no canto inferior direito da viewport.
+// Substitui o painel flutuante fixo que ficava sobrepondo itens
+function initFAB(){
+  if(document.getElementById('metrics-fab')) return; // já iniciado
+  const fab=document.createElement('button');
+  fab.id='metrics-fab';
+  fab.setAttribute('aria-label','Admin Mode');
+  fab.style.cssText='position:fixed;bottom:1.5rem;right:1.5rem;width:48px;height:48px;border-radius:50%;background:var(--accent);color:#fff;border:none;display:none;align-items:center;justify-content:center;cursor:pointer;box-shadow:var(--shadow-lg);z-index:400;font-size:20px;transition:transform .2s,box-shadow .2s';
+  fab.title='Admin Mode';
+  fab.textContent='⚡';
+  fab.onclick=()=>{
+    const menu=document.getElementById('fab-menu');
+    if(menu) menu.style.display=menu.style.display==='flex'?'none':'flex';
+  };
+  fab.onmouseenter=()=>{ fab.style.transform='scale(1.1)'; fab.style.boxShadow='0 8px 24px rgba(37,99,235,.5)'; };
+  fab.onmouseleave=()=>{ fab.style.transform=''; fab.style.boxShadow=''; };
+
+  const menu=document.createElement('div');
+  menu.id='fab-menu';
+  menu.style.cssText='position:fixed;bottom:5.5rem;right:1.5rem;background:var(--sf);border:1px solid var(--bds);border-radius:var(--r);padding:.5rem;display:none;flex-direction:column;gap:3px;z-index:401;box-shadow:var(--shadow-md);min-width:190px';
+  menu.innerHTML=`
+    <div style="font-size:10px;color:var(--tx3);padding:3px 8px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Métricas</div>
+    <button class="btn bs" style="justify-content:flex-start;font-size:12px;padding:6px 10px" id="fab-metrics-btn" onclick="toggleGodModeVisual()">👁 Ativar métricas visuais</button>
+    <div style="border-top:1px solid var(--bd);margin:3px 0"></div>
+    <div style="font-size:10px;color:var(--tx3);padding:3px 8px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Tema</div>
+    <button id="theme-auto"  class="btn bs" style="justify-content:flex-start;font-size:12px;padding:6px 10px" onclick="setTheme('auto')">🖥 Auto (sistema)</button>
+    <button id="theme-light" class="btn bs" style="justify-content:flex-start;font-size:12px;padding:6px 10px" onclick="setTheme('light')">☀️ Claro</button>
+    <button id="theme-dark"  class="btn bs" style="justify-content:flex-start;font-size:12px;padding:6px 10px" onclick="setTheme('dark')">🌙 Escuro</button>
+  `;
+  document.body.appendChild(fab);
+  document.body.appendChild(menu);
+
+  // Fecha ao clicar fora
+  document.addEventListener('click',e=>{
+    if(!e.target.closest('#metrics-fab')&&!e.target.closest('#fab-menu')) menu.style.display='none';
+  });
+
+  // Marca tema ativo
+  updateThemeButtons();
+}
+
+// tema aplicado antes do DOM via IIFE acima
+
+function updateThemeButtons(){
+  const saved=localStorage.getItem('bi_theme')||'auto';
+  // Atualiza no FAB
+  ['auto','light','dark'].forEach(t=>{
+    const b=document.getElementById('theme-'+t);
+    if(b){
+      const active=t===saved;
+      b.style.fontWeight=active?'700':'';
+      b.style.background=active?'var(--accent)':'';
+      b.style.color=active?'#fff':'';
+      b.style.borderRadius=active?'var(--rs)':'';
+    }
+  });
+}
+
+function setTheme(theme){
+  if(theme==='auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('bi_theme', theme);
+  updateThemeButtons();
+  const menu=document.getElementById('fab-menu');
+  if(menu) menu.style.display='none';
+}
+
+// Aplica tema salvo ao carregar (antes do DOMContentLoaded para evitar flash)
+(function(){
+  const saved=localStorage.getItem('bi_theme')||'auto';
+  if(saved!=='auto') document.documentElement.setAttribute('data-theme', saved);
+})();
+</script>
+</body>
+</html>
