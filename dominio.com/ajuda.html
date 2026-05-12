@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ajuda — Banco de Imagens</title>
+<style>
+:root{
+  --bg:#f0f0ee;--sf:#ffffff;--bd:rgba(0,0,0,.08);--bds:rgba(0,0,0,.16);
+  --tx:#111110;--tx2:#52524e;--tx3:#8a8a84;
+  --accent:#2563eb;--accent2:#f59e0b;
+  --r:12px;--rs:8px;
+  --shadow-sm:0 1px 3px rgba(0,0,0,.08);
+  --shadow-md:0 4px 12px rgba(0,0,0,.1);
+}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){
+  --bg:#0f0f11;--sf:#1a1a1d;--bd:rgba(255,255,255,.1);--bds:rgba(255,255,255,.22);
+  --tx:#f0f0ec;--tx2:#b8b8b2;--tx3:#787872;--accent:#3b82f6;
+}}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--tx);font-size:15px;line-height:1.65}
+.shell{max-width:880px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
+.topbar{background:var(--sf);border-bottom:1px solid var(--bd);padding:14px 24px;display:flex;align-items:center;gap:14px;box-shadow:var(--shadow-sm);position:sticky;top:0;z-index:50}
+.topbar h1{font-size:16px;font-weight:700;flex:1}
+.btn{padding:7px 14px;border-radius:var(--rs);font-size:13px;font-weight:500;cursor:pointer;border:0.5px solid var(--bds);background:transparent;color:var(--tx2);text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:var(--bd)}
+.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn-primary:hover{opacity:.9;background:var(--accent)}
+.hero{background:linear-gradient(135deg,var(--accent),#7c3aed);color:#fff;padding:2rem 2rem 2.25rem;border-radius:var(--r);margin:1.5rem 0 2rem;box-shadow:var(--shadow-md)}
+.hero h2{font-size:28px;font-weight:700;line-height:1.2;margin-bottom:.5rem}
+.hero p{font-size:15px;opacity:.95}
+.test-banner{background:#fff7ed;border:1px solid var(--accent2);color:#92400e;padding:.85rem 1rem;border-radius:var(--rs);margin-bottom:1.5rem;font-size:14px;display:flex;gap:10px;align-items:center}
+.toc{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.25rem 1.5rem;margin-bottom:2rem;box-shadow:var(--shadow-sm)}
+.toc h3{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--tx3);margin-bottom:.75rem;font-weight:700}
+.toc ol{padding-left:1.25rem;color:var(--tx2)}
+.toc ol li{margin-bottom:.3rem}
+.toc a{color:var(--accent);text-decoration:none}
+.toc a:hover{text-decoration:underline}
+section{background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.5rem 1.75rem;margin-bottom:1.25rem;box-shadow:var(--shadow-sm);scroll-margin-top:80px}
+section h3{font-size:18px;font-weight:700;margin-bottom:1rem;display:flex;align-items:center;gap:8px}
+section h4{font-size:14px;font-weight:600;margin:1.1rem 0 .4rem;color:var(--tx)}
+section p{margin-bottom:.75rem;color:var(--tx2)}
+section ul,section ol{margin:.5rem 0 .85rem 1.5rem;color:var(--tx2)}
+section li{margin-bottom:.35rem}
+section .tip{background:#eff6ff;border-left:3px solid var(--accent);padding:.6rem .85rem;border-radius:var(--rs);font-size:13px;color:#1e40af;margin:.75rem 0}
+section .warn{background:#fef3c7;border-left:3px solid var(--accent2);padding:.6rem .85rem;border-radius:var(--rs);font-size:13px;color:#92400e;margin:.75rem 0}
+kbd{background:var(--bd);border:1px solid var(--bds);border-radius:4px;padding:2px 7px;font-size:12px;font-family:monospace}
+.placeholder-img{background:linear-gradient(135deg,#e5e7eb 0%,#f3f4f6 100%);border:2px dashed #cbd5e1;border-radius:var(--rs);padding:2.5rem 1rem;text-align:center;color:#64748b;font-size:13px;margin:.85rem 0;font-style:italic}
+@media(prefers-color-scheme:dark){
+  .placeholder-img{background:#1f2937;border-color:#374151;color:#9ca3af}
+  .test-banner{background:#451a03;color:#fcd34d}
+  section .tip{background:#172554;color:#bfdbfe}
+  section .warn{background:#451a03;color:#fcd34d}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <h1>📚 Ajuda &amp; Tutoriais — Banco de Imagens</h1>
+  <a href="index.html" class="btn">← Voltar ao app</a>
+</header>
+
+<div class="shell">
+
+  <div class="hero">
+    <h2>Bem-vindo(a)!</h2>
+    <p>Este guia ensina passo a passo como usar o Banco de Imagens. Leve o tempo que precisar — está tudo aqui para você consultar quando quiser.</p>
+  </div>
+
+  <div class="test-banner">
+    🧪 <span><b>Você está em modo teste?</b> Excelente! Tudo o que você fizer aqui é sandbox — não afeta os dados reais. Pode clicar, errar, refazer. Quando o admin promover o seu acesso, você ganhará acesso às bases de produção.</span>
+  </div>
+
+  <nav class="toc">
+    <h3>Sumário</h3>
+    <ol>
+      <li><a href="#oque-e">O que é o Banco de Imagens</a></li>
+      <li><a href="#login">Como entrar (login)</a></li>
+      <li><a href="#bases">As bases de dados (TESTE, PH, PO)</a></li>
+      <li><a href="#filtros">Filtros: Estado, Cidade, Profissional, Exibir</a></li>
+      <li><a href="#registrar-uso">Registrar uso de um caso</a></li>
+      <li><a href="#remover-uso">Remover um uso</a></li>
+      <li><a href="#bulk">Registro em massa</a></li>
+      <li><a href="#fotos">Visualizar fotos do caso</a></li>
+      <li><a href="#historico">Histórico de alterações</a></li>
+      <li><a href="#promocao">Quando vou ser promovido para produção?</a></li>
+      <li><a href="#duvidas">Tirando dúvidas — quem chamar</a></li>
+    </ol>
+  </nav>
+
+  <section id="oque-e">
+    <h3>1 · O que é o Banco de Imagens</h3>
+    <p>É a ferramenta que organiza todos os <b>casos</b> (CASO-001, CASO-244, etc.) e mostra em quais <b>estados</b>, <b>cidades</b> e por quais <b>profissionais</b> cada caso já foi usado. Serve para evitar que dois profissionais usem a mesma imagem na mesma cidade.</p>
+    <p>Cada caso tem um conjunto de fotos (puxadas direto do Google Drive) e uma planilha que registra o histórico de uso.</p>
+    <div class="placeholder-img">[Print da tela principal — substitua aqui pela imagem do app]</div>
+  </section>
+
+  <section id="login">
+    <h3>2 · Como entrar (login)</h3>
+    <p>Use o usuário e senha que o administrador te enviou. Se errar a senha 5 vezes seguidas, o IP fica bloqueado por 15 minutos por segurança.</p>
+    <div class="tip">💡 Esqueceu a senha? Peça ao administrador para gerar uma nova — ele faz isso pelo painel <b>Admin Mode → Alterar senha</b>.</div>
+  </section>
+
+  <section id="bases">
+    <h3>3 · As bases de dados</h3>
+    <p>Existem <b>3 bases</b> separadas no sistema, cada uma com sua própria planilha e pasta no Drive:</p>
+    <ul>
+      <li><b>🧪 Base Teste</b> — sandbox para usuários novos. Nada aqui afeta a operação real.</li>
+      <li><b>🟦 Base PH</b> — base principal de produção (PH).</li>
+      <li><b>🟩 Base PO</b> — base secundária de produção (PO).</li>
+    </ul>
+    <p>Para trocar de base, use <b>Mais ▾ → Base de dados</b> no canto superior direito.</p>
+    <div class="warn">⚠️ Usuários novos só veem a Base Teste. As bases PH e PO ficam liberadas depois que o admin promover seu acesso.</div>
+  </section>
+
+  <section id="filtros">
+    <h3>4 · Filtros</h3>
+    <h4>Estado e cidade</h4>
+    <p>Use <b>Estado</b> para filtrar por UF. Para refinar mais, ative o modo <b>Cidade</b> (botão acima dos filtros) e escolha a cidade.</p>
+    <h4>Profissional</h4>
+    <p>Digite parte do nome no campo <b>Profissional</b>. O sistema mostra sugestões automáticas dos nomes que já existem nos casos.</p>
+    <h4>Exibir (Disponíveis / Em uso / Todos)</h4>
+    <p>Por padrão você vê apenas casos <b>Disponíveis</b> (que ainda podem ser usados na sua cidade/estado). Quando você digita um nome no campo <b>Profissional</b>, o filtro muda automaticamente para <b>Em uso</b> — porque a maior pergunta passa a ser "quais casos esse profissional já está usando?".</p>
+    <div class="tip">💡 Você pode trocar manualmente o filtro a qualquer momento. O sistema respeita sua escolha.</div>
+    <h4>Filtrar por IDs específicos</h4>
+    <p>Se você sabe os números (ex.: 244, 255, 834), digite separados por vírgula no campo <b>Filtrar por IDs específicos</b>. Esse filtro ignora os outros.</p>
+  </section>
+
+  <section id="registrar-uso">
+    <h3>5 · Registrar uso de um caso</h3>
+    <ol>
+      <li>Filtre pelo estado/cidade onde quer usar.</li>
+      <li>Clique no card do caso desejado (mostra um botão <b>"Registrar uso"</b> no topo do modal).</li>
+      <li>Preencha estado, cidade e o nome do profissional.</li>
+      <li>Confirme.</li>
+    </ol>
+    <p>Se o estado já tiver outro uso, o sistema avisa quem usou e em qual cidade — você decide se quer prosseguir mesmo assim.</p>
+    <div class="warn">⚠️ Se a <b>cidade</b> já estiver em uso pelo mesmo caso, o sistema bloqueia (não dá pra registrar duplicado).</div>
+  </section>
+
+  <section id="remover-uso">
+    <h3>6 · Remover um uso</h3>
+    <p>Abra o caso, localize o chip do estado/cidade/profissional que quer remover e clique no <b>×</b> ao lado. Você pode marcar vários para remover de uma vez (modo "remoção em massa").</p>
+  </section>
+
+  <section id="bulk">
+    <h3>7 · Registro em massa</h3>
+    <p>Útil quando o mesmo profissional vai usar vários casos na mesma cidade. Ative o modo de seleção, escolha os casos com checkbox e clique em <b>"Registrar uso nos selecionados"</b>.</p>
+    <p>Há também <b>"Aplicar por ID"</b> — você cola a lista de IDs (ex.: 244, 255, 320) e o sistema aplica o registro em todos.</p>
+  </section>
+
+  <section id="fotos">
+    <h3>8 · Visualizar fotos do caso</h3>
+    <p>As fotos vêm direto da pasta do Google Drive vinculada ao caso. O sistema gera <b>thumbs em cache local</b> para carregar mais rápido — se a primeira abertura demorar, as próximas serão instantâneas.</p>
+    <div class="tip">💡 Admins podem comparar velocidade Drive vs. Cache em <b>Admin Mode → Teste de velocidade</b>.</div>
+  </section>
+
+  <section id="historico">
+    <h3>9 · Histórico de alterações</h3>
+    <p>Botão <b>📋 Histórico</b> no topo. Mostra quem alterou o quê, quando — pode filtrar por usuário, caso ou texto livre.</p>
+  </section>
+
+  <section id="promocao">
+    <h3>10 · Quando vou ser promovido para produção?</h3>
+    <p>Quando o admin estiver confiante de que você dominou o sistema. Geralmente isso significa:</p>
+    <ul>
+      <li>Você sabe registrar e remover usos sem dúvidas.</li>
+      <li>Entende os filtros (Estado/Cidade/Profissional/Exibir).</li>
+      <li>Conhece o histórico e como reverter algo se errar.</li>
+    </ul>
+    <p>Quando estiver pronto, peça para o admin liberar — ele faz isso em <b>Admin Mode → Gerenciar usuários → Promover p/ produção</b>.</p>
+  </section>
+
+  <section id="duvidas">
+    <h3>11 · Tirando dúvidas</h3>
+    <p>Está com dúvida sobre algo que este guia não cobre? Fale com o administrador ou abra novamente o tour guiado em <b>Mais ▾ → 🎬 Tour guiado</b>.</p>
+    <div class="placeholder-img">[Espaço reservado para conteúdo extra — você pode editar este HTML para adicionar mais seções, prints, vídeos, etc.]</div>
+  </section>
+
+  <p style="text-align:center;color:var(--tx3);font-size:12px;margin-top:2rem">Banco de Imagens · v19.00 · Documentação interna</p>
+
+</div>
+
+</body>
+</html>
