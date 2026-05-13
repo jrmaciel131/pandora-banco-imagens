@@ -1,0 +1,3509 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Banco de Imagens — Exportador</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700&display=swap" rel="stylesheet">
+<!-- JSZip hospedado localmente (lib/jszip.min.js) — não depende de CDN, funciona
+     mesmo com firewall corporativo bloqueando cdnjs/jsdelivr/unpkg. -->
+<script src="lib/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
+<style>
+:root{
+  /* Fundos: quente, escalonado — mesma lógica do dark mas invertido */
+  --bg:#f2f1ea;--bg2:#e8e6dc;--bg3:#d8d5c8;
+  --border:rgba(0,0,0,0.10);--border2:rgba(0,0,0,0.20);
+  /* Texto: todos partem de #1a1908 — hierarquia por peso, não por cinza */
+  --text:#1a1908;--text2:#1a1908;--text3:#1a1908;
+  --accent:#1a2744;--accent-fg:#ffffff;
+  --ok-bg:#d6edbe;--ok-t:#244a04;
+  --err-bg:#f5d5d5;--err-t:#7a1010;
+  --warn-bg:#f5e4c8;--warn-t:#6a3200;
+  --info-bg:#d0e4f5;--info-t:#0c3d7a;
+}
+[data-theme="dark"]{
+  --bg:#0e0e0d;--bg2:#1c1c1a;--bg3:#2a2a27;
+  --border:rgba(255,255,255,0.08);--border2:rgba(255,255,255,0.24);
+  /* Texto: todos partem de #f2f1ea — hierarquia por peso, não por cinza */
+  --text:#f2f1ea;--text2:#f2f1ea;--text3:#f2f1ea;
+  --accent:#3a5fa8;--accent-fg:#ffffff;
+  --ok-bg:#0f2800;--ok-t:#8fd65a;
+  --err-bg:#3a0a0a;--err-t:#f08080;
+  --warn-bg:#2e1600;--warn-t:#e8a040;
+  --info-bg:#001e3c;--info-t:#80b8f0;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Syne',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;transition:background .2s,color .2s;}
+
+/* MENU */
+.menu-btn{position:fixed;top:16px;left:16px;width:36px;height:36px;border:0.5px solid var(--border2);border-radius:8px;background:var(--bg2);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;z-index:1000;transition:background .15s;}
+.menu-btn:hover{background:var(--bg3);}
+.menu-btn span{display:block;width:16px;height:1.5px;background:var(--text);border-radius:2px;transition:all .2s;}
+.menu-btn.open span:nth-child(1){transform:translateY(6.5px) rotate(45deg);}
+.menu-btn.open span:nth-child(2){opacity:0;}
+.menu-btn.open span:nth-child(3){transform:translateY(-6.5px) rotate(-45deg);}
+.menu-panel{position:fixed;top:0;left:0;width:220px;height:100vh;background:var(--bg2);border-right:0.5px solid var(--border2);z-index:999;padding:64px 16px 24px;transform:translateX(-100%);transition:transform .22s ease;box-shadow:4px 0 32px rgba(0,0,0,0.12);}
+.menu-panel.open{transform:translateX(0);}
+.menu-overlay{position:fixed;inset:0;z-index:998;display:none;}
+.menu-overlay.open{display:block;}
+.menu-section-label{font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--text);margin-bottom:10px;}
+.theme-options{display:flex;flex-direction:column;gap:4px;}
+.theme-opt{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--text);border:0.5px solid transparent;transition:all .12s;user-select:none;}
+.theme-opt:hover{background:var(--bg3);}
+.theme-opt.active{background:var(--bg3);border-color:var(--border2);}
+.theme-dot{width:14px;height:14px;border-radius:50%;border:0.5px solid var(--border2);flex-shrink:0;}
+.theme-dot.sys{background:linear-gradient(135deg,#fff 50%,#1a1a18 50%);}
+.theme-dot.light{background:#fff;}
+.theme-dot.dark{background:#1a1a18;}
+
+/* APP */
+.app{max-width:780px;margin:0 auto;padding:56px 24px 100px;}
+.header{display:flex;align-items:center;gap:12px;margin-bottom:2rem;padding-bottom:1.25rem;border-bottom:0.5px solid var(--border);}
+.logo-mark{width:38px;height:38px;background:#1a2744;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.logo-mark svg{width:22px;height:22px;}
+.header-text h1{font-size:17px;font-weight:700;letter-spacing:-.2px;color:var(--text);}
+.header-text span{font-size:11px;font-family:'DM Mono',monospace;color:var(--text);margin-top:2px;display:block;}
+
+.section{background:var(--bg);border:0.5px solid var(--border);border-radius:12px;padding:1.25rem;margin-bottom:12px;}
+.section-label{font-size:10px;font-family:'DM Mono',monospace;font-weight:700;color:var(--text);text-transform:uppercase;letter-spacing:.09em;margin-bottom:1rem;}
+.config-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.field-group{display:flex;flex-direction:column;gap:6px;}
+.field-label{font-size:12px;color:var(--text);font-weight:700;}
+input[type="number"],input[type="text"]{height:36px;border:0.5px solid var(--border2);border-radius:8px;padding:0 12px;font-size:14px;font-family:'DM Mono',monospace;background:var(--bg2);color:var(--text);width:100%;outline:none;transition:border-color .12s;}
+input[type="number"]:focus,input[type="text"]:focus{border-color:var(--text);}
+
+/* LOGOS GRID */
+.logos-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.logo-box{border:0.5px dashed var(--border2);border-radius:8px;padding:14px 10px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;position:relative;min-height:90px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;}
+.logo-box:hover{border-color:var(--text);background:var(--bg2);}
+.logo-box.has-logo{border-style:solid;border-color:var(--text);background:var(--bg2);}
+.logo-box.logo-error{border-style:solid;border-color:var(--err-t);background:var(--err-bg);}
+.logo-box input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;z-index:1;}
+.logo-tag{font-size:14px;font-weight:700;font-family:'DM Mono',monospace;color:var(--text);}
+.logo-status{font-size:10px;color:var(--text);line-height:1.4;text-align:center;}
+.logo-status.ready{color:var(--text);opacity:1;font-weight:700;}
+.logo-status.error{color:var(--err-t);opacity:1;font-weight:700;}
+.logo-optional{font-size:9px;font-family:'DM Mono',monospace;color:var(--text);margin-top:2px;letter-spacing:.04em;}
+
+/* LH/EH TOGGLE — sits on top of the logo box, no pointer capture from file input */
+.lheh-toggle{display:flex;gap:4px;margin-top:6px;position:relative;z-index:2;}
+.lheh-btn{font-size:11px;font-family:'DM Mono',monospace;font-weight:600;padding:3px 10px;border-radius:5px;border:0.5px solid var(--border2);cursor:pointer;background:var(--bg2);color:var(--text);transition:all .12s;pointer-events:all;}
+.lheh-btn:hover{background:var(--bg3);}
+.lheh-btn.active{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);opacity:1;}
+.logo-mode-row{display:flex;align-items:center;gap:6px;margin-top:6px;position:relative;z-index:2;flex-wrap:wrap;justify-content:center;}
+.logo-mode-tag{font-size:9px;font-family:'DM Mono',monospace;letter-spacing:.04em;padding:2px 7px;border-radius:5px;background:var(--bg3);color:var(--text);text-transform:uppercase;}
+.logo-mode-tag.custom{background:var(--accent);color:var(--accent-fg);}
+.logo-mode-btn{font-size:9px;font-family:'DM Mono',monospace;font-weight:600;padding:3px 9px;border-radius:5px;border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);cursor:pointer;letter-spacing:.04em;text-transform:uppercase;transition:all .12s;pointer-events:all;}
+.logo-mode-btn:hover{background:var(--bg3);}
+/* Format selection chips */
+.fmt-chips-grid{display:flex;flex-wrap:wrap;gap:8px;}
+.fmt-chip{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-family:'DM Mono',monospace;font-weight:600;padding:8px 14px;border-radius:8px;border:0.5px solid var(--border2);cursor:pointer;background:var(--bg2);color:var(--text);transition:all .12s;user-select:none;}
+.fmt-chip:hover{background:var(--bg3);}
+.fmt-chip.active{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);}
+.fmt-chip .fmt-check{width:14px;height:14px;border-radius:4px;border:0.5px solid var(--border2);display:inline-flex;align-items:center;justify-content:center;background:var(--bg);transition:all .12s;}
+.fmt-chip.active .fmt-check{background:var(--accent-fg);border-color:var(--accent-fg);}
+.fmt-chip .fmt-check svg{width:10px;height:10px;display:none;color:var(--accent);}
+.fmt-chip.active .fmt-check svg{display:block;}
+.fmt-chip-actions{display:flex;gap:6px;margin-top:10px;}
+.fmt-chip-action{font-size:10px;font-family:'DM Mono',monospace;font-weight:600;padding:5px 10px;border-radius:6px;border:0.5px solid var(--border2);background:transparent;color:var(--text);cursor:pointer;letter-spacing:.04em;text-transform:uppercase;transition:all .12s;}
+.fmt-chip-action:hover{background:var(--bg2);}
+
+/* DROP ZONE */
+.drop-zone{border:0.5px dashed var(--border2);border-radius:10px;padding:1.75rem 1rem;text-align:center;cursor:pointer;transition:all .15s;position:relative;}
+.drop-zone:hover,.drop-zone.drag-over{border-color:var(--text);background:var(--bg2);}
+.drop-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+.drop-icon{width:32px;height:32px;border:0.5px solid var(--border2);border-radius:8px;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;color:var(--text);}
+.drop-title{font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;}
+.drop-sub{font-size:11px;color:var(--text);font-family:'DM Mono',monospace;}
+
+/* FILE QUEUE */
+.file-queue{display:flex;flex-direction:column;gap:0;margin-top:10px;}
+
+/* GROUP BLOCK */
+.group-block{border:0.5px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:8px;transition:border-color .15s;}
+.group-block.drop-target-group{border-color:var(--text);background:var(--bg2);}
+
+.group-header{display:flex;align-items:center;gap:8px;padding:7px 12px 7px 10px;background:var(--bg2);border-bottom:0.5px solid var(--border);}
+.group-drag-handle{color:var(--text);cursor:grab;display:flex;align-items:center;}
+.group-drag-handle svg{width:14px;height:14px;}
+.group-case-label{font-size:12px;font-weight:700;font-family:'DM Mono',monospace;color:var(--text);flex:1;}
+.group-count{font-size:10px;font-family:'DM Mono',monospace;color:var(--text);}
+.group-unmerge-btn{font-size:10px;font-family:'DM Mono',monospace;padding:2px 8px;border-radius:4px;border:0.5px solid var(--border2);background:transparent;color:var(--text);cursor:pointer;transition:all .12s;}
+.group-unmerge-btn:hover{border-color:var(--warn-t);color:var(--warn-t);opacity:1;}
+
+/* ITEM ROW inside group */
+.file-item{display:flex;align-items:center;gap:10px;padding:8px 12px 8px 10px;background:var(--bg);border-bottom:0.5px solid var(--border);transition:background .12s;}
+.file-item:last-child{border-bottom:none;}
+.file-item.dragging-item{opacity:.35;}
+
+.item-drag-handle{color:var(--text);cursor:grab;display:flex;align-items:center;flex-shrink:0;}
+.item-drag-handle svg{width:12px;height:12px;}
+.file-thumb{width:28px;height:35px;border-radius:4px;object-fit:cover;flex-shrink:0;background:var(--bg3);}
+.file-info{flex:1;min-width:0;}
+.file-name{font-size:10px;font-family:'DM Mono',monospace;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.file-out{font-size:12px;font-weight:700;color:var(--text);font-family:'DM Mono',monospace;margin-top:1px;}
+.error-badge{font-size:10px;font-family:'DM Mono',monospace;padding:2px 7px;border-radius:4px;background:var(--err-bg);color:var(--err-t);margin-top:3px;display:inline-block;}
+
+.v-row{display:flex;align-items:center;gap:5px;margin-top:4px;}
+.v-label{font-size:10px;font-family:'DM Mono',monospace;color:var(--text);}
+.v-badge{font-size:10px;font-family:'DM Mono',monospace;padding:2px 7px;border-radius:4px;border:0.5px solid var(--border2);cursor:pointer;color:var(--text);user-select:none;background:var(--bg2);transition:all .1s;}
+.v-badge:hover:not(.disabled){border-color:var(--text);opacity:1;}
+.v-badge.active{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);opacity:1;}
+.v-badge.disabled{opacity:.35;cursor:not-allowed;}
+
+.file-remove{width:22px;height:22px;border:none;background:none;cursor:pointer;color:var(--text);font-size:17px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:4px;transition:all .1s;line-height:1;}
+.file-remove:hover{background:var(--err-bg);color:var(--err-t);opacity:1;}
+
+/* Drop zone between groups */
+.group-drop-between{height:6px;border-radius:4px;transition:all .15s;margin-bottom:2px;}
+.group-drop-between.active{height:20px;background:var(--bg3);border:1.5px dashed var(--border2);border-radius:6px;}
+
+/* HINT */
+.hint{font-size:11px;font-family:'DM Mono',monospace;color:var(--text);margin-top:8px;line-height:1.5;}
+.tip-box{background:var(--bg2);border:0.5px solid var(--border);border-radius:8px;padding:10px 14px;margin-top:10px;}
+.tip-box p{font-size:11px;font-family:'DM Mono',monospace;color:var(--text);line-height:1.6;}
+.tip-box strong{color:var(--text);opacity:1;font-weight:700;}
+
+/* PROCESS */
+.process-btn{width:100%;height:44px;border:none;border-radius:8px;background:#1a2744;color:#ffffff;font-size:14px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer;letter-spacing:.02em;transition:opacity .15s;margin-top:12px;}
+.process-btn:hover{opacity:.85;}
+.process-btn:disabled{opacity:.25;cursor:not-allowed;}
+.progress-wrap{height:3px;background:var(--bg3);border-radius:2px;margin-top:12px;overflow:hidden;display:none;}
+.progress-fill{height:100%;background:#1a2744;border-radius:2px;transition:width .25s;width:0%;}
+.status-msg{font-size:11px;font-family:'DM Mono',monospace;color:var(--text);text-align:center;margin-top:8px;min-height:16px;}
+
+/* OUTPUT */
+.divider{height:0.5px;background:var(--border);margin:1.5rem 0 1rem;}
+.output-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:8px;margin-top:10px;}
+.output-card{border:0.5px solid var(--border);border-radius:8px;overflow:hidden;background:var(--bg);min-width:0;}
+.output-card img{width:100%;aspect-ratio:4/5;object-fit:cover;display:block;}
+.output-card-info{padding:7px 9px;border-top:0.5px solid var(--border);min-width:0;overflow:hidden;}
+.output-card-name{font-size:9px;font-family:'DM Mono',monospace;color:var(--text);margin-bottom:6px;word-break:break-all;overflow-wrap:anywhere;line-height:1.4;}
+.dl-btn{width:100%;height:26px;border:0.5px solid var(--border2);border-radius:5px;background:transparent;font-size:11px;font-family:'DM Mono',monospace;cursor:pointer;color:var(--text);transition:background .1s;}
+.dl-btn:hover{background:var(--bg2);}
+.dl-all-btn{width:100%;height:38px;border:0.5px solid var(--border2);border-radius:8px;background:transparent;font-size:13px;font-family:'Syne',sans-serif;font-weight:700;cursor:pointer;color:var(--text);margin-top:12px;transition:background .12s;}
+.dl-all-btn:hover{background:var(--bg2);}
+.dl-all-btn:disabled{opacity:.5;cursor:not-allowed;}
+
+@media(max-width:520px){
+  .config-row{grid-template-columns:1fr;}
+  .logos-grid{grid-template-columns:1fr 1fr;}
+  .output-grid{grid-template-columns:repeat(2,1fr);}
+}
+
+/* FLOATING TAB BAR */
+.tab-bar{
+  position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+  display:flex;gap:4px;
+  background:#1a2744;
+  border:0.5px solid rgba(255,255,255,0.15);
+  border-radius:14px;
+  padding:4px;
+  z-index:1000;
+  box-shadow:0 6px 32px rgba(0,0,0,0.28), 0 1px 4px rgba(0,0,0,0.18);
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+}
+.tab-btn{
+  display:flex;align-items:center;gap:7px;
+  padding:8px 16px;
+  border-radius:10px;
+  border:none;
+  background:transparent;
+  color:#ffffff;
+  font-size:13px;font-family:'Syne',sans-serif;font-weight:700;
+  cursor:pointer;
+  transition:all .15s;
+  white-space:nowrap;
+  letter-spacing:-.01em;
+}
+.tab-btn:hover{background:rgba(255,255,255,0.12);}
+.tab-btn.active{background:rgba(255,255,255,0.18);color:#ffffff;opacity:1;}
+.tab-btn svg{width:14px;height:14px;flex-shrink:0;}
+.tab-btn.active svg{opacity:1;}
+
+/* SCREEN VISIBILITY */
+.screen{display:none;}
+.screen.active{display:block;}
+
+/* WEBP CONVERTER */
+.webp-drop-zone{border:0.5px dashed var(--border2);border-radius:10px;padding:2.5rem 1rem;text-align:center;cursor:pointer;transition:all .15s;position:relative;}
+.webp-drop-zone:hover,.webp-drop-zone.drag-over{border-color:var(--text);background:var(--bg2);}
+.webp-drop-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+
+.quality-row{display:flex;align-items:center;gap:12px;margin-top:4px;}
+.quality-slider{flex:1;-webkit-appearance:none;appearance:none;height:3px;border-radius:2px;background:var(--bg3);outline:none;cursor:pointer;}
+.quality-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:#1a2744;cursor:pointer;border:2px solid var(--bg);}
+.quality-slider::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:#1a2744;cursor:pointer;border:2px solid var(--bg);}
+.quality-val{font-size:14px;font-family:'DM Mono',monospace;font-weight:700;color:var(--text);min-width:36px;text-align:right;}
+
+.webp-queue{display:flex;flex-direction:column;gap:6px;margin-top:12px;}
+.webp-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);}
+.webp-thumb{width:30px;height:30px;border-radius:5px;object-fit:cover;flex-shrink:0;background:var(--bg3);}
+.webp-info{flex:1;min-width:0;}
+.webp-fname{font-size:11px;font-family:'DM Mono',monospace;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.webp-size{font-size:10px;font-family:'DM Mono',monospace;color:var(--text);margin-top:1px;}
+.webp-remove{width:22px;height:22px;border:none;background:none;cursor:pointer;color:var(--text);font-size:17px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:4px;transition:all .1s;line-height:1;}
+.webp-remove:hover{background:var(--err-bg);color:var(--err-t);opacity:1;}
+.webp-status-badge{font-size:10px;font-family:'DM Mono',monospace;padding:2px 7px;border-radius:4px;flex-shrink:0;font-weight:600;}
+.webp-status-badge.done{background:var(--ok-bg);color:var(--ok-t);}
+.webp-status-badge.pending{background:var(--bg3);color:var(--text);}
+.webp-status-badge.converting{background:var(--info-bg);color:var(--info-t);}
+
+/* SAVINGS BANNER */
+.savings-banner{
+  display:flex;align-items:center;gap:16px;
+  background:var(--ok-bg);
+  border:0.5px solid var(--ok-t);
+  border-radius:10px;
+  padding:14px 18px;
+  margin-bottom:16px;
+}
+.savings-banner svg{width:20px;height:20px;color:var(--ok-t);flex-shrink:0;}
+.savings-stat{display:flex;flex-direction:column;}
+.savings-main{font-size:18px;font-weight:700;font-family:'DM Mono',monospace;color:var(--ok-t);line-height:1;}
+.savings-sub{font-size:10px;font-family:'DM Mono',monospace;color:var(--ok-t);opacity:.75;margin-top:3px;}
+.savings-divider{width:0.5px;background:var(--ok-t);opacity:.3;align-self:stretch;}
+.savings-detail{font-size:11px;font-family:'DM Mono',monospace;color:var(--ok-t);opacity:.8;line-height:1.7;}
+
+/* ===== AUDIO CONVERTER ===== */
+.audio-drop-zone{border:0.5px dashed var(--border2);border-radius:10px;padding:2.5rem 1rem;text-align:center;cursor:pointer;transition:all .15s;position:relative;}
+.audio-drop-zone:hover,.audio-drop-zone.drag-over{border-color:var(--text);background:var(--bg2);}
+.audio-drop-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+.audio-queue{display:flex;flex-direction:column;gap:6px;margin-top:12px;}
+.audio-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);}
+.audio-icon{width:30px;height:30px;border-radius:5px;flex-shrink:0;background:var(--bg3);display:flex;align-items:center;justify-content:center;}
+.audio-icon svg{width:14px;height:14px;color:var(--text);}
+.audio-info{flex:1;min-width:0;}
+.audio-fname{font-size:11px;font-family:'DM Mono',monospace;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.audio-meta{font-size:10px;font-family:'DM Mono',monospace;color:var(--text);margin-top:1px;}
+.audio-remove{width:22px;height:22px;border:none;background:none;cursor:pointer;color:var(--text);font-size:17px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:4px;transition:all .1s;line-height:1;}
+.audio-remove:hover{background:var(--err-bg);color:var(--err-t);opacity:1;}
+.audio-status-badge{font-size:10px;font-family:'DM Mono',monospace;padding:2px 7px;border-radius:4px;flex-shrink:0;font-weight:600;}
+.audio-status-badge.done{background:var(--ok-bg);color:var(--ok-t);}
+.audio-status-badge.pending{background:var(--bg3);color:var(--text);}
+.audio-status-badge.converting{background:var(--info-bg);color:var(--info-t);}
+.audio-status-badge.error{background:var(--err-bg);color:var(--err-t);}
+.format-select-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:4px;}
+.format-chip{font-size:11px;font-family:'DM Mono',monospace;font-weight:600;padding:5px 12px;border-radius:6px;border:0.5px solid var(--border2);cursor:pointer;background:var(--bg2);color:var(--text);transition:all .12s;user-select:none;}
+.format-chip:hover{background:var(--bg3);}
+.format-chip.active{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);}
+.audio-output-list{display:flex;flex-direction:column;gap:6px;margin-top:10px;}
+.audio-out-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);min-width:0;}
+.audio-out-info{flex:1;min-width:0;overflow:hidden;}
+.audio-out-name{font-size:11px;font-family:'DM Mono',monospace;font-weight:600;color:var(--text);word-break:break-all;overflow-wrap:anywhere;line-height:1.4;}
+.audio-out-size{font-size:10px;font-family:'DM Mono',monospace;color:var(--text);margin-top:1px;word-break:break-word;line-height:1.4;}
+.size-pred{font-size:10px;font-family:'DM Mono',monospace;color:var(--text);margin-top:2px;display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;}
+.size-pred .pct-down{color:var(--ok-t);font-weight:700;}
+.size-pred .pct-up{color:var(--warn-t);font-weight:700;}
+.size-pred .pct-neu{color:var(--text);opacity:.7;}
+.audio-ffmpeg-note{background:var(--info-bg);border:0.5px solid var(--info-t);border-radius:8px;padding:10px 14px;margin-top:10px;}
+.audio-ffmpeg-note p{font-size:11px;font-family:'DM Mono',monospace;color:var(--info-t);line-height:1.6;}
+
+/* ===== GIF / VIDEO / WEBM ===== */
+.video-drop-zone{border:0.5px dashed var(--border2);border-radius:10px;padding:2.5rem 1rem;text-align:center;cursor:pointer;transition:all .15s;position:relative;}
+.video-drop-zone:hover,.video-drop-zone.drag-over{border-color:var(--text);background:var(--bg2);}
+.video-drop-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+.video-preview-wrap{margin-top:12px;border:0.5px solid var(--border);border-radius:10px;overflow:hidden;background:var(--bg2);}
+.video-preview-wrap video{width:100%;max-height:280px;display:block;background:#000;}
+.video-trim-bar{padding:12px 14px;border-top:0.5px solid var(--border);}
+.trim-label-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+.trim-label{font-size:11px;font-family:'DM Mono',monospace;color:var(--text);}
+.trim-time{font-size:11px;font-family:'DM Mono',monospace;font-weight:700;color:var(--text);}
+.trim-range-wrap{position:relative;height:28px;display:flex;align-items:center;}
+.trim-track{position:absolute;left:0;right:0;height:4px;background:var(--bg3);border-radius:2px;}
+.trim-selection{position:absolute;height:4px;background:var(--accent,#1a2744);border-radius:2px;top:50%;transform:translateY(-50%);}
+[data-theme="dark"] .trim-selection{background:var(--accent);}
+.trim-handle{position:absolute;width:14px;height:14px;background:#1a2744;border-radius:50%;top:50%;transform:translateY(-50%);cursor:ew-resize;z-index:2;border:2px solid var(--bg);box-sizing:border-box;}
+[data-theme="dark"] .trim-handle{background:var(--accent);}
+.gif-options{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;}
+.gif-fps-row{display:flex;align-items:center;gap:10px;}
+.gif-fps-slider{flex:1;-webkit-appearance:none;appearance:none;height:3px;border-radius:2px;background:var(--bg3);outline:none;cursor:pointer;}
+.gif-fps-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:#1a2744;cursor:pointer;border:2px solid var(--bg);}
+.gif-fps-slider::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:#1a2744;cursor:pointer;border:2px solid var(--bg);}
+.gif-scale-input{height:36px;border:0.5px solid var(--border2);border-radius:8px;padding:0 12px;font-size:14px;font-family:'DM Mono',monospace;background:var(--bg2);color:var(--text);width:100%;outline:none;transition:border-color .12s;}
+.gif-scale-input:focus{border-color:var(--text);}
+.gif-out-preview{margin-top:12px;text-align:center;}
+.gif-out-preview img{max-width:100%;border-radius:8px;border:0.5px solid var(--border);}
+.webm-options{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;}
+.webm-drop-zone{border:0.5px dashed var(--border2);border-radius:10px;padding:1.5rem 1rem;text-align:center;cursor:pointer;transition:all .15s;position:relative;}
+.webm-drop-zone:hover,.webm-drop-zone.drag-over{border-color:var(--text);background:var(--bg2);}
+.webm-drop-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+.webm-preview-info{margin-top:10px;padding:9px 12px;border:0.5px solid var(--border);border-radius:8px;background:var(--bg);display:flex;align-items:center;gap:10px;}
+.webm-fname{font-size:11px;font-family:'DM Mono',monospace;font-weight:600;color:var(--text);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.webm-clear-btn{width:22px;height:22px;border:none;background:none;cursor:pointer;color:var(--text);font-size:17px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:4px;transition:all .1s;line-height:1;}
+.webm-clear-btn:hover{background:var(--err-bg);color:var(--err-t);}
+.output-badge{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-family:'DM Mono',monospace;padding:3px 9px;border-radius:4px;border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);margin-top:6px;}
+.two-btn-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;}
+.sec-btn{height:44px;border:0.5px solid var(--border2);border-radius:8px;background:transparent;color:var(--text);font-size:13px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer;letter-spacing:.02em;transition:all .15s;}
+.sec-btn:hover{background:var(--bg2);}
+.sec-btn:disabled{opacity:.25;cursor:not-allowed;}
+
+/* config-row */
+.config-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+
+/* GIF TIMELINE */
+.gif-timeline{margin-top:10px;padding:10px 14px 6px;border:0.5px solid var(--border);border-radius:10px;background:var(--bg2);}
+.gif-tl-track{position:relative;height:20px;display:flex;align-items:center;cursor:pointer;}
+.gif-tl-track::before{content:'';position:absolute;left:0;right:0;height:4px;background:var(--bg3);border-radius:2px;}
+.gif-tl-range{position:absolute;height:4px;background:var(--accent);border-radius:2px;top:50%;transform:translateY(-50%);}
+.gif-tl-handle{position:absolute;width:14px;height:14px;background:var(--accent);border-radius:50%;top:50%;transform:translate(-50%,-50%);cursor:ew-resize;z-index:3;border:2px solid var(--bg);box-sizing:border-box;transition:transform .1s;}
+.gif-tl-handle:hover,.gif-tl-handle:active{transform:translate(-50%,-50%) scale(1.25);}
+.gif-tl-playhead{position:absolute;width:2px;height:20px;background:var(--err-t);top:0;transform:translateX(-50%);z-index:2;pointer-events:none;border-radius:1px;}
+.gif-tl-labels{display:flex;justify-content:space-between;align-items:center;margin-top:4px;}
+.gif-tl-label{font-size:10px;font-family:'DM Mono',monospace;color:var(--text);}
+.gif-tl-dur{font-weight:700;font-size:11px;}
+
+/* VTT */
+.vtt-timer{font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:var(--err-t);padding:0 10px;border:0.5px solid var(--err-t);border-radius:6px;height:44px;display:flex;align-items:center;gap:4px;}
+.vtt-waveform{margin-top:8px;}
+
+/* GLOBAL ERROR TOAST */
+.err-toast{position:fixed;top:16px;right:16px;background:var(--err-bg);color:var(--err-t);border:0.5px solid var(--err-t);border-radius:8px;padding:12px 16px;font-size:12px;font-family:'DM Mono',monospace;font-weight:600;z-index:2000;max-width:380px;box-shadow:0 6px 24px rgba(0,0,0,0.18);display:none;line-height:1.5;animation:errSlide .25s ease;}
+.err-toast.show{display:block;}
+.err-toast .err-close{position:absolute;top:6px;right:8px;background:none;border:none;color:var(--err-t);font-size:14px;cursor:pointer;line-height:1;padding:2px 4px;}
+.err-toast .err-title{font-weight:700;margin-bottom:4px;}
+@keyframes errSlide{from{opacity:0;transform:translateX(20px);}to{opacity:1;transform:none;}}
+.err-inline{background:var(--err-bg);color:var(--err-t);border:0.5px solid var(--err-t);border-radius:8px;padding:10px 12px;font-size:11px;font-family:'DM Mono',monospace;margin-top:8px;line-height:1.55;}
+.err-inline strong{font-weight:700;}
+
+/* SUB-MODE TABS (within video screen) */
+.submode-tabs{display:flex;gap:4px;background:var(--bg2);border:0.5px solid var(--border);border-radius:10px;padding:4px;margin-bottom:12px;}
+.submode-btn{flex:1;padding:9px 14px;border-radius:7px;border:none;background:transparent;color:var(--text);font-size:12px;font-family:'Syne',sans-serif;font-weight:700;cursor:pointer;transition:all .15s;letter-spacing:.01em;}
+.submode-btn:hover{background:var(--bg3);}
+.submode-btn.active{background:#1a2744;color:#ffffff;}
+.submode-pane{display:none;}
+.submode-pane.active{display:block;}
+
+</style>
+</head>
+<body>
+
+<div class="err-toast" id="errToast">
+  <button class="err-close" onclick="hideErrToast()">&times;</button>
+  <div class="err-title" id="errToastTitle">Erro</div>
+  <div id="errToastBody"></div>
+</div>
+
+<button class="menu-btn" id="menuBtn" onclick="toggleMenu()">
+  <span></span><span></span><span></span>
+</button>
+<div class="menu-overlay" id="menuOverlay" onclick="closeMenu()"></div>
+<div class="menu-panel" id="menuPanel">
+  <div class="menu-section-label">Aparência</div>
+  <div class="theme-options">
+    <div class="theme-opt" id="opt-system" onclick="setTheme('system')"><div class="theme-dot sys"></div>Padrão do sistema</div>
+    <div class="theme-opt" id="opt-light" onclick="setTheme('light')"><div class="theme-dot light"></div>Modo claro</div>
+    <div class="theme-opt" id="opt-dark" onclick="setTheme('dark')"><div class="theme-dot dark"></div>Modo escuro</div>
+  </div>
+</div>
+
+<!-- FLOATING TAB BAR -->
+<div class="tab-bar">
+  <button class="tab-btn active" id="tab-banco" onclick="switchScreen('banco')">
+    <svg viewBox="0 0 14 14" fill="none"><rect x="1" y="1" width="5" height="6" rx="1" fill="currentColor" opacity=".9"/><rect x="8" y="1" width="5" height="3" rx="1" fill="currentColor" opacity=".5"/><rect x="1" y="9" width="5" height="4" rx="1" fill="currentColor" opacity=".5"/><rect x="8" y="6" width="5" height="7" rx="1" fill="currentColor" opacity=".9"/></svg>
+    Banco de Imagens
+  </button>
+  <button class="tab-btn" id="tab-webp" onclick="switchScreen('webp')">
+    <svg viewBox="0 0 14 14" fill="none"><rect x="1" y="1" width="12" height="9" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M4 10.5v2M10 10.5v2M2 12.5h10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M4 5l2 2 4-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    Exportar WebP
+  </button>
+  <button class="tab-btn" id="tab-audio" onclick="switchScreen('audio')">
+    <svg viewBox="0 0 14 14" fill="none"><path d="M5 2h4v7a2 2 0 01-4 0V2z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 6.5v1a5 5 0 0010 0v-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M7 11v2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+    Áudio
+  </button>
+  <button class="tab-btn" id="tab-video" onclick="switchScreen('video')">
+    <svg viewBox="0 0 14 14" fill="none"><rect x="1" y="2" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M5.5 5l4 2-4 2V5z" fill="currentColor" opacity=".8"/></svg>
+    Vídeo
+  </button>
+</div>
+
+<div class="app">
+  <div class="header">
+    <div class="logo-mark">
+      <svg viewBox="0 0 22 22" fill="none"><rect x="2" y="2" width="8" height="10" rx="2" fill="#ffffff" opacity=".9"/><rect x="12" y="2" width="8" height="5" rx="2" fill="#ffffff" opacity=".5"/><rect x="2" y="14" width="8" height="6" rx="2" fill="#ffffff" opacity=".5"/><rect x="12" y="9" width="8" height="11" rx="2" fill="#ffffff" opacity=".9"/></svg>
+    </div>
+    <div class="header-text">
+      <h1 id="appTitle">Banco de Imagens — Exportador</h1>
+      <span id="appSubtitle">VNI · VOI · NA · LH/EH · CL · 1080×1350</span>
+    </div>
+  </div>
+
+  <!-- TELA: BANCO DE IMAGENS -->
+  <div class="screen active" id="screen-banco">
+  <!-- 01 CONFIG -->
+  <div class="section">
+    <div class="section-label">01 — Configuração</div>
+    <div class="config-row">
+      <div class="field-group">
+        <div class="field-label">Número inicial do caso</div>
+        <input type="number" id="startCase" value="1" min="1" placeholder="Ex: 1121">
+      </div>
+      <div class="field-group">
+        <div class="field-label">Prefixo</div>
+        <input type="text" id="prefix" value="CASO" placeholder="CASO">
+      </div>
+    </div>
+    <div class="hint" style="margin-top:10px;">Exporta apenas os formatos selecionados na seção 03. Ex.: CASO-001-VNI · CASO-001-VNI-NA · CASO-001-VNI-LH (ou EH) · CASO-001-VNI-CL · CASO-001-VOI · CASO-001-VOI-CL</div>
+  </div>
+
+  <!-- 02 LOGOS -->
+  <div class="section">
+    <div class="section-label">02 — Logos (PNG 1080×1350 com transparência)</div>
+    <div class="logos-grid">
+
+      <!-- NA -->
+      <div class="logo-box" id="naBox">
+        <input type="file" accept="image/png,image/webp" id="logoNA" onchange="loadLogo('NA',this)">
+        <div class="logo-tag na">NA</div>
+        <div class="logo-status" id="naStatus">carregando padrão…</div>
+        <div class="logo-mode-row" id="naModeRow" style="display:none;">
+          <span class="logo-mode-tag" id="naModeTag">padrão</span>
+          <button class="logo-mode-btn" id="naModeBtn" onclick="toggleLogoMode('NA',event)">trocar</button>
+        </div>
+      </div>
+
+      <!-- LH / EH -->
+      <div class="logo-box" id="lhehBox">
+        <input type="file" accept="image/png,image/webp" id="logoLHEH" onchange="loadLogo('LHEH',this)">
+        <div class="logo-tag lheh" id="lhehTag">LH</div>
+        <div class="logo-status" id="lhehStatus">carregando padrão…</div>
+        <div class="lheh-toggle" id="lhehToggle" style="display:none;" onclick="event.stopPropagation()">
+          <button class="lheh-btn active" id="btnLH" onclick="setLHEH('LH')">LH</button>
+          <button class="lheh-btn" id="btnEH" onclick="setLHEH('EH')">EH</button>
+        </div>
+        <div class="logo-mode-row" id="lhehModeRow" style="display:none;">
+          <span class="logo-mode-tag" id="lhehModeTag">padrão</span>
+          <button class="logo-mode-btn" id="lhehModeBtn" onclick="toggleLogoMode('LHEH',event)">trocar</button>
+        </div>
+      </div>
+
+      <!-- CL -->
+      <div class="logo-box" id="clBox">
+        <input type="file" accept="image/png,image/webp" id="logoCL" onchange="loadLogo('CL',this)">
+        <div class="logo-tag cl">CL</div>
+        <div class="logo-status" id="clStatus">Logo Cliente<br>clique para subir</div>
+        <div class="logo-optional">opcional</div>
+        <div class="logo-mode-row" id="clModeRow" style="display:none;">
+          <button class="logo-mode-btn" id="clRemoveBtn" onclick="removeCustomCL(event)">remover</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 03 FORMATOS -->
+  <div class="section">
+    <div class="section-label">03 — Formatos para exportar</div>
+    <div class="fmt-chips-grid" id="fmtChipsGrid">
+      <span class="fmt-chip active" id="fmtVNI" data-fmt="VNI" onclick="toggleFmt('VNI')">
+        <span class="fmt-check"><svg viewBox="0 0 16 16" fill="none"><path d="M3 8l3 3 7-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span>VNI</span>
+      </span>
+      <span class="fmt-chip active" id="fmtNA" data-fmt="NA" onclick="toggleFmt('NA')">
+        <span class="fmt-check"><svg viewBox="0 0 16 16" fill="none"><path d="M3 8l3 3 7-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span>NA</span>
+      </span>
+      <span class="fmt-chip active" id="fmtLHEH" data-fmt="LHEH" onclick="toggleFmt('LHEH')">
+        <span class="fmt-check"><svg viewBox="0 0 16 16" fill="none"><path d="M3 8l3 3 7-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span id="fmtLHEHText">LH</span>
+      </span>
+      <span class="fmt-chip active" id="fmtCL" data-fmt="CL" onclick="toggleFmt('CL')" style="display:none;">
+        <span class="fmt-check"><svg viewBox="0 0 16 16" fill="none"><path d="M3 8l3 3 7-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span>CL</span>
+      </span>
+      <span class="fmt-chip active" id="fmtVOI" data-fmt="VOI" onclick="toggleFmt('VOI')">
+        <span class="fmt-check"><svg viewBox="0 0 16 16" fill="none"><path d="M3 8l3 3 7-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span>VOI</span>
+      </span>
+      <span class="fmt-chip active" id="fmtVOICL" data-fmt="VOICL" onclick="toggleFmt('VOICL')" style="display:none;">
+        <span class="fmt-check"><svg viewBox="0 0 16 16" fill="none"><path d="M3 8l3 3 7-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span>VOI-CL</span>
+      </span>
+    </div>
+    <div class="fmt-chip-actions">
+      <button class="fmt-chip-action" onclick="setAllFmt(true)">marcar todos</button>
+      <button class="fmt-chip-action" onclick="setAllFmt(false)">desmarcar todos</button>
+    </div>
+    <div class="hint" style="margin-top:10px;">Selecione apenas os formatos que você quer exportar. Se tiver subido a logo CL, os formatos CL e VOI-CL ficam disponíveis.</div>
+  </div>
+
+  <!-- 04 FOTOS -->
+  <div class="section">
+    <div class="section-label">04 — Fotos base (apenas 1080×1350)</div>
+    <div class="drop-zone" id="dropZone">
+      <input type="file" accept="image/jpeg,image/png" multiple id="photoInput" onchange="handleFiles(this.files)">
+      <div class="drop-icon">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M4 6l4-4 4 4M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="drop-title">Soltar fotos aqui ou clicar</div>
+      <div class="drop-sub">JPG · PNG · múltiplos arquivos</div>
+    </div>
+    <div class="tip-box" style="margin-top:10px;">
+      <p><strong>Agrupar fotos no mesmo caso:</strong> arraste uma foto sobre outra para que compartilhem o mesmo número (CASO-001-V1, CASO-001-V2...). Arraste grupos inteiros pelo handle <strong>⠿</strong> para reordenar. Ao agrupar, o V é atribuído automaticamente e os IDs abaixo sobem.</p>
+    </div>
+    <div class="file-queue" id="fileQueue"></div>
+  </div>
+
+  <button class="process-btn" id="processBtn" onclick="processAll()" disabled>Processar e exportar</button>
+  <div class="progress-wrap" id="progressWrap"><div class="progress-fill" id="progressFill"></div></div>
+  <div class="status-msg" id="statusMsg"></div>
+
+  <div id="outputSection" style="display:none;">
+    <div class="divider"></div>
+    <div class="section-label">Resultado</div>
+    <div class="output-grid" id="outputGrid"></div>
+    <button class="dl-all-btn" onclick="downloadAll()">Baixar tudo como ZIP</button>
+  </div>
+  </div><!-- /screen-banco -->
+
+  <!-- TELA: EXPORTADOR WEBP -->
+  <div class="screen" id="screen-webp">
+
+    <!-- QUALIDADE -->
+    <div class="section">
+      <div class="section-label">01 — Qualidade WebP</div>
+      <div class="field-group">
+        <div class="field-label">Qualidade de compressão</div>
+        <div class="quality-row">
+          <input type="range" class="quality-slider" id="webpQuality" min="1" max="100" value="50" oninput="updateQualityLabel()">
+          <span class="quality-val" id="webpQualityVal">50%</span>
+        </div>
+        <div class="hint" style="margin-top:6px;">50% = padrão recomendado · abaixo de 40% = compressão alta · acima de 80% = qualidade máxima</div>
+      </div>
+    </div>
+
+    <!-- UPLOAD -->
+    <div class="section">
+      <div class="section-label">02 — Fotos (JPG · PNG · múltiplos arquivos)</div>
+      <div class="webp-drop-zone" id="webpDropZone">
+        <input type="file" accept="image/jpeg,image/png,image/gif,image/bmp,image/tiff" multiple id="webpInput" onchange="handleWebpFiles(this.files)">
+        <div class="drop-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M4 6l4-4 4 4M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="drop-title">Soltar fotos aqui ou clicar</div>
+        <div class="drop-sub">JPG · PNG · múltiplos arquivos · proporção e cores preservadas</div>
+      </div>
+      <div class="webp-queue" id="webpQueue"></div>
+    </div>
+
+    <button class="process-btn" id="webpProcessBtn" onclick="convertAllToWebp()" disabled>Converter para WebP</button>
+    <div class="progress-wrap" id="webpProgressWrap"><div class="progress-fill" id="webpProgressFill"></div></div>
+    <div class="status-msg" id="webpStatusMsg"></div>
+
+    <div id="webpOutputSection" style="display:none;">
+      <div class="divider"></div>
+      <div class="section-label">Resultado</div>
+      <div id="webpSavingsBanner"></div>
+      <div class="output-grid" id="webpOutputGrid"></div>
+      <button class="dl-all-btn" onclick="downloadAllWebp()">Baixar tudo como ZIP</button>
+    </div>
+
+  </div><!-- /screen-webp -->
+
+  <!-- TELA: CONVERSOR DE AUDIO -->
+  <div class="screen" id="screen-audio">
+
+    <div class="section">
+      <div class="section-label">01 &mdash; Formato de sa&iacute;da</div>
+      <div class="field-group">
+        <div class="field-label">Converter para</div>
+        <div class="format-select-row" id="audioFormatRow">
+          <span class="format-chip active" data-fmt="mp3" onclick="selectAudioFormat('mp3')">MP3</span>
+          <span class="format-chip" data-fmt="wav" onclick="selectAudioFormat('wav')">WAV</span>
+          <span class="format-chip" data-fmt="ogg" onclick="selectAudioFormat('ogg')">OGG</span>
+          <span class="format-chip" data-fmt="aac" onclick="selectAudioFormat('aac')">AAC&thinsp;/&thinsp;M4A</span>
+          <span class="format-chip" data-fmt="webm" onclick="selectAudioFormat('webm')">WebM&thinsp;Opus</span>
+        </div>
+        <div class="hint" style="margin-top:6px;" id="audioFmtHint">MP3 &middot; compat&iacute;vel com todos os players e plataformas</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">02 &mdash; Qualidade</div>
+      <div class="field-group">
+        <div class="field-label">Bitrate de sa&iacute;da</div>
+        <div class="quality-row">
+          <input type="range" class="quality-slider" id="audioBitrate" min="0" max="4" value="2" oninput="updateBitrateLabel()">
+          <span class="quality-val" id="audioBitrateVal">192 kbps</span>
+        </div>
+        <div class="hint" style="margin-top:6px;" id="audioBitrateHint">192 kbps = qualidade padr&atilde;o &middot; 320 kbps = m&aacute;xima &middot; 96 kbps = comprimido</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">03 &mdash; Arquivos de &aacute;udio</div>
+      <div class="audio-drop-zone" id="audioDropZone">
+        <input type="file" accept="audio/*,audio/mpeg,audio/mp3,audio/wav,audio/wave,audio/x-wav,audio/ogg,audio/opus,audio/webm,audio/mp4,audio/aac,audio/x-m4a,audio/m4a,audio/flac,audio/x-flac,audio/aiff,audio/x-aiff,audio/3gpp,audio/AMR,audio/amr,audio/basic,.ogg,.oga,.mp3,.wav,.flac,.aac,.m4a,.m4b,.mp4a,.opus,.weba,.webm,.3gp,.3gpp,.amr,.aiff,.aif,.au,.mka,.spx,.wma" multiple id="audioInput" onchange="handleAudioFiles(this.files)">
+        <div class="drop-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M4 6l4-4 4 4M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="drop-title">Soltar arquivos de &aacute;udio aqui ou clicar</div>
+        <div class="drop-sub">OGG &middot; MP3 &middot; WAV &middot; FLAC &middot; AAC &middot; M4A &middot; OPUS &middot; e mais</div>
+      </div>
+      <div class="audio-queue" id="audioQueue"></div>
+    </div>
+
+    <button class="process-btn" id="audioProcessBtn" onclick="convertAllAudio()" disabled>Converter &aacute;udio</button>
+    <div class="progress-wrap" id="audioProgressWrap"><div class="progress-fill" id="audioProgressFill"></div></div>
+    <div class="status-msg" id="audioStatusMsg"></div>
+    <div id="audioErrorBox"></div>
+    <div id="audioOutputSection" style="display:none;">
+      <div class="divider"></div>
+      <div class="section-label">Resultado</div>
+      <div class="audio-output-list" id="audioOutputList"></div>
+      <button class="dl-all-btn" onclick="downloadAllAudio()" style="margin-top:12px;">Baixar tudo como ZIP</button>
+    </div>
+
+    <div class="divider" style="margin-top:2rem;"></div>
+    <div class="section-label" style="margin-bottom:12px;">Voice to Text &mdash; Transcri&ccedil;&atilde;o</div>
+
+    <!-- Sub-tabs: gravar vs upload -->
+    <div class="submode-tabs" style="margin-bottom:12px;">
+      <button class="submode-btn active" id="vttModeMicBtn" onclick="setVttMode('mic')">A &mdash; Gravar pelo microfone</button>
+      <button class="submode-btn" id="vttModeFileBtn" onclick="setVttMode('file')">B &mdash; Subir arquivo</button>
+    </div>
+
+    <!-- Idioma compartilhado -->
+    <div class="section">
+      <div class="section-label">Idioma</div>
+      <div class="format-select-row" id="vttLangRow">
+        <span class="format-chip active" data-lang="pt-BR" onclick="selectVttLang('pt-BR')">Portugu&ecirc;s BR</span>
+        <span class="format-chip" data-lang="en-US" onclick="selectVttLang('en-US')">English</span>
+        <span class="format-chip" data-lang="es-ES" onclick="selectVttLang('es-ES')">Espa&ntilde;ol</span>
+        <span class="format-chip" data-lang="fr-FR" onclick="selectVttLang('fr-FR')">Fran&ccedil;ais</span>
+      </div>
+    </div>
+
+    <!-- MODO A: MICROFONE -->
+    <div class="submode-pane active" id="vttPaneMic">
+      <div class="section">
+        <div class="section-label">Gravar &aacute;udio do microfone</div>
+        <div class="hint" style="margin-bottom:10px;">Usa a Web Speech API do Chrome / Edge. Pede permiss&atilde;o de microfone ao iniciar.</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="process-btn" id="vttRecordBtn" onclick="toggleRecording()" style="margin:0;flex:1;background:#7a1010;color:#fff;">&#9679;&ensp;Iniciar grava&ccedil;&atilde;o</button>
+          <div class="vtt-timer" id="vttTimer" style="display:none;">0:00</div>
+        </div>
+        <div class="vtt-waveform" id="vttWaveform" style="display:none;">
+          <canvas id="vttCanvas" width="700" height="48" style="width:100%;height:48px;border-radius:6px;background:var(--bg3);"></canvas>
+        </div>
+      </div>
+      <button class="process-btn" id="vttMicTranscribeBtn" onclick="transcribeFromMic()" disabled>Transcrever grava&ccedil;&atilde;o</button>
+    </div>
+
+    <!-- MODO B: UPLOAD via API -->
+    <div class="submode-pane" id="vttPaneFile">
+      <div class="section">
+        <div class="section-label">API de transcri&ccedil;&atilde;o</div>
+        <div class="hint" style="margin-bottom:8px;">A transcri&ccedil;&atilde;o de arquivos requer um servi&ccedil;o externo. Selecione um provedor e cole sua API key. A chave fica salva apenas no seu navegador (localStorage).</div>
+        <div id="vttFileOriginWarn" class="err-inline" style="display:none;margin-bottom:8px;"></div>
+        <div class="format-select-row" id="vttApiRow">
+          <span class="format-chip active" data-api="groq" onclick="selectVttApi('groq')">Groq Whisper (free)</span>
+          <span class="format-chip" data-api="openai" onclick="selectVttApi('openai')">OpenAI Whisper</span>
+          <span class="format-chip" data-api="hf" onclick="selectVttApi('hf')">Hugging Face</span>
+        </div>
+        <div class="hint" style="margin-top:8px;" id="vttApiHint">Groq tem free tier generoso e &eacute; muito r&aacute;pido. Crie sua key em console.groq.com/keys</div>
+        <div class="field-group" style="margin-top:10px;">
+          <div class="field-label">API key</div>
+          <input type="password" id="vttApiKey" placeholder="cole sua API key aqui" oninput="saveVttApiKey()">
+          <div class="hint" style="margin-top:4px;" id="vttApiKeyStatus">N&atilde;o configurada.</div>
+        </div>
+        <button class="sec-btn" id="vttTestApiBtn" style="width:100%;margin-top:10px;" onclick="testVttApiConnection()">Testar conex&atilde;o com a API</button>
+        <div id="vttApiTestResult" style="margin-top:8px;display:none;"></div>
+      </div>
+      <div class="section">
+        <div class="section-label">Arquivo de &aacute;udio</div>
+        <div class="audio-drop-zone" id="vttDropZone" style="padding:1.25rem 1rem;">
+          <input type="file" accept="audio/*,video/*,audio/mpeg,audio/mp3,audio/wav,audio/ogg,audio/opus,audio/webm,audio/mp4,audio/aac,audio/x-m4a,audio/flac,audio/x-flac,audio/aiff,audio/3gpp,audio/AMR,video/mp4,video/webm,video/quicktime,video/x-matroska,video/x-msvideo,video/x-ms-wmv,video/x-flv,video/3gpp,video/x-m4v,.ogg,.oga,.mp3,.wav,.flac,.aac,.m4a,.opus,.weba,.webm,.3gp,.3gpp,.amr,.aiff,.aif,.au,.mka,.mp4,.m4v,.mov,.mkv,.avi,.wmv,.flv,.ts,.mts" id="vttFileInput" onchange="handleVttFile(this.files[0])">
+          <div class="drop-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M4 6l4-4 4 4M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div class="drop-title" id="vttDzTitle">Soltar &aacute;udio aqui ou clicar para transcrever</div>
+          <div class="drop-sub">MP3 &middot; OGG &middot; WAV &middot; M4A &middot; FLAC &middot; MP4 &middot; WebM</div>
+        </div>
+        <div id="vttFileInfo" class="webm-preview-info" style="display:none;">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0;color:var(--text)"><path d="M5 2h4v7a2 2 0 01-4 0V2z" stroke="currentColor" stroke-width="1.2"/></svg>
+          <span class="webm-fname" id="vttFileName">&mdash;</span>
+          <button class="webm-clear-btn" onclick="clearVttFile()">&times;</button>
+        </div>
+      </div>
+      <button class="process-btn" id="vttFileTranscribeBtn" onclick="transcribeUploadedFile()" disabled>Transcrever via API</button>
+    </div>
+
+    <!-- Saida compartilhada -->
+    <div class="progress-wrap" id="vttProgressWrap"><div class="progress-fill" id="vttProgressFill"></div></div>
+    <div class="status-msg" id="vttStatusMsg"></div>
+    <div id="vttErrorBox"></div>
+    <div id="vttOutputSection" style="display:none;margin-top:12px;">
+      <div class="divider"></div>
+      <div class="section-label">Transcri&ccedil;&atilde;o</div>
+      <textarea id="vttText" style="width:100%;min-height:160px;border:0.5px solid var(--border2);border-radius:8px;padding:12px;font-size:13px;font-family:'DM Mono',monospace;background:var(--bg2);color:var(--text);resize:vertical;outline:none;margin-top:8px;" placeholder="A transcri&ccedil;&atilde;o aparecer&aacute; aqui..."></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="sec-btn" onclick="copyVttText()" style="flex:1;">Copiar texto</button>
+        <button class="sec-btn" onclick="downloadVttText()" style="flex:1;">Baixar .txt</button>
+      </div>
+    </div>
+
+  </div><!-- /screen-audio -->
+
+  <!-- TELA: VIDEO (Criar GIF + Converter) -->
+  <div class="screen" id="screen-video">
+
+    <!-- SUB-MODE SWITCH -->
+    <div class="submode-tabs">
+      <button class="submode-btn active" id="vmode-gif-btn" onclick="setVideoMode('gif')">Criar GIF</button>
+      <button class="submode-btn" id="vmode-conv-btn" onclick="setVideoMode('conv')">Converter Video</button>
+    </div>
+
+    <div class="submode-pane active" id="vpane-gif">
+
+      <div class="section">
+        <div class="section-label">01 &mdash; Selecionar video</div>
+        <div class="video-drop-zone" id="gifVideoDropZone">
+          <input type="file" accept="video/*,video/mp4,video/webm,video/quicktime,video/x-matroska,video/x-msvideo,video/x-ms-wmv,video/x-flv,video/3gpp,video/mp2t,video/x-m4v,video/ogg,.mp4,.webm,.mov,.avi,.mkv,.wmv,.flv,.3gp,.3gpp,.ts,.mts,.m4v,.ogv,.qt" id="gifVideoInput" onchange="handleGifVideoFile(this.files[0])">
+          <div class="drop-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M4 6l4-4 4 4M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div class="drop-title" id="gifVideoDzTitle">Soltar video aqui ou clicar</div>
+          <div class="drop-sub">MP4 &middot; WebM &middot; MOV &middot; AVI &middot; MKV</div>
+        </div>
+      </div>
+
+      <div id="gifBuilderWrap" style="display:none;">
+        <div class="section">
+          <div class="section-label">02 &mdash; Player &amp; Corte</div>
+          <div class="video-preview-wrap">
+            <video id="gifVideoEl" preload="metadata" muted playsinline style="width:100%;max-height:260px;display:block;background:#000;" ontimeupdate="gifOnTimeUpdate()"></video>
+          </div>
+          <div class="gif-timeline">
+            <div class="gif-tl-track" id="gifTlTrack">
+              <div class="gif-tl-range" id="gifTlRange"></div>
+              <div class="gif-tl-handle gif-tl-handle-s" id="gifTlHandleS"></div>
+              <div class="gif-tl-handle gif-tl-handle-e" id="gifTlHandleE"></div>
+              <div class="gif-tl-playhead" id="gifTlPlayhead" style="left:0%;"></div>
+            </div>
+            <div class="gif-tl-labels">
+              <span class="gif-tl-label" id="gifTlLabelS">0.0s</span>
+              <span class="gif-tl-label gif-tl-dur" id="gifTlDur">dur: 0.0s</span>
+              <span class="gif-tl-label" id="gifTlLabelE">0.0s</span>
+            </div>
+          </div>
+          <div class="config-row" style="margin-top:10px;">
+            <div class="field-group">
+              <div class="field-label">Inicio (s)</div>
+              <input type="number" id="gifStartInput" value="0" min="0" step="0.1" oninput="onGifTimeInput('start')" class="gif-scale-input">
+            </div>
+            <div class="field-group">
+              <div class="field-label">Fim (s)</div>
+              <input type="number" id="gifEndInput" value="5" min="0" step="0.1" oninput="onGifTimeInput('end')" class="gif-scale-input">
+            </div>
+          </div>
+          <div class="hint" style="margin-top:6px;" id="gifDurHint">Duracao: 5.0s &middot; max 10s recomendado para arquivos menores</div>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <button class="sec-btn" onclick="gifPlayPause()" id="gifPlayBtn" style="flex:1;">&#9654; Play</button>
+            <button class="sec-btn" onclick="gifPlaySelection()" style="flex:1;">&#9654; So trecho</button>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-label">03 &mdash; Opcoes do GIF</div>
+          <div class="config-row">
+            <div class="field-group">
+              <div class="field-label">FPS</div>
+              <div class="quality-row">
+                <input type="range" class="quality-slider" id="gifFps" min="5" max="25" value="12" oninput="updateGifFpsLabel()">
+                <span class="quality-val" id="gifFpsVal">12 fps</span>
+              </div>
+            </div>
+            <div class="field-group">
+              <div class="field-label">Largura (px)</div>
+              <input type="number" id="gifWidth" min="80" max="1920" placeholder="original" class="gif-scale-input" oninput="updateGifSizePred()">
+            </div>
+          </div>
+          <div class="hint" style="margin-top:6px;" id="gifSizeHint">Mais FPS = mais suave mas arquivo maior &middot; deixe em branco para usar a largura original do v&iacute;deo.</div>
+          <div class="size-pred" id="gifSizePred" style="margin-top:6px;display:none;"></div>
+        </div>
+
+        <button class="process-btn" id="gifExportBtn" onclick="exportGif()">Gerar GIF</button>
+        <div class="progress-wrap" id="gifProgressWrap"><div class="progress-fill" id="gifProgressFill"></div></div>
+        <div class="status-msg" id="gifStatusMsg"></div>
+        <div id="gifErrorBox"></div>
+        <div class="gif-out-preview" id="gifOutPreview" style="display:none;margin-top:12px;text-align:center;"></div>
+      </div>
+    </div><!-- /vpane-gif -->
+
+    <div class="submode-pane" id="vpane-conv">
+
+      <div class="section">
+        <div class="section-label">01 &mdash; Arquivo de entrada</div>
+        <div class="video-drop-zone" id="vcDropZone">
+          <input type="file" accept="video/*,image/gif,video/mp4,video/webm,video/quicktime,video/x-matroska,video/x-msvideo,video/x-ms-wmv,video/x-flv,video/3gpp,video/mp2t,video/x-m4v,video/ogg,.mp4,.webm,.mov,.avi,.mkv,.wmv,.flv,.3gp,.3gpp,.ts,.mts,.m4v,.ogv,.qt,.gif,.gifv" id="vcInput" onchange="handleVcFile(this.files[0])">
+          <div class="drop-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v8M4 6l4-4 4 4M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <div class="drop-title" id="vcDzTitle">Soltar video ou GIF aqui</div>
+          <div class="drop-sub">MP4 &middot; WebM &middot; MOV &middot; AVI &middot; MKV &middot; GIF &middot; e mais</div>
+        </div>
+        <div id="vcFileInfo" style="display:none;" class="webm-preview-info">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0;color:var(--text)"><rect x="1" y="2" width="14" height="12" rx="2" stroke="currentColor" stroke-width="1.2"/><path d="M6 6l5 2.5L6 11V6z" fill="currentColor" opacity=".7"/></svg>
+          <span class="webm-fname" id="vcFileName">&mdash;</span>
+          <button class="webm-clear-btn" onclick="clearVcFile()">&times;</button>
+        </div>
+      </div>
+
+      <div class="section" id="vcFormatSection" style="display:none;">
+        <div class="section-label">02 &mdash; Formato de saida (escolha o seu)</div>
+        <div class="format-select-row" id="vcFormatRow" style="flex-wrap:wrap;gap:6px;"></div>
+        <div class="hint" style="margin-top:6px;" id="vcFmtHint">Selecione um formato acima</div>
+      </div>
+
+      <div class="section" id="vcOptionsSection" style="display:none;">
+        <div class="section-label">03 &mdash; Opcoes</div>
+        <div class="config-row">
+          <div class="field-group">
+            <div class="field-label">Qualidade</div>
+            <div class="quality-row">
+              <input type="range" class="quality-slider" id="vcQuality" min="0" max="4" value="2" oninput="updateVcQualityLabel()">
+              <span class="quality-val" id="vcQualityVal">Medio</span>
+            </div>
+          </div>
+          <div class="field-group">
+            <div class="field-label">Largura (px, opcional)</div>
+            <input type="number" id="vcWidth" min="80" max="3840" placeholder="original" class="gif-scale-input" oninput="updateVcSizePred()">
+          </div>
+        </div>
+        <div class="size-pred" id="vcSizePred" style="margin-top:8px;display:none;"></div>
+      </div>
+
+      <button class="process-btn" id="vcConvertBtn" onclick="convertVideo()" disabled>Converter video</button>
+      <div class="progress-wrap" id="vcProgressWrap"><div class="progress-fill" id="vcProgressFill"></div></div>
+      <div class="status-msg" id="vcStatusMsg"></div>
+      <div id="vcErrorBox"></div>
+      <div id="vcOutputSection" style="display:none;margin-top:10px;"></div>
+
+    </div><!-- /vpane-conv -->
+
+  </div><!-- /screen-video -->
+
+</div>
+
+<script>
+/* ===== THEME ===== */
+let currentTheme = localStorage.getItem('theme') || 'system';
+function applyTheme(t){
+  const dark = t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);
+  dark?document.documentElement.setAttribute('data-theme','dark'):document.documentElement.removeAttribute('data-theme');
+}
+function setTheme(t){
+  currentTheme=t;localStorage.setItem('theme',t);applyTheme(t);
+  document.querySelectorAll('.theme-opt').forEach(el=>el.classList.remove('active'));
+  document.getElementById('opt-'+t).classList.add('active');
+  closeMenu();
+}
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{if(currentTheme==='system')applyTheme('system');});
+applyTheme(currentTheme);
+document.querySelectorAll('.theme-opt').forEach(el=>el.classList.remove('active'));
+document.getElementById('opt-'+currentTheme).classList.add('active');
+
+
+/* ===== GLOBAL ERROR / TOAST ===== */
+function showErrToast(title, msg, ttl){
+  try {
+    const el = document.getElementById('errToast');
+    document.getElementById('errToastTitle').textContent = title || 'Erro';
+    document.getElementById('errToastBody').textContent = (msg || '').toString();
+    el.classList.add('show');
+    if(typeof ttl !== 'number') ttl = 8000;
+    if(window._errToastTimer) clearTimeout(window._errToastTimer);
+    if(ttl > 0){ window._errToastTimer = setTimeout(hideErrToast, ttl); }
+    console.error('[err]', title, msg);
+  } catch(e){ console.error(e); }
+}
+function hideErrToast(){
+  try { document.getElementById('errToast').classList.remove('show'); } catch(e){}
+}
+function showInlineErr(elId, title, msg){
+  try {
+    const el = document.getElementById(elId);
+    if(!el) return;
+    el.innerHTML = '<div class="err-inline"><strong>' + (title||'Erro') + ':</strong> ' + ((msg||'').toString().replace(/</g,'&lt;')) + '</div>';
+  } catch(e){ console.error(e); }
+}
+function clearInlineErr(elId){
+  try { const el = document.getElementById(elId); if(el) el.innerHTML=''; } catch(e){}
+}
+window.addEventListener('error', function(e){
+  showErrToast('Erro inesperado', (e.error && e.error.message) || e.message || 'Erro desconhecido');
+});
+window.addEventListener('unhandledrejection', function(e){
+  const msg = (e.reason && (e.reason.message || e.reason)) || 'Promise rejeitada';
+  showErrToast('Erro em operacao assincrona', msg);
+});
+
+/* ===== VIDEO SUB-MODE SWITCHER ===== */
+function setVideoMode(mode){
+  try {
+    document.getElementById('vmode-gif-btn').classList.toggle('active', mode==='gif');
+    document.getElementById('vmode-conv-btn').classList.toggle('active', mode==='conv');
+    document.getElementById('vpane-gif').classList.toggle('active', mode==='gif');
+    document.getElementById('vpane-conv').classList.toggle('active', mode==='conv');
+  } catch(e){
+    showErrToast('Erro ao trocar modo', e.message);
+  }
+}
+
+/* ===== MENU ===== */
+function toggleMenu(){['menuBtn','menuPanel','menuOverlay'].forEach(id=>document.getElementById(id).classList.toggle('open'));}
+function closeMenu(){['menuBtn','menuPanel','menuOverlay'].forEach(id=>document.getElementById(id).classList.remove('open'));}
+
+/* ===== LOGOS ===== */
+const logos    = { NA:null, LHEH:null, CL:null };  // active logo in use
+const defaults = { NA:null, LH:null, EH:null };    // default logo loaded from server
+const customs  = { NA:null, LHEH:null, CL:null };  // user-uploaded logo
+const useCustom = { NA:false, LHEH:false };        // mode flag (CL is always custom)
+let lhehLabel = 'LH'; // 'LH' or 'EH' — which is currently active
+
+// URLs of default logos on the server (same folder as index.html)
+const DEFAULT_LOGO_URLS = {
+  NA: encodeURI('./VNI - NA - PROJETO NOVOS CASOS - NÃO ALTERAR.png'),
+  LH: encodeURI('./VNI - LH.png'),
+  EH: encodeURI('./VNI - EH.png')
+};
+
+function detectLHEH(filename){
+  const up = filename.toUpperCase();
+  if(up.includes('EH')) return 'EH';
+  if(up.includes('LH')) return 'LH';
+  return null;
+}
+
+function loadImageFromURL(url){
+  return new Promise((res, rej)=>{
+    const img = new Image();
+    // anonymous CORS so canvas.toBlob() works even if served from a CDN/subdomain
+    img.crossOrigin = 'anonymous';
+    img.onload = () => res(img);
+    img.onerror = (e) => rej(e);
+    img.src = url;
+  });
+}
+
+async function initDefaultLogos(){
+  // Load defaults in parallel; gracefully fall back if any fail.
+  const results = await Promise.allSettled([
+    loadImageFromURL(DEFAULT_LOGO_URLS.NA),
+    loadImageFromURL(DEFAULT_LOGO_URLS.LH),
+    loadImageFromURL(DEFAULT_LOGO_URLS.EH)
+  ]);
+  const validate = (img, key) => {
+    if(!img) return null;
+    if(img.naturalWidth !== 1080 || img.naturalHeight !== 1350){
+      console.warn('Logo padrão '+key+' com dimensão incorreta: '+img.naturalWidth+'×'+img.naturalHeight);
+      return null;
+    }
+    return img;
+  };
+  defaults.NA = results[0].status==='fulfilled' ? validate(results[0].value, 'NA') : null;
+  defaults.LH = results[1].status==='fulfilled' ? validate(results[1].value, 'LH') : null;
+  defaults.EH = results[2].status==='fulfilled' ? validate(results[2].value, 'EH') : null;
+
+  // Apply NA default
+  if(defaults.NA){
+    logos.NA = defaults.NA;
+    setLogoBoxState('NA','default','Logo NA · padrão ativa');
+  } else {
+    setLogoBoxStateUnloaded('NA');
+  }
+
+  // Apply LH/EH default — initial label = LH
+  if(defaults.LH || defaults.EH){
+    if(!defaults[lhehLabel]) lhehLabel = defaults.LH ? 'LH' : 'EH';
+    logos.LHEH = defaults[lhehLabel];
+    document.getElementById('lhehTag').textContent = lhehLabel;
+    document.getElementById('btnLH').classList.toggle('active', lhehLabel==='LH');
+    document.getElementById('btnEH').classList.toggle('active', lhehLabel==='EH');
+    document.getElementById('lhehToggle').style.display = 'flex';
+    setLogoBoxState('LHEH','default','Logo '+lhehLabel+' · padrão ativa');
+  } else {
+    setLogoBoxStateUnloaded('LHEH');
+  }
+
+  updateFmtAvailability();
+  renderQueue();
+}
+
+function setLogoBoxState(type, mode, statusText){
+  const id = type.toLowerCase();
+  const box = document.getElementById(id+'Box');
+  const status = document.getElementById(id+'Status');
+  const modeRow = document.getElementById(id+'ModeRow');
+  const modeTag = document.getElementById(id+'ModeTag');
+  const modeBtn = document.getElementById(id+'ModeBtn');
+
+  box.classList.remove('logo-error');
+  box.classList.add('has-logo');
+  status.textContent = statusText;
+  status.className = 'logo-status ready';
+
+  if(modeRow){
+    modeRow.style.display = 'flex';
+    if(modeTag){
+      modeTag.textContent = mode==='custom' ? 'personalizada' : 'padrão';
+      modeTag.classList.toggle('custom', mode==='custom');
+    }
+    if(modeBtn){
+      modeBtn.textContent = mode==='custom' ? 'usar padrão' : 'subir outra';
+    }
+  }
+}
+
+function setLogoBoxStateUnloaded(type){
+  const id = type.toLowerCase();
+  const box = document.getElementById(id+'Box');
+  const status = document.getElementById(id+'Status');
+  const modeRow = document.getElementById(id+'ModeRow');
+  box.classList.remove('has-logo','logo-error');
+  status.className = 'logo-status';
+  if(type==='LHEH'){
+    status.innerHTML = 'Logo LH/EH<br>clique para subir';
+  } else if(type==='CL'){
+    status.innerHTML = 'Logo Cliente<br>clique para subir';
+  } else {
+    status.innerHTML = 'Logo '+type+'<br>clique para subir';
+  }
+  if(modeRow) modeRow.style.display = 'none';
+  // Restore "opcional" badge if it exists in the box (CL only)
+  const opt = box.querySelector('.logo-optional');
+  if(opt) opt.style.display = '';
+}
+
+function setLHEH(val){
+  lhehLabel = val;
+  document.getElementById('btnLH').classList.toggle('active', val==='LH');
+  document.getElementById('btnEH').classList.toggle('active', val==='EH');
+  document.getElementById('lhehTag').textContent = val;
+  // Recompute active LHEH logo
+  if(useCustom.LHEH){
+    // Custom logo stays the same (user uploads one file regardless of label)
+    if(customs.LHEH){
+      logos.LHEH = customs.LHEH;
+      const fname = customs.LHEH._fileName || 'personalizada';
+      setLogoBoxState('LHEH','custom','Logo '+val+' · '+fname);
+    }
+  } else {
+    logos.LHEH = defaults[val] || null;
+    if(logos.LHEH){
+      setLogoBoxState('LHEH','default','Logo '+val+' · padrão ativa');
+    } else {
+      setLogoBoxStateUnloaded('LHEH');
+    }
+  }
+  updateFmtAvailability();
+  renderQueue();
+}
+
+// Click handler for "trocar" / "usar padrão" button on NA / LHEH boxes
+function toggleLogoMode(type, ev){
+  if(ev){ ev.stopPropagation(); ev.preventDefault(); }
+  if(useCustom[type]){
+    // Switch back to default
+    useCustom[type] = false;
+    customs[type] = null;
+    const input = document.getElementById('logo'+type);
+    if(input) input.value = '';
+    if(type==='NA'){
+      logos.NA = defaults.NA || null;
+      if(logos.NA) setLogoBoxState('NA','default','Logo NA · padrão ativa');
+      else setLogoBoxStateUnloaded('NA');
+    } else if(type==='LHEH'){
+      logos.LHEH = defaults[lhehLabel] || null;
+      if(logos.LHEH) setLogoBoxState('LHEH','default','Logo '+lhehLabel+' · padrão ativa');
+      else setLogoBoxStateUnloaded('LHEH');
+    }
+    updateFmtAvailability();
+    renderQueue();
+  } else {
+    // Trigger file picker for custom upload
+    const input = document.getElementById('logo'+type);
+    if(input) input.click();
+  }
+}
+
+// Click handler for "remover" on the CL box
+function removeCustomCL(ev){
+  if(ev){ ev.stopPropagation(); ev.preventDefault(); }
+  customs.CL = null;
+  logos.CL = null;
+  const input = document.getElementById('logoCL');
+  if(input) input.value = '';
+  setLogoBoxStateUnloaded('CL');
+  updateFmtAvailability();
+  renderQueue();
+}
+
+function loadLogo(type, input){
+  const file = input.files[0];
+  if(!file) return;
+  const id = type.toLowerCase();
+  const box = document.getElementById(id+'Box');
+  const status = document.getElementById(id+'Status');
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      if(img.naturalWidth!==1080||img.naturalHeight!==1350){
+        input.value='';
+        box.classList.remove('has-logo'); box.classList.add('logo-error');
+        const modeRow = document.getElementById(id+'ModeRow');
+        if(modeRow) modeRow.style.display = 'none';
+        status.textContent=img.naturalWidth+'×'+img.naturalHeight+' — precisa ser 1080×1350';
+        status.className='logo-status error';
+        setTimeout(()=>{
+          box.classList.remove('logo-error');
+          // Restore previous state
+          if(type==='NA'){
+            if(logos.NA){ setLogoBoxState('NA', useCustom.NA?'custom':'default', useCustom.NA?('Logo NA · personalizada'):'Logo NA · padrão ativa'); }
+            else setLogoBoxStateUnloaded('NA');
+          } else if(type==='LHEH'){
+            if(logos.LHEH){ setLogoBoxState('LHEH', useCustom.LHEH?'custom':'default', useCustom.LHEH?('Logo '+lhehLabel+' · personalizada'):('Logo '+lhehLabel+' · padrão ativa')); }
+            else setLogoBoxStateUnloaded('LHEH');
+          } else if(type==='CL'){
+            if(logos.CL){ setLogoBoxState('CL','custom','Logo CL · '+(customs.CL && customs.CL._fileName?customs.CL._fileName:'personalizada')); }
+            else setLogoBoxStateUnloaded('CL');
+          }
+        },3000);
+        return;
+      }
+
+      img._fileName = file.name;
+
+      if(type==='NA'){
+        customs.NA = img;
+        useCustom.NA = true;
+        logos.NA = img;
+        setLogoBoxState('NA','custom','Logo NA · '+file.name);
+      } else if(type==='LHEH'){
+        customs.LHEH = img;
+        useCustom.LHEH = true;
+        logos.LHEH = img;
+        // Auto-detect LH or EH from filename
+        const detected = detectLHEH(file.name);
+        if(detected){
+          lhehLabel = detected;
+          document.getElementById('btnLH').classList.toggle('active', detected==='LH');
+          document.getElementById('btnEH').classList.toggle('active', detected==='EH');
+          document.getElementById('lhehTag').textContent = detected;
+        }
+        document.getElementById('lhehToggle').style.display='flex';
+        setLogoBoxState('LHEH','custom','Logo '+lhehLabel+' · '+file.name);
+      } else if(type==='CL'){
+        customs.CL = img;
+        logos.CL = img;
+        const clBox = document.getElementById('clBox');
+        const clOpt = clBox.querySelector('.logo-optional');
+        if(clOpt) clOpt.style.display = 'none';
+        setLogoBoxState('CL','custom','Logo CL · '+file.name);
+      }
+
+      updateFmtAvailability();
+      renderQueue();
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+/* ===== DATA MODEL =====
+  groups: array of group objects (ordered = case order)
+    group: { id: number, items: [item, ...] }
+    item: { id, file, version: null|'V1'|'V2'|'V3', error: null|string }
+
+  Groups with 1 item → no version suffix
+  Groups with >1 items → each item must have a unique version V1/V2/V3
+*/
+let groups = [];
+let _gid = 0, _iid = 0;
+function newGid(){ return ++_gid; }
+function newIid(){ return ++_iid; }
+
+function getStartNum(){ return parseInt(document.getElementById('startCase').value)||1; }
+function getPrefix(){ return (document.getElementById('prefix').value||'CASO').trim(); }
+function padNum(n){ return String(n).padStart(3,'0'); }
+function getCaseName(n){ return getPrefix()+'-'+padNum(n); }
+
+// Assign auto-versions when a group gets a second item
+function assignVersions(group){
+  const used = group.items.map(i=>i.version).filter(Boolean);
+  group.items.forEach(item=>{
+    if(!item.version){
+      const next = ['V1','V2','V3'].find(v=>!used.includes(v));
+      if(next){ item.version=next; used.push(next); }
+    }
+  });
+}
+
+function handleFiles(files){
+  Array.from(files).forEach(f=>{
+    if(groups.some(g=>g.items.some(i=>i.file.name===f.name))) return;
+    groups.push({ id:newGid(), items:[{id:newIid(), file:f, version:null, error:null}] });
+  });
+  renderQueue(); checkBtn();
+}
+
+function removeItem(gid, iid){
+  const gIdx = groups.findIndex(g=>g.id===gid);
+  if(gIdx<0) return;
+  const g = groups[gIdx];
+  g.items = g.items.filter(i=>i.id!==iid);
+  if(g.items.length===0){ groups.splice(gIdx,1); }
+  else if(g.items.length===1){ g.items[0].version=null; } // single item → no version needed
+  renderQueue(); checkBtn();
+}
+
+function setVersion(gid, iid, v){
+  const g = groups.find(g=>g.id===gid);
+  if(!g) return;
+  const item = g.items.find(i=>i.id===iid);
+  if(!item) return;
+  // Check not already used by another item in this group
+  const usedByOther = g.items.filter(i=>i.id!==iid).map(i=>i.version);
+  if(usedByOther.includes(v)) return; // blocked, already used
+  item.version = (item.version===v) ? null : v;
+  renderQueue();
+}
+
+function unmergeGroup(gid){
+  const gIdx = groups.findIndex(g=>g.id===gid);
+  if(gIdx<0) return;
+  const g = groups[gIdx];
+  if(g.items.length<=1) return;
+  const newGroups = g.items.map(item=>{ item.version=null; return {id:newGid(), items:[item]}; });
+  groups.splice(gIdx,1,...newGroups);
+  renderQueue();
+}
+
+/* ===== RENDER ===== */
+function renderQueue(){
+  const q = document.getElementById('fileQueue');
+  if(!groups.length){ q.innerHTML=''; return; }
+
+  const start = getStartNum();
+  let html = '';
+
+  groups.forEach((group, gIdx)=>{
+    const caseNum = start + gIdx;
+    const caseName = getCaseName(caseNum);
+    const isMulti = group.items.length > 1;
+
+    // Drop between groups
+    html += `<div class="group-drop-between" id="gdb-${gIdx}" 
+      ondragover="onDropBetweenOver(event,${gIdx})" 
+      ondragleave="onDropBetweenLeave(event)" 
+      ondrop="onDropBetween(event,${gIdx})"></div>`;
+
+    html += `<div class="group-block" id="gb-${group.id}"
+      ondragover="onGroupOver(event,'${group.id}')"
+      ondragleave="onGroupLeave(event,'${group.id}')"
+      ondrop="onDropToGroup(event,'${group.id}')">`;
+
+    // Group header
+    html += `<div class="group-header" 
+      draggable="true"
+      ondragstart="onGroupDragStart(event,'${group.id}')"
+      ondragend="onGroupDragEnd(event)">
+      <div class="group-drag-handle">
+        <svg viewBox="0 0 14 14" fill="none"><circle cx="4" cy="3" r="1" fill="currentColor"/><circle cx="10" cy="3" r="1" fill="currentColor"/><circle cx="4" cy="7" r="1" fill="currentColor"/><circle cx="10" cy="7" r="1" fill="currentColor"/><circle cx="4" cy="11" r="1" fill="currentColor"/><circle cx="10" cy="11" r="1" fill="currentColor"/></svg>
+      </div>
+      <div class="group-case-label">${caseName}${isMulti?' — '+group.items.length+' fotos':''}</div>
+      ${isMulti?`<button class="group-unmerge-btn" onclick="unmergeGroup(${group.id})" ondragstart="event.stopPropagation()">desgrupar</button>`:''}
+    </div>`;
+
+    // Items
+    group.items.forEach(item=>{
+      const vSuffix = item.version ? '-'+item.version : '';
+      const displayName = caseName + vSuffix + '-VNI';
+      const errHtml = item.error ? `<div class="error-badge">${item.error}</div>` : '';
+
+      // Version badges — disabled if used by another item in group
+      let vBadges = '';
+      if(isMulti){
+        const usedByOther = group.items.filter(i=>i.id!==item.id).map(i=>i.version);
+        vBadges = ['V1','V2','V3'].map(v=>{
+          const isActive = item.version===v;
+          const isDisabled = !isActive && usedByOther.includes(v);
+          return `<span class="v-badge${isActive?' active':''}${isDisabled?' disabled':''}" 
+            onclick="${isDisabled?'':'setVersion('+group.id+','+item.id+',\''+v+'\')'}">${v}</span>`;
+        }).join('');
+      }
+
+      html += `<div class="file-item" 
+        draggable="true"
+        ondragstart="onItemDragStart(event,'${group.id}','${item.id}')"
+        ondragend="onItemDragEnd(event)">
+        <div class="item-drag-handle">
+          <svg viewBox="0 0 12 12" fill="none"><circle cx="3" cy="2" r=".9" fill="currentColor"/><circle cx="9" cy="2" r=".9" fill="currentColor"/><circle cx="3" cy="6" r=".9" fill="currentColor"/><circle cx="9" cy="6" r=".9" fill="currentColor"/><circle cx="3" cy="10" r=".9" fill="currentColor"/><circle cx="9" cy="10" r=".9" fill="currentColor"/></svg>
+        </div>
+        <img class="file-thumb" id="th${item.id}" src="" alt="">
+        <div class="file-info">
+          <div class="file-name">${item.file.name}</div>
+          <div class="file-out">${displayName}</div>
+          ${errHtml}
+          ${isMulti?`<div class="v-row"><span class="v-label">versão:</span>${vBadges}</div>`:''}
+        </div>
+        <button class="file-remove" onclick="removeItem(${group.id},${item.id})">×</button>
+      </div>`;
+    });
+
+    html += `</div>`; // group-block
+  });
+
+  // Final drop-between
+  html += `<div class="group-drop-between" id="gdb-${groups.length}" 
+    ondragover="onDropBetweenOver(event,${groups.length})" 
+    ondragleave="onDropBetweenLeave(event)" 
+    ondrop="onDropBetween(event,${groups.length})"></div>`;
+
+  q.innerHTML = html;
+
+  // Thumbnails
+  groups.forEach(g=>g.items.forEach(item=>{
+    const reader = new FileReader();
+    reader.onload = e=>{ const el=document.getElementById('th'+item.id); if(el) el.src=e.target.result; };
+    reader.readAsDataURL(item.file);
+  }));
+}
+
+function checkBtn(){
+  document.getElementById('processBtn').disabled = groups.length===0;
+}
+
+document.getElementById('startCase').addEventListener('input', renderQueue);
+document.getElementById('prefix').addEventListener('input', renderQueue);
+
+/* ===== DRAG & DROP ===== */
+let draggingGroupId = null;
+let draggingItemGid = null;
+let draggingItemIid = null;
+
+// GROUP drag (reorder groups)
+function onGroupDragStart(e, gid){
+  draggingGroupId = gid;
+  draggingItemGid = null; draggingItemIid = null;
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(()=>{ const el=document.getElementById('gb-'+gid); if(el) el.style.opacity='.4'; },0);
+}
+function onGroupDragEnd(e){
+  if(draggingGroupId){ const el=document.getElementById('gb-'+draggingGroupId); if(el) el.style.opacity=''; }
+  draggingGroupId=null;
+  document.querySelectorAll('.group-drop-between').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.group-block').forEach(el=>el.classList.remove('drop-target-group'));
+}
+
+// DROP BETWEEN groups (reorder)
+function onDropBetweenOver(e, beforeIdx){
+  e.preventDefault();
+  if(draggingGroupId===null && draggingItemGid===null) return;
+  document.querySelectorAll('.group-drop-between').forEach(el=>el.classList.remove('active'));
+  const el=document.getElementById('gdb-'+beforeIdx); if(el) el.classList.add('active');
+}
+function onDropBetweenLeave(e){ e.currentTarget.classList.remove('active'); }
+function onDropBetween(e, beforeIdx){
+  e.preventDefault();
+  e.currentTarget.classList.remove('active');
+
+  if(draggingGroupId!==null){
+    // Move whole group to position beforeIdx
+    const fromIdx = groups.findIndex(g=>g.id==draggingGroupId);
+    if(fromIdx<0) return;
+    const [moved] = groups.splice(fromIdx,1);
+    let toIdx = beforeIdx;
+    if(fromIdx < beforeIdx) toIdx--;
+    groups.splice(toIdx,0,moved);
+    draggingGroupId=null;
+    renderQueue();
+
+  } else if(draggingItemGid!==null){
+    // Extract item from its group and create a new standalone group at position beforeIdx
+    const srcGroup = groups.find(g=>g.id==draggingItemGid);
+    if(!srcGroup) return;
+    const item = srcGroup.items.find(i=>i.id==draggingItemIid);
+    if(!item) return;
+    srcGroup.items = srcGroup.items.filter(i=>i.id!=draggingItemIid);
+    item.version=null;
+    if(srcGroup.items.length===1) srcGroup.items[0].version=null;
+    if(srcGroup.items.length===0) groups.splice(groups.indexOf(srcGroup),1);
+    const newGroup = {id:newGid(), items:[item]};
+    // recalc insert position after possible removal
+    let toIdx = beforeIdx;
+    if(groups.indexOf(srcGroup)>-1 && groups.indexOf(srcGroup) < beforeIdx) toIdx--;
+    toIdx = Math.max(0, Math.min(toIdx, groups.length));
+    groups.splice(toIdx,0,newGroup);
+    draggingItemGid=null; draggingItemIid=null;
+    renderQueue();
+  }
+}
+
+// GROUP target (merge item into group)
+function onGroupOver(e, gid){
+  e.preventDefault();
+  if(draggingItemGid===null) return; // only item drags can merge
+  if(draggingItemGid==gid) return;   // same group → no
+  const el=document.getElementById('gb-'+gid);
+  if(el) el.classList.add('drop-target-group');
+}
+function onGroupLeave(e, gid){
+  const el=document.getElementById('gb-'+gid);
+  if(el) el.classList.remove('drop-target-group');
+}
+function onDropToGroup(e, gid){
+  e.stopPropagation(); e.preventDefault();
+  const el=document.getElementById('gb-'+gid); if(el) el.classList.remove('drop-target-group');
+  if(draggingItemGid===null) return;
+  if(draggingItemGid==gid) return;
+  if(String(draggingItemGid)===String(gid)) return;
+
+  const srcGroup = groups.find(g=>g.id==draggingItemGid);
+  const dstGroup = groups.find(g=>g.id==gid);
+  if(!srcGroup||!dstGroup) return;
+
+  // Check group limit (max 3)
+  if(dstGroup.items.length>=3){ alert('Máximo de 3 fotos por caso (V1, V2, V3).'); return; }
+
+  const item = srcGroup.items.find(i=>i.id==draggingItemIid);
+  if(!item) return;
+
+  // Remove from source
+  srcGroup.items = srcGroup.items.filter(i=>i.id!=draggingItemIid);
+  if(srcGroup.items.length===1) srcGroup.items[0].version=null;
+  if(srcGroup.items.length===0) groups.splice(groups.indexOf(srcGroup),1);
+
+  // Add to dest
+  item.version=null;
+  dstGroup.items.push(item);
+  assignVersions(dstGroup);
+
+  draggingItemGid=null; draggingItemIid=null;
+  renderQueue();
+}
+
+// ITEM drag (to merge into another group or extract)
+function onItemDragStart(e, gid, iid){
+  draggingItemGid = parseInt(gid)||gid;
+  draggingItemIid = parseInt(iid)||iid;
+  draggingGroupId = null;
+  e.dataTransfer.effectAllowed = 'move';
+  e.stopPropagation();
+}
+function onItemDragEnd(e){ draggingItemGid=null; draggingItemIid=null; }
+
+/* Drop zone for file upload (separate from queue) */
+const dz = document.getElementById('dropZone');
+dz.addEventListener('dragover', e=>{ e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragleave', ()=>dz.classList.remove('drag-over'));
+dz.addEventListener('drop', e=>{
+  e.preventDefault(); dz.classList.remove('drag-over');
+  if(e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+});
+
+/* ===== PROCESS ===== */
+function loadImgFromFile(file){
+  return new Promise((res,rej)=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const img=new Image();
+      img.onload=()=>res(img); img.onerror=rej;
+      img.src=e.target.result;
+    };
+    reader.onerror=rej;
+    reader.readAsDataURL(file);
+  });
+}
+
+function compositeCanvas(base, logo){
+  const W=1080,H=1350;
+  const c=document.createElement('canvas');
+  c.width=W; c.height=H;
+  const ctx=c.getContext('2d');
+  ctx.drawImage(base,0,0,W,H);
+  if(logo) ctx.drawImage(logo,0,0,W,H);
+  return c;
+}
+
+function canvasToBlob(canvas,type,quality){
+  return new Promise(res=>canvas.toBlob(res,type,quality));
+}
+
+/* ===== FORMAT SELECTION ===== */
+const fmtState = { VNI:true, NA:true, LHEH:true, CL:true, VOI:true, VOICL:true };
+
+function toggleFmt(key){
+  fmtState[key] = !fmtState[key];
+  const el = document.getElementById('fmt'+key);
+  if(el) el.classList.toggle('active', fmtState[key]);
+}
+
+function setAllFmt(value){
+  Object.keys(fmtState).forEach(k=>{
+    fmtState[k] = value;
+    const el = document.getElementById('fmt'+k);
+    if(el) el.classList.toggle('active', value);
+  });
+}
+
+// Show/hide format chips based on which logos are available.
+// VNI and VOI are always available (no logo needed).
+// NA/LHEH need their logos. CL and VOI-CL need the CL upload.
+function updateFmtAvailability(){
+  const naAvail   = !!logos.NA;
+  const lhehAvail = !!logos.LHEH;
+  const clAvail   = !!logos.CL;
+
+  const naEl    = document.getElementById('fmtNA');
+  const lhehEl  = document.getElementById('fmtLHEH');
+  const clEl    = document.getElementById('fmtCL');
+  const voiclEl = document.getElementById('fmtVOICL');
+  if(naEl)    naEl.style.display    = naAvail   ? 'inline-flex' : 'none';
+  if(lhehEl)  lhehEl.style.display  = lhehAvail ? 'inline-flex' : 'none';
+  if(clEl)    clEl.style.display    = clAvail   ? 'inline-flex' : 'none';
+  if(voiclEl) voiclEl.style.display = clAvail   ? 'inline-flex' : 'none';
+
+  const fmtLHEHText = document.getElementById('fmtLHEHText');
+  if(fmtLHEHText) fmtLHEHText.textContent = lhehLabel;
+}
+
+async function processAll(){
+  if(!groups.length) return;
+  const outputs=[];
+  document.getElementById('outputGrid').innerHTML='';
+  document.getElementById('outputSection').style.display='none';
+
+  const btn=document.getElementById('processBtn');
+  btn.disabled=true;
+  const pw=document.getElementById('progressWrap');
+  const pf=document.getElementById('progressFill');
+  const sm=document.getElementById('statusMsg');
+  pw.style.display='block'; pf.style.width='0%';
+
+  // Effective formats: must be selected AND have the required logo (when applicable).
+  const exp = {
+    VNI:   fmtState.VNI,
+    NA:    fmtState.NA    && !!logos.NA,
+    LHEH:  fmtState.LHEH  && !!logos.LHEH,
+    CL:    fmtState.CL    && !!logos.CL,
+    VOI:   fmtState.VOI,
+    VOICL: fmtState.VOICL && !!logos.CL
+  };
+
+  // Bail out early if user unchecked everything.
+  const anySelected = Object.values(exp).some(Boolean);
+  if(!anySelected){
+    btn.disabled=false;
+    pw.style.display='none';
+    sm.textContent='Selecione ao menos um formato em "03 — Formatos para exportar".';
+    return;
+  }
+
+  const stepsPerItem = Object.values(exp).filter(Boolean).length;
+
+  const start=getStartNum();
+  let totalItems=0; groups.forEach(g=>totalItems+=g.items.length);
+  let done=0;
+  function tick(msg){ done++; pf.style.width=Math.round(done/(totalItems*stepsPerItem||1)*100)+'%'; sm.textContent=msg; }
+
+  for(let gIdx=0; gIdx<groups.length; gIdx++){
+    const group=groups[gIdx];
+    const caseNum=start+gIdx;
+    const caseName=getCaseName(caseNum);
+    const isMulti=group.items.length>1;
+
+    for(const item of group.items){
+      item.error=null;
+      let img;
+      try{ img=await loadImgFromFile(item.file); }
+      catch(e){ item.error='erro ao carregar'; done+=stepsPerItem; continue; }
+
+      if(img.naturalWidth!==1080||img.naturalHeight!==1350){
+        item.error=img.naturalWidth+'×'+img.naturalHeight+' — esperado 1080×1350';
+        done+=stepsPerItem; continue;
+      }
+
+      const vSuffix = isMulti && item.version ? '-'+item.version : '';
+
+      // VNI
+      if(exp.VNI){
+        const cA=compositeCanvas(img,null);
+        const bA=await canvasToBlob(cA,'image/jpeg',0.95);
+        outputs.push({blob:bA, name:caseName+vSuffix+'-VNI.jpg', url:URL.createObjectURL(bA)});
+        tick(caseName+vSuffix+' — VNI');
+      }
+
+      // VNI-NA
+      if(exp.NA){
+        const c=compositeCanvas(img,logos.NA);
+        const b=await canvasToBlob(c,'image/jpeg',0.95);
+        outputs.push({blob:b, name:caseName+vSuffix+'-VNI-NA.jpg', url:URL.createObjectURL(b)});
+        tick(caseName+vSuffix+' — NA');
+      }
+
+      // VNI-LH or VNI-EH
+      if(exp.LHEH){
+        const c=compositeCanvas(img,logos.LHEH);
+        const b=await canvasToBlob(c,'image/jpeg',0.95);
+        outputs.push({blob:b, name:caseName+vSuffix+'-VNI-'+lhehLabel+'.jpg', url:URL.createObjectURL(b)});
+        tick(caseName+vSuffix+' — '+lhehLabel);
+      }
+
+      // VNI-CL
+      if(exp.CL){
+        const c=compositeCanvas(img,logos.CL);
+        const b=await canvasToBlob(c,'image/jpeg',0.95);
+        outputs.push({blob:b, name:caseName+vSuffix+'-VNI-CL.jpg', url:URL.createObjectURL(b)});
+        tick(caseName+vSuffix+' — CL');
+      }
+
+      // VOI
+      if(exp.VOI){
+        const cD=compositeCanvas(img,null);
+        const bD=await canvasToBlob(cD,'image/webp',0.5);
+        outputs.push({blob:bD, name:caseName+vSuffix+'-VOI.webp', url:URL.createObjectURL(bD)});
+        tick(caseName+vSuffix+' — VOI');
+      }
+
+      // VOI-CL
+      if(exp.VOICL){
+        const c=compositeCanvas(img,logos.CL);
+        const b=await canvasToBlob(c,'image/webp',0.5);
+        outputs.push({blob:b, name:caseName+vSuffix+'-VOI-CL.webp', url:URL.createObjectURL(b)});
+        tick(caseName+vSuffix+' — VOI-CL');
+      }
+    }
+  }
+
+  btn.disabled=false;
+  renderQueue();
+  sm.textContent=outputs.length+' arquivos prontos para download';
+  renderOutputs(outputs);
+  window._lastOutputs=outputs;
+}
+
+function renderOutputs(outputs){
+  const grid=document.getElementById('outputGrid');
+  grid.innerHTML=outputs.map((o,i)=>`
+    <div class="output-card">
+      <img src="${o.url}" alt="${o.name}">
+      <div class="output-card-info">
+        <div class="output-card-name">${o.name}</div>
+        <button class="dl-btn" onclick="dlSingle(${i})">baixar</button>
+      </div>
+    </div>`).join('');
+  document.getElementById('outputSection').style.display='block';
+}
+
+function dlSingle(i){
+  const outs = window._lastOutputs;
+  if(!outs || !outs[i]){ try{ showErrToast('Download indisponível','Reprocesse as fotos.'); }catch(_){}; return; }
+  const o=outs[i];
+  const a=document.createElement('a'); a.href=o.url; a.download=o.name; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+/* ===== GLOBAL DOWNLOAD REGISTRY =====
+   Stores blobs/URLs by short ID so dynamically-rendered "baixar" buttons can
+   reference them via dlById('id') instead of embedding filenames inline.
+   This avoids broken downloads when filenames contain ' " \ or other chars
+   that would break a string interpolated into an onclick attribute. */
+window._dlReg = window._dlReg || {};
+function registerDownload(name, blob, url){
+  const id = 'dl_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+  window._dlReg[id] = { name: name, blob: blob, url: url };
+  return id;
+}
+function dlById(id){
+  const o = window._dlReg && window._dlReg[id];
+  if(!o){ try{ showErrToast('Download indisponível','O arquivo não está mais em memória. Gere novamente.'); }catch(_){}; return; }
+  const a = document.createElement('a');
+  a.href = o.url;
+  a.download = o.name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+/* ===== JSZip — uso direto =====
+   O <script src="...jszip.min.js"> no topo do arquivo já carrega a lib.
+   Esta função só checa se JSZip está disponível e devolve mensagem útil
+   se não estiver (CDN bloqueado, página em file://, etc). */
+function getJSZip(){
+  if(typeof JSZip === 'undefined'){
+    throw new Error('JSZip não carregou. Recarregue a página (F5). Se continuar, verifique se algum bloqueador (uBlock/firewall) está impedindo cdnjs.cloudflare.com.');
+  }
+  return JSZip;
+}
+
+async function downloadAll(){
+  const outs = window._lastOutputs;
+  if(!outs || !outs.length) return;
+  const btn = document.querySelector('#outputSection .dl-all-btn');
+  const orig = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = 'Gerando ZIP…'; }
+  try{
+    const zip = new (getJSZip())();
+    outs.forEach(o => zip.file(o.name, o.blob));
+    const blob = await zip.generateAsync({type:'blob'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'banco-imagens.zip';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch(e){
+    showErrToast && showErrToast('Erro ao gerar ZIP', e.message || String(e));
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = orig; }
+  }
+}
+
+/* ===== SCREEN SWITCHER ===== */
+function switchScreen(name){
+  document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el=>el.classList.remove('active'));
+  document.getElementById('screen-'+name).classList.add('active');
+  document.getElementById('tab-'+name).classList.add('active');
+  const titles = {
+    banco: ['Banco de Imagens — Exportador','VNI · VOI · NA · LH/EH · CL · 1080×1350'],
+    webp:  ['Exportador WebP','JPG · PNG → WebP · proporção e cores preservadas'],
+    audio: ['Conversor de Áudio','OGG · MP3 · WAV · FLAC · AAC → qualquer formato'],
+    video: ['Vídeo — Criar GIF & Converter','Trecho do vídeo → GIF · ou conversão de formato']
+  };
+  const t = titles[name] || titles.banco;
+  document.getElementById('appTitle').textContent = t[0];
+  document.getElementById('appSubtitle').textContent = t[1];
+  closeMenu();
+}
+
+/* ===== WEBP CONVERTER ===== */
+let webpFiles = [];
+
+function updateQualityLabel(){
+  document.getElementById('webpQualityVal').textContent = document.getElementById('webpQuality').value + '%';
+}
+
+// Drop zone drag events
+const wdz = document.getElementById('webpDropZone');
+wdz.addEventListener('dragover', e=>{ e.preventDefault(); wdz.classList.add('drag-over'); });
+wdz.addEventListener('dragleave', ()=>wdz.classList.remove('drag-over'));
+wdz.addEventListener('drop', e=>{
+  e.preventDefault(); wdz.classList.remove('drag-over');
+  if(e.dataTransfer.files.length) handleWebpFiles(e.dataTransfer.files);
+});
+
+function handleWebpFiles(files){
+  Array.from(files).forEach(f=>{
+    if(!f.type.startsWith('image/')) return;
+    if(webpFiles.some(x=>x.name===f.name && x.size===f.size)) return;
+    webpFiles.push({ file:f, name:f.name, size:f.size, id: Date.now()+Math.random(), status:'pending', outUrl:null, outBlob:null });
+  });
+  renderWebpQueue();
+  document.getElementById('webpProcessBtn').disabled = webpFiles.length===0;
+}
+
+function removeWebpFile(id){
+  webpFiles = webpFiles.filter(f=>f.id!==id);
+  renderWebpQueue();
+  document.getElementById('webpProcessBtn').disabled = webpFiles.length===0;
+  if(!webpFiles.length){ document.getElementById('webpOutputSection').style.display='none'; }
+}
+
+function renderWebpQueue(){
+  const q = document.getElementById('webpQueue');
+  if(!webpFiles.length){ q.innerHTML=''; return; }
+  q.innerHTML = webpFiles.map(f=>{
+    const badgeCls = f.status==='done'?'done':f.status==='converting'?'converting':'pending';
+    const badgeTxt = f.status==='done'?'convertido':f.status==='converting'?'convertendo…':'pendente';
+    const outName = f.name.replace(/\.[^.]+$/, '')+'.webp';
+    return `<div class="webp-item">
+      <img class="webp-thumb" id="wth-${f.id}" src="" alt="">
+      <div class="webp-info">
+        <div class="webp-fname">${f.name}</div>
+        <div class="webp-size">→ ${outName} · ${(f.size/1024).toFixed(0)} KB original</div>
+      </div>
+      <span class="webp-status-badge ${badgeCls}">${badgeTxt}</span>
+      <button class="webp-remove" onclick="removeWebpFile(${f.id})">×</button>
+    </div>`;
+  }).join('');
+
+  // Load thumbs
+  webpFiles.forEach(f=>{
+    const el = document.getElementById('wth-'+f.id);
+    if(!el || el.src) return;
+    const r = new FileReader();
+    r.onload = e => { if(el) el.src=e.target.result; };
+    r.readAsDataURL(f.file);
+  });
+}
+
+async function convertAllToWebp(){
+  if(!webpFiles.length) return;
+  const quality = parseInt(document.getElementById('webpQuality').value) / 100;
+  const btn = document.getElementById('webpProcessBtn');
+  btn.disabled = true;
+  const pw = document.getElementById('webpProgressWrap');
+  const pf = document.getElementById('webpProgressFill');
+  const sm = document.getElementById('webpStatusMsg');
+  pw.style.display='block'; pf.style.width='0%';
+  document.getElementById('webpOutputSection').style.display='none';
+  document.getElementById('webpOutputGrid').innerHTML='';
+
+  const outputs = [];
+  for(let i=0; i<webpFiles.length; i++){
+    const f = webpFiles[i];
+    f.status = 'converting';
+    renderWebpQueue();
+    sm.textContent = 'Convertendo: ' + f.name;
+
+    try {
+      const img = await new Promise((res,rej)=>{
+        const reader = new FileReader();
+        reader.onload = e => {
+          const im = new Image();
+          im.onload = ()=>res(im);
+          im.onerror = rej;
+          im.src = e.target.result;
+        };
+        reader.onerror = rej;
+        reader.readAsDataURL(f.file);
+      });
+
+      // Draw at EXACT original dimensions — no resize, no crop
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+
+      const blob = await new Promise(res=>canvas.toBlob(res, 'image/webp', quality));
+      const url = URL.createObjectURL(blob);
+      const outName = f.name.replace(/\.[^.]+$/, '')+'.webp';
+      f.status='done'; f.outUrl=url; f.outBlob=blob; f.outName=outName;
+      outputs.push({ blob, url, name:outName, origSize:f.size, webpSize:blob.size });
+    } catch(e){
+      f.status='pending';
+    }
+
+    pf.style.width = Math.round((i+1)/webpFiles.length*100)+'%';
+    renderWebpQueue();
+  }
+
+  btn.disabled = false;
+  sm.textContent = outputs.length + ' arquivo(s) convertido(s)';
+  window._lastWebpOutputs = outputs;
+  renderWebpOutputs(outputs);
+}
+
+function fmtSize(bytes){
+  if(bytes>=1024*1024) return (bytes/1024/1024).toFixed(1)+' MB';
+  return Math.round(bytes/1024)+' KB';
+}
+
+/* Calcula previsao de tamanho final em bytes
+   - audio: bitrate em kbps * duration_s / 8 * 1024 (aprox)
+   - video: bitrate em bps * duration_s / 8
+   - WAV: numChannels * sampleRate * 2 (16-bit) * duration */
+function estimateAudioSize(durSec, bitrateKbps, fmt){
+  if(!durSec || durSec<=0) return 0;
+  if(fmt==='wav'){
+    // 2 canais, 16-bit, 44100 Hz como aproximacao se nao tivermos info
+    return Math.round(2 * 44100 * 2 * durSec);
+  }
+  return Math.round((bitrateKbps*1000/8) * durSec);
+}
+function estimateVideoSize(durSec, bitrateBps){
+  if(!durSec || durSec<=0) return 0;
+  return Math.round((bitrateBps/8) * durSec);
+}
+/* Renderiza HTML de % de mudanca entre origSize e newSize */
+function renderPctChange(origSize, newSize){
+  if(!origSize || !newSize) return '<span class="pct-neu">tamanho desconhecido</span>';
+  const diff = newSize - origSize;
+  const pct = Math.round(Math.abs(diff)/origSize*100);
+  if(diff < 0) return '<span class="pct-down">&minus;'+pct+'% (reducao)</span>';
+  if(diff > 0) return '<span class="pct-up">&plus;'+pct+'% (aumento)</span>';
+  return '<span class="pct-neu">sem mudanca</span>';
+}
+function renderSizePred(origSize, predictedSize){
+  if(!predictedSize) return '';
+  return 'previsao: ~'+fmtSize(predictedSize)+(origSize?' &middot; '+renderPctChange(origSize, predictedSize):'');
+}
+
+function renderWebpOutputs(outputs){
+  // Savings banner
+  const totalOrig = outputs.reduce((s,o)=>s+o.origSize,0);
+  const totalWebp = outputs.reduce((s,o)=>s+o.webpSize,0);
+  const saved = totalOrig - totalWebp;
+  const pct = totalOrig>0 ? Math.round(saved/totalOrig*100) : 0;
+  const banner = document.getElementById('webpSavingsBanner');
+  if(saved>0){
+    banner.innerHTML=`
+      <div class="savings-banner">
+        <svg viewBox="0 0 20 20" fill="none"><path d="M10 2L12.4 7.4H18L13.4 10.8L15.2 16.4L10 13L4.8 16.4L6.6 10.8L2 7.4H7.6L10 2Z" fill="currentColor" opacity=".25"/><path d="M10 4.5l1.8 4h4l-3.2 2.5 1.2 4L10 12.5l-3.8 2.5 1.2-4L4.2 8.5h4L10 4.5z" fill="currentColor"/></svg>
+        <div class="savings-stat">
+          <div class="savings-main">−${pct}%</div>
+          <div class="savings-sub">espaço economizado</div>
+        </div>
+        <div class="savings-divider"></div>
+        <div class="savings-detail">
+          Original: ${fmtSize(totalOrig)}<br>
+          WebP: ${fmtSize(totalWebp)}<br>
+          Ganho: ${fmtSize(saved)} livres
+        </div>
+      </div>`;
+  } else {
+    banner.innerHTML='';
+  }
+
+  const grid = document.getElementById('webpOutputGrid');
+  grid.innerHTML = outputs.map((o,i)=>{
+    const pctItem = o.origSize>0 ? Math.round((o.origSize-o.webpSize)/o.origSize*100) : 0;
+    const sizeTag = pctItem>0 ? `<span style="color:var(--ok-t);font-size:9px;font-family:'DM Mono',monospace;">−${pctItem}% · ${fmtSize(o.webpSize)}</span>` : `<span style="color:var(--text3);font-size:9px;font-family:'DM Mono',monospace;">${fmtSize(o.webpSize)}</span>`;
+    return `
+    <div class="output-card">
+      <img src="${o.url}" alt="${o.name}" style="aspect-ratio:unset;max-height:160px;object-fit:contain;background:var(--bg3);">
+      <div class="output-card-info">
+        <div class="output-card-name">${o.name}</div>
+        <div style="margin-bottom:6px;">${sizeTag}</div>
+        <button class="dl-btn" onclick="dlSingleWebp(${i})">baixar</button>
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('webpOutputSection').style.display='block';
+}
+
+function dlSingleWebp(i){
+  const outs = window._lastWebpOutputs;
+  if(!outs || !outs[i]){ try{ showErrToast('Download indisponível','Re-converta as imagens.'); }catch(_){}; return; }
+  const o = outs[i];
+  const a = document.createElement('a'); a.href=o.url; a.download=o.name; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+async function downloadAllWebp(){
+  const outputs = window._lastWebpOutputs;
+  if(!outputs||!outputs.length) return;
+  const btn = document.querySelector('#webpOutputSection .dl-all-btn');
+  const orig = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = 'Gerando ZIP…'; }
+  try {
+    const zip = new (getJSZip())();
+    outputs.forEach(o=>zip.file(o.name, o.blob));
+    const blob = await zip.generateAsync({type:'blob'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download='webp-exportados.zip';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch(e){
+    showErrToast && showErrToast('Erro ao gerar ZIP', e.message || String(e));
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = orig; }
+  }
+}
+/* ===== AUDIO CONVERTER ===== */
+let audioFiles = [];
+let audioTargetFmt = 'mp3';
+const audioFmtHints = {
+  mp3:  'MP3 · compatível com todos os players e plataformas',
+  wav:  'WAV · sem compressão — qualidade máxima, arquivo maior',
+  ogg:  'OGG Vorbis · ótimo para web e jogos, codec livre',
+  aac:  'AAC / M4A · padrão Apple · excelente qualidade e tamanho',
+  webm: 'WebM Opus · áudio otimizado para web'
+};
+const audioBitrateMap    = [96,128,192,256,320];
+const audioBitrateLabels = ['96 kbps','128 kbps','192 kbps','256 kbps','320 kbps'];
+
+function selectAudioFormat(fmt){
+  audioTargetFmt = fmt;
+  document.querySelectorAll('#audioFormatRow .format-chip').forEach(el=>
+    el.classList.toggle('active', el.dataset.fmt===fmt));
+  document.getElementById('audioFmtHint').textContent = audioFmtHints[fmt]||'';
+  updateBitrateLabel();
+  renderAudioQueue();
+}
+
+function updateBitrateLabel(){
+  const idx = parseInt(document.getElementById('audioBitrate').value);
+  document.getElementById('audioBitrateVal').textContent = audioBitrateLabels[idx];
+  renderAudioQueue();
+}
+
+(function initAudioDrop(){
+  const dz = document.getElementById('audioDropZone');
+  dz.addEventListener('dragover', e=>{e.preventDefault();dz.classList.add('drag-over');});
+  dz.addEventListener('dragleave', ()=>dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e=>{
+    e.preventDefault(); dz.classList.remove('drag-over');
+    if(e.dataTransfer.files.length) handleAudioFiles(e.dataTransfer.files);
+  });
+})();
+
+function handleAudioFiles(files){
+  // Extensões de áudio comuns que podem ter MIME vazio em alguns sistemas
+  const audioExt = /\.(ogg|oga|mp3|wav|flac|aac|m4a|m4b|mp4a|opus|weba|webm|3gp|3gpp|amr|aiff|aif|au|mka|spx|wma|mid|midi|ape)$/i;
+  const skipped = [];
+  Array.from(files).forEach(f=>{
+    // Aceita: tipo MIME audio/* OU extensão conhecida (alguns navegadores não preenchem .type para .flac/.amr/etc)
+    const isAudio = (f.type && f.type.startsWith('audio/')) || audioExt.test(f.name);
+    if(!isAudio){ skipped.push(f.name); return; }
+    if(audioFiles.some(x=>x.name===f.name && x.size===f.size)) return;
+    const item = {file:f, name:f.name, size:f.size, id:Date.now()+Math.random(), status:'pending', duration:null};
+    audioFiles.push(item);
+    // Tenta descobrir a duracao em background usando <audio>
+    try {
+      const a = document.createElement('audio');
+      a.preload = 'metadata';
+      a.src = URL.createObjectURL(f);
+      a.onloadedmetadata = () => {
+        item.duration = isFinite(a.duration) ? a.duration : null;
+        try { URL.revokeObjectURL(a.src); } catch(_){}
+        renderAudioQueue();
+      };
+      a.onerror = () => { try { URL.revokeObjectURL(a.src); } catch(_){} };
+    } catch(_){}
+  });
+  if(skipped.length){
+    showInlineErr('audioErrorBox', skipped.length+' arquivo(s) ignorado(s) (não parecem ser áudio)', skipped.slice(0,5).join('\n'));
+  }
+  renderAudioQueue();
+  document.getElementById('audioProcessBtn').disabled = audioFiles.length===0;
+}
+
+function removeAudioFile(id){
+  audioFiles = audioFiles.filter(f=>f.id!=id);
+  renderAudioQueue();
+  document.getElementById('audioProcessBtn').disabled = audioFiles.length===0;
+}
+
+function renderAudioQueue(){
+  const q = document.getElementById('audioQueue');
+  if(!audioFiles.length){q.innerHTML='';return;}
+  const fmt = audioTargetFmt;
+  const bitrate = audioBitrateMap[parseInt(document.getElementById('audioBitrate').value)];
+  q.innerHTML = audioFiles.map(f=>{
+    const cls = {done:'done',converting:'converting',error:'error',pending:'pending'}[f.status]||'pending';
+    const lbl = {done:'convertido',converting:'convertendo…',error:'erro',pending:'pendente'}[f.status]||'pendente';
+    const predBytes = f.duration ? estimateAudioSize(f.duration, bitrate, fmt) : 0;
+    const predHtml = predBytes ? `<div class="size-pred">${renderSizePred(f.size, predBytes)}</div>` : '';
+    const dur = f.duration ? ' · '+f.duration.toFixed(1)+'s' : '';
+    return `<div class="audio-item">
+      <div class="audio-icon"><svg viewBox="0 0 14 14" fill="none"><path d="M5 2h4v7a2 2 0 01-4 0V2z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 6.5v1a5 5 0 0010 0v-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></div>
+      <div class="audio-info">
+        <div class="audio-fname">${f.name}</div>
+        <div class="audio-meta">${fmtSize(f.size)} · ${f.name.split('.').pop().toUpperCase()}${dur}</div>
+        ${predHtml}
+      </div>
+      <span class="audio-status-badge ${cls}">${lbl}</span>
+      <button class="audio-remove" onclick="removeAudioFile(${f.id})">&#215;</button>
+    </div>`;
+  }).join('');
+}
+
+function checkAudioFmtSupport(fmt){
+  if(fmt==='wav') return {ok:true, mime:'audio/wav', willFallback:false, note:'', useEncoder:'wav'};
+  if(fmt==='mp3'){
+    if(typeof lamejs !== 'undefined') return {ok:true, mime:'audio/mpeg', willFallback:false, note:'', useEncoder:'lamejs'};
+    return {ok:false, mime:null, willFallback:false, note:'Encoder MP3 (lamejs) nao carregou. Verifique sua conexao com internet e recarregue a pagina.', useEncoder:null};
+  }
+  const map = {
+    ogg:  ['audio/ogg;codecs=vorbis','audio/ogg'],
+    aac:  ['audio/mp4;codecs=mp4a.40.2','audio/aac','audio/mp4'],
+    webm: ['audio/webm;codecs=opus','audio/webm']
+  };
+  const cands = map[fmt] || [];
+  for(const m of cands){
+    if(typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)) {
+      return {ok:true, mime:m, willFallback:false, note:'', useEncoder:'mediarecorder'};
+    }
+  }
+  const fallbacks = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=vorbis','audio/ogg'];
+  for(const m of fallbacks){
+    if(typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)) {
+      return {ok:true, mime:m, willFallback:true, note:'Seu navegador nao suporta encoding nativo de '+fmt.toUpperCase()+'. O audio sera salvo em '+m+' (extensao alternativa). Use MP3 ou WAV para garantir compatibilidade.', useEncoder:'mediarecorder'};
+    }
+  }
+  return {ok:false, mime:null, willFallback:false, note:'Nenhum codec de audio suportado neste navegador. Tente MP3 ou WAV.', useEncoder:null};
+}
+
+async function convertAllAudio(){
+  if(!audioFiles.length) return;
+  clearInlineErr('audioErrorBox');
+  const fmt = audioTargetFmt;
+  const bitrate = audioBitrateMap[parseInt(document.getElementById('audioBitrate').value)];
+  const btn = document.getElementById('audioProcessBtn');
+  btn.disabled = true;
+  const pf = document.getElementById('audioProgressFill');
+  const sm = document.getElementById('audioStatusMsg');
+  document.getElementById('audioProgressWrap').style.display='block';
+  pf.style.width='0%';
+  document.getElementById('audioOutputSection').style.display='none';
+
+  const sup = checkAudioFmtSupport(fmt);
+  if(!sup.ok){
+    sm.textContent='';
+    showInlineErr('audioErrorBox', 'Formato nao suportado', sup.note);
+    showErrToast('Formato nao suportado', sup.note);
+    btn.disabled = false;
+    return;
+  }
+  if(sup.willFallback){
+    showInlineErr('audioErrorBox', 'Aviso', sup.note);
+  }
+
+  const outputs = [];
+  const errors = [];
+  for(let i=0;i<audioFiles.length;i++){
+    const f = audioFiles[i];
+    f.status='converting'; renderAudioQueue();
+    sm.textContent='Convertendo: '+f.name;
+    pf.style.width=Math.round(i/audioFiles.length*100)+'%';
+
+    let actx = null;
+    try {
+      const ab = await f.file.arrayBuffer();
+      actx = new (window.AudioContext||window.webkitAudioContext)();
+      const decoded = await actx.decodeAudioData(ab.slice(0));
+      let blob;
+      if(sup.useEncoder==='wav' || fmt==='wav'){
+        blob = audioBufferToWav(decoded);
+      } else if(sup.useEncoder==='lamejs' || fmt==='mp3'){
+        blob = audioBufferToMp3(decoded, bitrate);
+      } else {
+        blob = await encodeAudioBuffer(decoded, fmt, bitrate, sup.mime);
+      }
+      try { if(actx && actx.state!=='closed') actx.close(); } catch(_){}
+
+      if(!blob || blob.size === 0){
+        throw new Error('Blob vazio gerado pelo encoder.');
+      }
+
+      let realExt;
+      if(sup.willFallback){
+        if(sup.mime.indexOf('webm') !== -1) realExt = 'webm';
+        else if(sup.mime.indexOf('ogg') !== -1) realExt = 'ogg';
+        else realExt = fmt;
+      } else {
+        realExt = fmt==='aac'?'m4a':fmt;
+      }
+      const outName = f.name.replace(/\.[^.]+$/,'')+'.'+realExt;
+      const url = URL.createObjectURL(blob);
+      f.status='done';
+      outputs.push({blob,url,name:outName,origSize:f.size,outSize:blob.size});
+    } catch(e){
+      console.error('[audio] erro convertendo', f.name, e);
+      f.status='error';
+      errors.push({name: f.name, msg: (e && e.message) ? e.message : String(e)});
+      try { if(actx && actx.state!=='closed') actx.close(); } catch(_){}
+    }
+    pf.style.width=Math.round((i+1)/audioFiles.length*100)+'%';
+    renderAudioQueue();
+  }
+  btn.disabled=false;
+
+  if(errors.length){
+    const errMsgs = errors.map(e => '- '+e.name+': '+e.msg).join('\n');
+    showInlineErr('audioErrorBox', errors.length+' arquivo(s) com erro', errMsgs);
+    showErrToast('Falha em '+errors.length+' arquivo(s)', errors[0].name+' - '+errors[0].msg);
+  }
+
+  sm.textContent = outputs.length+' arquivo(s) convertido(s)' + (errors.length ? ' / '+errors.length+' com erro' : '');
+  window._lastAudioOutputs=outputs;
+  if(outputs.length) renderAudioOutputs(outputs);
+}
+
+/* Encoder MP3 nativo via lamejs - resolve o "navegador nao suporta MP3" */
+function audioBufferToMp3(buf, kbps){
+  if(typeof lamejs === 'undefined') {
+    throw new Error('Biblioteca lamejs nao carregou. Verifique sua conexao com internet.');
+  }
+  const channels = Math.min(buf.numberOfChannels, 2);
+  const sampleRate = buf.sampleRate;
+  const bitRate = kbps || 192;
+  const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, bitRate);
+
+  // Float32 [-1,1] -> Int16
+  function f32ToI16(f32){
+    const i16 = new Int16Array(f32.length);
+    for(let i=0;i<f32.length;i++){
+      const s = Math.max(-1, Math.min(1, f32[i]));
+      i16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    return i16;
+  }
+  const left  = f32ToI16(buf.getChannelData(0));
+  const right = channels>1 ? f32ToI16(buf.getChannelData(1)) : null;
+
+  const blockSize = 1152;
+  const mp3Data = [];
+  for(let i=0;i<left.length;i+=blockSize){
+    const lChunk = left.subarray(i, i+blockSize);
+    const rChunk = right ? right.subarray(i, i+blockSize) : null;
+    const mp3buf = right
+      ? mp3encoder.encodeBuffer(lChunk, rChunk)
+      : mp3encoder.encodeBuffer(lChunk);
+    if(mp3buf.length > 0) mp3Data.push(new Uint8Array(mp3buf));
+  }
+  const end = mp3encoder.flush();
+  if(end.length > 0) mp3Data.push(new Uint8Array(end));
+  return new Blob(mp3Data, {type:'audio/mpeg'});
+}
+
+function audioBufferToWav(buf){
+  const ch=buf.numberOfChannels, sr=buf.sampleRate, len=buf.length;
+  const bps=16, blk=ch*(bps/8), byteR=sr*blk, dataSize=len*blk;
+  const ab=new ArrayBuffer(44+dataSize); const v=new DataView(ab);
+  function ws(off,s){for(let i=0;i<s.length;i++)v.setUint8(off+i,s.charCodeAt(i));}
+  ws(0,'RIFF'); v.setUint32(4,36+dataSize,true); ws(8,'WAVE');
+  ws(12,'fmt '); v.setUint32(16,16,true); v.setUint16(20,1,true);
+  v.setUint16(22,ch,true); v.setUint32(24,sr,true); v.setUint32(28,byteR,true);
+  v.setUint16(32,blk,true); v.setUint16(34,bps,true);
+  ws(36,'data'); v.setUint32(40,dataSize,true);
+  let off=44;
+  for(let s=0;s<len;s++) for(let c=0;c<ch;c++){
+    const x=Math.max(-1,Math.min(1,buf.getChannelData(c)[s]));
+    v.setInt16(off,x<0?x*0x8000:x*0x7FFF,true); off+=2;
+  }
+  return new Blob([ab],{type:'audio/wav'});
+}
+
+function encodeAudioBuffer(audioBuffer,fmt,bitrate,preferMime){
+  return new Promise((resolve,reject)=>{
+    try {
+      const ch=Math.min(audioBuffer.numberOfChannels,2), sr=audioBuffer.sampleRate;
+      const off=new OfflineAudioContext(ch,audioBuffer.length,sr);
+      const src=off.createBufferSource(); src.buffer=audioBuffer; src.connect(off.destination); src.start(0);
+      off.startRendering().then(rendered=>{
+        const actx=new AudioContext({sampleRate:sr});
+        const dest=actx.createMediaStreamDestination();
+        const bsrc=actx.createBufferSource(); bsrc.buffer=rendered; bsrc.connect(dest);
+        let mime = preferMime || null;
+        if(!mime){
+          const mimeMap={
+            mp3:['audio/mpeg','audio/mp3'],
+            ogg:['audio/ogg;codecs=vorbis','audio/ogg'],
+            aac:['audio/mp4;codecs=mp4a.40.2','audio/aac','audio/mp4'],
+            webm:['audio/webm;codecs=opus','audio/webm']
+          };
+          for(const m of (mimeMap[fmt]||['audio/webm;codecs=opus'])){
+            if(MediaRecorder.isTypeSupported(m)){mime=m;break;}
+          }
+          if(!mime){
+            for(const m of ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=vorbis','audio/ogg']){
+              if(MediaRecorder.isTypeSupported(m)){mime=m;break;}
+            }
+          }
+        }
+        if(!mime){ try{actx.close();}catch(_){} ; reject(new Error('Nenhum codec suportado pelo MediaRecorder neste navegador.')); return; }
+        const chunks=[];
+        let mr;
+        try {
+          mr=new MediaRecorder(dest.stream,{mimeType:mime,audioBitsPerSecond:bitrate*1000});
+        } catch(mrErr){
+          try{actx.close();}catch(_){} ; reject(new Error('MediaRecorder falhou: '+mrErr.message)); return;
+        }
+        mr.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
+        mr.onstop=()=>{
+          try{actx.close();}catch(_){}
+          if(!chunks.length){ reject(new Error('Nenhum dado de audio gerado pelo encoder.')); return; }
+          resolve(new Blob(chunks,{type:mime}));
+        };
+        mr.onerror=e=>{ try{actx.close();}catch(_){} ; reject(new Error('Erro do MediaRecorder: '+(e.error&&e.error.message||e.message||'desconhecido'))); };
+        mr.start(); bsrc.start(0);
+        bsrc.onended=()=>{ try{mr.stop();}catch(_){} };
+      }).catch(err=>reject(new Error('Falha no rendering: '+(err.message||err))));
+    } catch(outerErr){
+      reject(new Error('Falha ao iniciar encoding: '+(outerErr.message||outerErr)));
+    }
+  });
+}
+
+function renderAudioOutputs(outputs){
+  const list=document.getElementById('audioOutputList');
+  list.innerHTML=outputs.map((o,i)=>`
+    <div class="audio-out-item">
+      <div class="audio-icon"><svg viewBox="0 0 14 14" fill="none"><path d="M5 2h4v7a2 2 0 01-4 0V2z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2 6.5v1a5 5 0 0010 0v-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></div>
+      <div class="audio-out-info">
+        <div class="audio-out-name">${o.name}</div>
+        <div class="audio-out-size">${fmtSize(o.outSize)} · original: ${fmtSize(o.origSize)}</div>
+        <div class="size-pred">${renderPctChange(o.origSize, o.outSize)}</div>
+      </div>
+      <button class="dl-btn" style="min-width:64px;flex-shrink:0;" onclick="dlSingleAudio(${i})">baixar</button>
+    </div>`).join('');
+  document.getElementById('audioOutputSection').style.display='block';
+}
+
+function dlSingleAudio(i){
+  const outs = window._lastAudioOutputs;
+  if(!outs || !outs[i]){ try{ showErrToast('Download indisponível','Re-converta os arquivos.'); }catch(_){}; return; }
+  const o = outs[i];
+  const a=document.createElement('a');a.href=o.url;a.download=o.name;document.body.appendChild(a);a.click();document.body.removeChild(a);
+}
+
+async function downloadAllAudio(){
+  const outs=window._lastAudioOutputs;
+  if(!outs||!outs.length)return;
+  const btn = document.querySelector('#audioOutputSection .dl-all-btn');
+  const orig = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = 'Gerando ZIP…'; }
+  try {
+    const zip = new (getJSZip())();
+    outs.forEach(o=>zip.file(o.name,o.blob));
+    const blob=await zip.generateAsync({type:'blob'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download='audio-convertido.zip';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch(e){
+    showErrToast && showErrToast('Erro ao gerar ZIP', e.message || String(e));
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = orig; }
+  }
+}
+
+/* ===== VOICE TO TEXT ===== */
+let vttLang = 'pt-BR';
+let vttMode = 'mic'; // 'mic' or 'file'
+let vttMediaRecorder = null;
+let vttAudioChunks = [];
+let vttTimerInterval = null;
+let vttTimerSec = 0;
+let vttRecordedBlob = null;
+let vttUploadedFile = null;
+let vttAudioCtx = null;
+let vttAnalyser = null;
+let vttAnimFrame = null;
+let vttApi = 'groq';
+let vttUploadProgressTimer = null;
+
+const VTT_API_INFO = {
+  groq:   {label:'Groq Whisper', hint:'Free tier generoso, super rapido. Crie key em console.groq.com/keys', endpoint:'https://api.groq.com/openai/v1/audio/transcriptions', model:'whisper-large-v3-turbo'},
+  openai: {label:'OpenAI Whisper', hint:'~$0.006/min. Crie key em platform.openai.com/api-keys', endpoint:'https://api.openai.com/v1/audio/transcriptions', model:'whisper-1'},
+  hf:     {label:'Hugging Face',  hint:'Free tier limitado. Crie token em huggingface.co/settings/tokens', endpoint:'https://api-inference.huggingface.co/models/openai/whisper-large-v3', model:null}
+};
+
+function setVttMode(mode){
+  vttMode = mode;
+  document.getElementById('vttModeMicBtn').classList.toggle('active', mode==='mic');
+  document.getElementById('vttModeFileBtn').classList.toggle('active', mode==='file');
+  document.getElementById('vttPaneMic').classList.toggle('active', mode==='mic');
+  document.getElementById('vttPaneFile').classList.toggle('active', mode==='file');
+  // Limpa progresso e mensagens ao trocar de modo
+  document.getElementById('vttProgressWrap').style.display='none';
+  document.getElementById('vttProgressFill').style.width='0%';
+  document.getElementById('vttStatusMsg').textContent='';
+  clearInlineErr('vttErrorBox');
+}
+
+function selectVttLang(lang){
+  vttLang=lang;
+  document.querySelectorAll('#vttLangRow .format-chip').forEach(el=>
+    el.classList.toggle('active', el.dataset.lang===lang));
+}
+
+function selectVttApi(api){
+  vttApi = api;
+  document.querySelectorAll('#vttApiRow .format-chip').forEach(el=>
+    el.classList.toggle('active', el.dataset.api===api));
+  document.getElementById('vttApiHint').textContent = VTT_API_INFO[api].hint;
+  // Carrega key salva para esse provedor
+  const k = localStorage.getItem('vttApiKey_'+api) || '';
+  document.getElementById('vttApiKey').value = k;
+  updateVttApiKeyStatus();
+  // Esconde resultado de teste antigo ao trocar de provedor
+  const r = document.getElementById('vttApiTestResult');
+  if(r){ r.style.display='none'; r.innerHTML=''; }
+}
+
+/* Detecta origin "null" (file://) e mostra aviso prominente */
+function checkVttOrigin(){
+  const warn = document.getElementById('vttFileOriginWarn');
+  if(!warn) return;
+  const isFileProto = location.protocol === 'file:' || window.origin === 'null' || !location.host;
+  if(isFileProto){
+    warn.style.display='block';
+    warn.innerHTML = '<strong>Aviso:</strong> voce abriu este arquivo direto pelo computador (origin null). Alguns navegadores/extensoes bloqueiam APIs externas nesse modo. Se voce ver "Failed to fetch", rode a pagina via servidor local: abra o terminal na pasta do export e execute <code>python -m http.server 8000</code>, depois abra <code>http://localhost:8000</code>.';
+  } else {
+    warn.style.display='none';
+  }
+}
+
+/* Testa a conexao com o provedor escolhido sem enviar audio.
+   Faz GET no endpoint base ou similar para checar:
+   - rede (Failed to fetch = sem internet/CORS)
+   - validade da key (401/403)
+   - bloqueio CORS (mensagem especifica) */
+async function testVttApiConnection(){
+  const btn = document.getElementById('vttTestApiBtn');
+  const out = document.getElementById('vttApiTestResult');
+  const apiKey = (document.getElementById('vttApiKey').value||'').trim();
+  out.style.display='block';
+
+  if(!apiKey){
+    out.innerHTML = '<div class="err-inline"><strong>Sem key:</strong> cole sua API key acima antes de testar.</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Testando...';
+  out.innerHTML = '<div class="hint">Verificando conexao com '+VTT_API_INFO[vttApi].label+'...</div>';
+
+  // Endpoints "lightweight" para teste (listagem de modelos / health)
+  const testEndpoint = {
+    groq:   'https://api.groq.com/openai/v1/models',
+    openai: 'https://api.openai.com/v1/models',
+    hf:     'https://huggingface.co/api/whoami-v2'
+  }[vttApi];
+
+  try {
+    const t0 = Date.now();
+    const r = await fetch(testEndpoint, {
+      method:'GET',
+      headers:{ 'Authorization':'Bearer '+apiKey }
+    });
+    const elapsed = Date.now()-t0;
+
+    if(r.ok){
+      out.innerHTML = '<div class="err-inline" style="background:var(--ok-bg);color:var(--ok-t);border-color:var(--ok-t);"><strong>OK:</strong> conexao com '+VTT_API_INFO[vttApi].label+' funcionou ('+elapsed+'ms). API key valida. Pode transcrever.</div>';
+    } else if(r.status===401 || r.status===403){
+      out.innerHTML = '<div class="err-inline"><strong>Key invalida ('+r.status+'):</strong> a chave foi rejeitada pelo '+VTT_API_INFO[vttApi].label+'. Verifique se copiou completa e esta ativa.</div>';
+    } else if(r.status===429){
+      out.innerHTML = '<div class="err-inline"><strong>Rate limit (429):</strong> muitas requisicoes recentes. Aguarde alguns minutos.</div>';
+    } else {
+      let body=''; try { body = (await r.text()).substring(0,200); } catch(_){}
+      out.innerHTML = '<div class="err-inline"><strong>HTTP '+r.status+':</strong> '+(body||'resposta inesperada do servidor')+'</div>';
+    }
+  } catch(e){
+    const msg = (e&&e.message)||String(e);
+    let diag = '';
+    if(msg.indexOf('Failed to fetch')!==-1 || msg.indexOf('NetworkError')!==-1){
+      diag = '<strong>Falha na rede ou CORS bloqueou:</strong><br>'+
+        '1. Verifique se voce tem internet ativa (abra google.com em outra aba).<br>'+
+        '2. Se voce abriu o arquivo direto (file://), rode via servidor local: <code>python -m http.server 8000</code> na pasta e abra http://localhost:8000.<br>'+
+        '3. Desative extensoes (uBlock, Privacy Badger, Brave Shields) temporariamente.<br>'+
+        '4. Se estiver atras de firewall corporativo, pode estar bloqueando '+(new URL(testEndpoint)).hostname+'.';
+    } else {
+      diag = '<strong>Erro:</strong> '+msg;
+    }
+    out.innerHTML = '<div class="err-inline">'+diag+'</div>';
+  }
+  btn.disabled = false;
+  btn.textContent = 'Testar conexao com a API';
+}
+
+function saveVttApiKey(){
+  const k = document.getElementById('vttApiKey').value.trim();
+  if(k) localStorage.setItem('vttApiKey_'+vttApi, k);
+  else  localStorage.removeItem('vttApiKey_'+vttApi);
+  updateVttApiKeyStatus();
+}
+function updateVttApiKeyStatus(){
+  const k = (document.getElementById('vttApiKey').value||'').trim();
+  const el = document.getElementById('vttApiKeyStatus');
+  if(!k){ el.textContent='Nao configurada.'; el.style.color=''; }
+  else { el.textContent='Configurada (salva neste navegador). '+k.substring(0,4)+'...'+k.slice(-3); el.style.color='var(--ok-t)'; }
+}
+
+function clearVttFile(){
+  vttUploadedFile=null;
+  document.getElementById('vttDzTitle').textContent='Soltar audio aqui ou clicar para transcrever';
+  document.getElementById('vttFileInfo').style.display='none';
+  document.getElementById('vttFileTranscribeBtn').disabled=true;
+  document.getElementById('vttFileInput').value='';
+}
+
+/* Restaura key salva ao abrir + carrega logos padrão */
+window.addEventListener('DOMContentLoaded', ()=>{
+  try {
+    const savedApi = localStorage.getItem('vttApiProvider');
+    if(savedApi && VTT_API_INFO[savedApi]) selectVttApi(savedApi);
+    else selectVttApi('groq');
+    checkVttOrigin();
+  } catch(_){}
+  // Carrega as logos padrão (NA, LH, EH) do servidor
+  try { initDefaultLogos(); } catch(e){ console.warn('initDefaultLogos:', e); }
+  // Sincroniza chips de formato com a disponibilidade inicial
+  try { updateFmtAvailability(); } catch(_){}
+});
+
+async function toggleRecording(){
+  if(vttMediaRecorder && vttMediaRecorder.state==='recording'){
+    stopRecording();
+  } else {
+    await startRecording();
+  }
+}
+
+async function startRecording(){
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    vttAudioChunks=[];
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ?'audio/webm;codecs=opus':'audio/webm';
+    vttMediaRecorder = new MediaRecorder(stream,{mimeType});
+    vttMediaRecorder.ondataavailable=e=>{if(e.data.size>0)vttAudioChunks.push(e.data);};
+    vttMediaRecorder.onstop=()=>{
+      const blob=new Blob(vttAudioChunks,{type:mimeType});
+      vttRecordedBlob=blob;
+      const micBtn = document.getElementById('vttMicTranscribeBtn');
+      if(micBtn) micBtn.disabled=false;
+      document.getElementById('vttStatusMsg').textContent='Gravacao pronta - clique em Transcrever gravacao.';
+      stream.getTracks().forEach(t=>t.stop());
+      stopWaveform();
+    };
+    vttMediaRecorder.start(200);
+
+    // Timer
+    vttTimerSec=0;
+    const timer=document.getElementById('vttTimer');
+    timer.style.display='flex';
+    clearInterval(vttTimerInterval);
+    vttTimerInterval=setInterval(()=>{
+      vttTimerSec++;
+      const m=Math.floor(vttTimerSec/60), s=vttTimerSec%60;
+      timer.textContent=m+':'+(s<10?'0':'')+s;
+    },1000);
+
+    // Waveform
+    vttAudioCtx=new AudioContext();
+    vttAnalyser=vttAudioCtx.createAnalyser();
+    vttAnalyser.fftSize=256;
+    const src=vttAudioCtx.createMediaStreamSource(stream);
+    src.connect(vttAnalyser);
+    document.getElementById('vttWaveform').style.display='block';
+    drawWaveform();
+
+    const btn=document.getElementById('vttRecordBtn');
+    btn.style.background='#7a1010';
+    btn.innerHTML='&#9632;&ensp;Parar gravação';
+  } catch(e){
+    document.getElementById('vttStatusMsg').textContent='Erro ao acessar microfone: '+e.message;
+  }
+}
+
+function stopRecording(){
+  if(vttMediaRecorder&&vttMediaRecorder.state!=='inactive') vttMediaRecorder.stop();
+  clearInterval(vttTimerInterval);
+  const btn=document.getElementById('vttRecordBtn');
+  btn.style.background='';
+  btn.innerHTML='&#9679;&ensp;Iniciar gravação';
+  document.getElementById('vttTimer').style.display='none';
+  document.getElementById('vttWaveform').style.display='none';
+}
+
+function drawWaveform(){
+  const canvas=document.getElementById('vttCanvas');
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height;
+  const data=new Uint8Array(vttAnalyser.frequencyBinCount);
+  function frame(){
+    vttAnimFrame=requestAnimationFrame(frame);
+    vttAnalyser.getByteTimeDomainData(data);
+    ctx.clearRect(0,0,W,H);
+    ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--accent')||'#1a2744';
+    ctx.lineWidth=2; ctx.beginPath();
+    const sl=W/data.length;
+    data.forEach((v,i)=>{
+      const x=i*sl, y=(v/128-1)*(H/2)+H/2;
+      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+  }
+  frame();
+}
+
+function stopWaveform(){
+  if(vttAnimFrame) cancelAnimationFrame(vttAnimFrame);
+  if(vttAudioCtx) vttAudioCtx.close().catch(()=>{});
+}
+
+(function initVttDrop(){
+  const dz=document.getElementById('vttDropZone');
+  dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag-over');});
+  dz.addEventListener('dragleave',()=>dz.classList.remove('drag-over'));
+  dz.addEventListener('drop',e=>{
+    e.preventDefault();dz.classList.remove('drag-over');
+    if(e.dataTransfer.files[0]) handleVttFile(e.dataTransfer.files[0]);
+  });
+})();
+
+function handleVttFile(file){
+  if(!file)return;
+  vttUploadedFile=file;
+  document.getElementById('vttDzTitle').textContent=file.name;
+  document.getElementById('vttFileName').textContent=file.name;
+  document.getElementById('vttFileInfo').style.display='flex';
+  document.getElementById('vttFileTranscribeBtn').disabled=false;
+  document.getElementById('vttStatusMsg').textContent='Arquivo pronto ('+fmtSize(file.size)+') - clique em Transcrever via API.';
+}
+
+/* === MODO A: Transcricao do microfone via Web Speech API === */
+async function transcribeFromMic(){
+  clearInlineErr('vttErrorBox');
+  const sm=document.getElementById('vttStatusMsg');
+  const btn=document.getElementById('vttMicTranscribeBtn');
+  const pf=document.getElementById('vttProgressFill');
+  const textarea=document.getElementById('vttText');
+
+  if(!vttRecordedBlob){
+    showInlineErr('vttErrorBox','Sem gravacao','Grave algum audio pelo microfone primeiro.');
+    return;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SpeechRecognition){
+    const m='Este navegador nao suporta a Web Speech API. Use Google Chrome ou Microsoft Edge no desktop, ou use o modo "Subir arquivo" via API.';
+    showInlineErr('vttErrorBox','Navegador incompativel', m);
+    showErrToast('Transcricao indisponivel', m);
+    return;
+  }
+
+  btn.disabled=true;
+  document.getElementById('vttProgressWrap').style.display='block';
+  pf.style.width='10%';
+  sm.textContent='Preparando transcricao...';
+  document.getElementById('vttOutputSection').style.display='block';
+  textarea.value=''; textarea.placeholder='Capturando audio...';
+
+  let actx=null;
+  try {
+    const arrBuf = await vttRecordedBlob.arrayBuffer();
+    actx = new AudioContext();
+    let decoded;
+    try { decoded = await actx.decodeAudioData(arrBuf.slice(0)); }
+    catch(decErr){ throw new Error('Nao foi possivel decodificar o audio: '+(decErr.message||decErr)); }
+
+    pf.style.width='30%';
+    sm.textContent='Transcrevendo (reproduzindo audio em tempo real)...';
+
+    const dest = actx.createMediaStreamDestination();
+    const src2 = actx.createBufferSource();
+    src2.buffer=decoded;
+    src2.connect(dest);
+    src2.connect(actx.destination);
+
+    const recog = new SpeechRecognition();
+    recog.lang=vttLang; recog.continuous=true; recog.interimResults=true; recog.maxAlternatives=1;
+
+    let finalText='', lastInterim='', stoppedByUs=false;
+    recog.onresult=e=>{
+      let interim='';
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        const t=e.results[i][0].transcript;
+        if(e.results[i].isFinal){ finalText+=t+' '; } else { interim=t; }
+      }
+      lastInterim = interim;
+      textarea.value = (finalText + (interim?'[ '+interim+' ]':'')).trim();
+      pf.style.width='70%';
+    };
+    recog.onerror=e=>{
+      const code=e.error||'desconhecido';
+      let msg='Erro no reconhecimento: '+code;
+      if(code==='no-speech') msg='Nenhuma fala detectada.';
+      else if(code==='not-allowed' || code==='service-not-allowed') msg='Permissao do microfone negada.';
+      else if(code==='audio-capture') msg='Nao foi possivel capturar audio.';
+      else if(code==='network') msg='Erro de rede. Web Speech API precisa de internet.';
+      sm.textContent=msg;
+      showInlineErr('vttErrorBox','Erro na transcricao', msg);
+      btn.disabled=false;
+      try{actx.close();}catch(_){}
+    };
+    recog.onend=()=>{
+      pf.style.width='100%';
+      const out=(finalText+(lastInterim?lastInterim:'')).trim();
+      textarea.value=out;
+      textarea.placeholder='A transcricao aparecera aqui...';
+      sm.textContent = out ? 'Transcricao concluida - '+out.length+' caracteres.' : '';
+      if(!out) showInlineErr('vttErrorBox','Sem texto detectado','Tente gravar novamente em ambiente mais silencioso.');
+      btn.disabled=false;
+      try{actx.close();}catch(_){}
+    };
+
+    try { recog.start(); }
+    catch(rErr){ throw new Error('Nao foi possivel iniciar reconhecimento: '+rErr.message); }
+    src2.start(0);
+    src2.onended = () => setTimeout(()=>{ if(!stoppedByUs){stoppedByUs=true;try{recog.stop();}catch(_){}} }, 800);
+    setTimeout(()=>{ if(!stoppedByUs){stoppedByUs=true;try{recog.stop();}catch(_){}} }, decoded.duration*1000+5000);
+  } catch(e){
+    console.error('[vtt:mic]', e);
+    sm.textContent='';
+    const msg=(e&&e.message)?e.message:String(e);
+    showInlineErr('vttErrorBox','Erro na transcricao', msg);
+    btn.disabled=false;
+    textarea.placeholder='A transcricao aparecera aqui...';
+    try{if(actx&&actx.state!=='closed') actx.close();}catch(_){}
+  }
+}
+
+/* === MODO B: Transcricao de arquivo via API === */
+async function transcribeUploadedFile(){
+  clearInlineErr('vttErrorBox');
+  const sm=document.getElementById('vttStatusMsg');
+  const btn=document.getElementById('vttFileTranscribeBtn');
+  const pf=document.getElementById('vttProgressFill');
+  const textarea=document.getElementById('vttText');
+
+  if(!vttUploadedFile){
+    showInlineErr('vttErrorBox','Sem arquivo','Selecione um arquivo de audio primeiro.');
+    return;
+  }
+  const apiInfo = VTT_API_INFO[vttApi];
+  const apiKey = (document.getElementById('vttApiKey').value||'').trim();
+  if(!apiKey){
+    showInlineErr('vttErrorBox','Sem API key','Cole sua API key do '+apiInfo.label+' acima. A chave fica salva apenas neste navegador.');
+    return;
+  }
+
+  // Limite de 25MB (limite tipico de Whisper API)
+  if(vttUploadedFile.size > 25*1024*1024){
+    showInlineErr('vttErrorBox','Arquivo muito grande','O arquivo tem '+fmtSize(vttUploadedFile.size)+'. APIs Whisper aceitam ate ~25MB. Comprima o audio (use o conversor MP3 com bitrate menor) antes de enviar.');
+    return;
+  }
+
+  btn.disabled=true;
+  document.getElementById('vttProgressWrap').style.display='block';
+  pf.style.width='5%';
+  document.getElementById('vttOutputSection').style.display='block';
+  textarea.value=''; textarea.placeholder='Aguardando resposta da API...';
+  clearInlineErr('vttErrorBox');
+  localStorage.setItem('vttApiProvider', vttApi);
+
+  // Timer de progresso visual (a API nao reporta progresso real)
+  if(vttUploadProgressTimer) clearInterval(vttUploadProgressTimer);
+  let elapsed=0;
+  const startTs=Date.now();
+  vttUploadProgressTimer = setInterval(()=>{
+    elapsed=(Date.now()-startTs)/1000;
+    const cap = 92; // nunca passa de 92% antes da resposta
+    const next = Math.min(cap, 5 + elapsed*3);
+    pf.style.width = next+'%';
+    sm.textContent = 'Enviando para '+apiInfo.label+'... '+elapsed.toFixed(0)+'s';
+  }, 500);
+
+  try {
+    let text = '';
+    if(vttApi === 'groq' || vttApi === 'openai'){
+      const fd = new FormData();
+      fd.append('file', vttUploadedFile, vttUploadedFile.name);
+      fd.append('model', apiInfo.model);
+      fd.append('language', vttLang.split('-')[0]);
+      fd.append('response_format', 'json');
+      const r = await fetch(apiInfo.endpoint, {
+        method:'POST',
+        headers:{ 'Authorization':'Bearer '+apiKey },
+        body: fd
+      });
+      if(!r.ok){
+        let errBody='';
+        try { errBody = await r.text(); } catch(_){}
+        throw new Error('HTTP '+r.status+(errBody?' - '+errBody.substring(0,200):''));
+      }
+      const j = await r.json();
+      text = j.text || j.transcription || '';
+    } else if(vttApi === 'hf'){
+      // HF aceita audio binario direto
+      const r = await fetch(apiInfo.endpoint, {
+        method:'POST',
+        headers:{
+          'Authorization':'Bearer '+apiKey,
+          'Content-Type': vttUploadedFile.type || 'application/octet-stream'
+        },
+        body: vttUploadedFile
+      });
+      if(!r.ok){
+        let errBody='';
+        try { errBody = await r.text(); } catch(_){}
+        throw new Error('HTTP '+r.status+(errBody?' - '+errBody.substring(0,200):''));
+      }
+      const j = await r.json();
+      text = (Array.isArray(j) ? (j[0] && j[0].text) : (j.text || j.transcription)) || '';
+    }
+
+    clearInterval(vttUploadProgressTimer); vttUploadProgressTimer=null;
+    pf.style.width='100%';
+    if(!text.trim()){
+      sm.textContent='';
+      textarea.value='';
+      textarea.placeholder='A transcricao aparecera aqui...';
+      showInlineErr('vttErrorBox','Sem texto detectado','A API retornou texto vazio. O audio pode estar mudo ou em formato nao reconhecido.');
+    } else {
+      textarea.value = text.trim();
+      textarea.placeholder='';
+      sm.textContent='Transcricao concluida - '+text.trim().length+' caracteres em '+elapsed.toFixed(0)+'s.';
+    }
+    btn.disabled=false;
+  } catch(e){
+    if(vttUploadProgressTimer){ clearInterval(vttUploadProgressTimer); vttUploadProgressTimer=null; }
+    pf.style.width='0%';
+    console.error('[vtt:file]', e);
+    const msg = (e&&e.message)?e.message:String(e);
+    sm.textContent='';
+    textarea.placeholder='A transcricao aparecera aqui...';
+    let hint = '';
+    if(msg.indexOf('401')!==-1 || msg.indexOf('403')!==-1) {
+      hint = ' (verifique sua API key clicando em "Testar conexao")';
+    } else if(msg.indexOf('429')!==-1) {
+      hint = ' (limite de uso / rate limit - aguarde alguns minutos)';
+    } else if(msg.indexOf('Failed to fetch')!==-1 || msg.indexOf('NetworkError')!==-1) {
+      const isFile = location.protocol === 'file:' || window.origin === 'null';
+      if(isFile){
+        hint = ' - VOCE ABRIU VIA file://. Rode via servidor local: na pasta do export, execute "python -m http.server 8000" no terminal e abra http://localhost:8000. Tambem pode ser extensao do navegador bloqueando (uBlock/Brave Shields/firewall corporativo). Clique em "Testar conexao com a API" para diagnostico detalhado.';
+      } else {
+        hint = ' (sem internet, extensao bloqueando, ou firewall - clique em "Testar conexao" para diagnostico)';
+      }
+    }
+    showInlineErr('vttErrorBox','Erro na transcricao', msg+hint);
+    showErrToast('Erro na transcricao', msg+(hint.length<60?hint:''));
+    btn.disabled=false;
+  }
+}
+
+/* Compatibilidade: deixa as referencias antigas funcionarem */
+async function transcribeAudio(){
+  if(vttRecordedBlob && !vttUploadedFile) return transcribeFromMic();
+  if(vttUploadedFile) return transcribeUploadedFile();
+  showInlineErr('vttErrorBox','Sem audio','Grave pelo microfone ou faca upload de um arquivo.');
+}
+/* funcao legada removida - usar transcribeFromMic() ou transcribeUploadedFile() */
+
+function copyVttText(){
+  const t=document.getElementById('vttText').value;
+  if(!t)return;
+  navigator.clipboard.writeText(t).then(()=>{
+    document.getElementById('vttStatusMsg').textContent='Texto copiado!';
+  });
+}
+
+function downloadVttText(){
+  const t=document.getElementById('vttText').value;
+  if(!t)return;
+  const blob=new Blob([t],{type:'text/plain'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download='transcricao.txt';a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ===== GIF CREATOR ===== */
+let _gifDur=0, _gifFile=null, _gifStart=0, _gifEnd=5;
+let _gifDragging=null;
+let _gifWorkerBlobUrl=null;
+
+/* gif.worker.js precisa ser carregado como blob URL para funcionar em origin "null" (file://) */
+async function getGifWorkerUrl(){
+  if(_gifWorkerBlobUrl) return _gifWorkerBlobUrl;
+  const candidates = [
+    'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js',
+    'https://unpkg.com/gif.js@0.2.0/dist/gif.worker.js',
+    'https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.worker.js'
+  ];
+  let lastErr=null;
+  for(const url of candidates){
+    try {
+      const r = await fetch(url, {mode:'cors'});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const txt = await r.text();
+      const blob = new Blob([txt], {type:'application/javascript'});
+      _gifWorkerBlobUrl = URL.createObjectURL(blob);
+      return _gifWorkerBlobUrl;
+    } catch(e){ lastErr=e; }
+  }
+  throw new Error('Nao foi possivel baixar gif.worker.js: '+(lastErr&&lastErr.message||'sem internet'));
+}
+
+function updateGifFpsLabel(){
+  document.getElementById('gifFpsVal').textContent=document.getElementById('gifFps').value+' fps';
+  updateGifSizePred();
+}
+
+/* Estimativa rough de bytes do GIF: width*height*frames*0.15 (compressao tipica) */
+function updateGifSizePred(){
+  try {
+    if(!_gifFile){ const el=document.getElementById('gifSizePred'); if(el) el.style.display='none'; return; }
+    const fps=parseInt(document.getElementById('gifFps').value)||12;
+    const wInput=document.getElementById('gifWidth').value.trim();
+    const vidEl=document.getElementById('gifVideoEl');
+    const origW = vidEl.videoWidth||640, origH = vidEl.videoHeight||360;
+    const outW = (wInput && parseInt(wInput)>0)?parseInt(wInput):origW;
+    const outH = origW>0 ? Math.round(outW*(origH/origW)) : Math.round(outW*0.5625);
+    const dur = Math.max(0,_gifEnd-_gifStart);
+    const frames = Math.round(fps*dur);
+    if(frames<=0){ const el=document.getElementById('gifSizePred'); if(el) el.style.display='none'; return; }
+    // ~0.10 bytes por pixel-frame para GIF tipico (varia muito conforme conteudo)
+    const predicted = Math.round(outW*outH*frames*0.10);
+    const el = document.getElementById('gifSizePred');
+    if(el){
+      el.style.display='inline-flex';
+      el.innerHTML = renderSizePred(_gifFile.size, predicted)+' &middot; '+outW+'x'+outH+' &middot; '+frames+' frames';
+    }
+  } catch(e){}
+}
+
+(function initGifDrop(){
+  const dz=document.getElementById('gifVideoDropZone');
+  dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag-over');});
+  dz.addEventListener('dragleave',()=>dz.classList.remove('drag-over'));
+  dz.addEventListener('drop',e=>{
+    e.preventDefault();dz.classList.remove('drag-over');
+    if(e.dataTransfer.files[0]) handleGifVideoFile(e.dataTransfer.files[0]);
+  });
+})();
+
+function handleGifVideoFile(file){
+  if(!file)return;
+  _gifFile=file;
+  const video=document.getElementById('gifVideoEl');
+  video.src=URL.createObjectURL(file);
+  document.getElementById('gifVideoDzTitle').textContent=file.name;
+  video.onloadedmetadata=()=>{
+    _gifDur=video.duration;
+    _gifStart=0;
+    _gifEnd=Math.min(_gifDur,5);
+    document.getElementById('gifStartInput').value=_gifStart.toFixed(1);
+    document.getElementById('gifEndInput').value=_gifEnd.toFixed(1);
+    document.getElementById('gifEndInput').max=_gifDur;
+    document.getElementById('gifStartInput').max=_gifDur;
+    document.getElementById('gifBuilderWrap').style.display='block';
+    updateGifTimeline();
+  };
+}
+
+function updateGifTimeline(){
+  const dur=_gifDur||1;
+  const sP=(_gifStart/dur)*100, eP=(_gifEnd/dur)*100;
+  document.getElementById('gifTlHandleS').style.left=sP+'%';
+  document.getElementById('gifTlHandleE').style.left=eP+'%';
+  document.getElementById('gifTlRange').style.left=sP+'%';
+  document.getElementById('gifTlRange').style.width=(eP-sP)+'%';
+  document.getElementById('gifTlLabelS').textContent=_gifStart.toFixed(1)+'s';
+  document.getElementById('gifTlLabelE').textContent=_gifEnd.toFixed(1)+'s';
+  const dur2=_gifEnd-_gifStart;
+  document.getElementById('gifTlDur').textContent='dur: '+dur2.toFixed(1)+'s';
+  document.getElementById('gifDurHint').textContent=
+    'Duração selecionada: '+dur2.toFixed(1)+'s'+(dur2>10?' · atenção: GIFs >10s ficam muito grandes':'');
+  document.getElementById('gifStartInput').value=_gifStart.toFixed(1);
+  document.getElementById('gifEndInput').value=_gifEnd.toFixed(1);
+  updateGifSizePred();
+}
+
+function gifOnTimeUpdate(){
+  const video=document.getElementById('gifVideoEl');
+  if(!_gifDur) return;
+  const p=(video.currentTime/_gifDur)*100;
+  document.getElementById('gifTlPlayhead').style.left=p+'%';
+}
+
+// Timeline drag handles
+(function initGifHandles(){
+  function startDrag(handleId, which){
+    const h=document.getElementById(handleId);
+    function onMove(clientX){
+      const track=document.getElementById('gifTlTrack');
+      const rect=track.getBoundingClientRect();
+      let pct=Math.max(0,Math.min(1,(clientX-rect.left)/rect.width));
+      const t=pct*_gifDur;
+      if(which==='start'){
+        _gifStart=Math.max(0,Math.min(t,_gifEnd-0.1));
+      } else {
+        _gifEnd=Math.min(_gifDur,Math.max(t,_gifStart+0.1));
+      }
+      updateGifTimeline();
+    }
+    h.addEventListener('mousedown',e=>{
+      e.preventDefault(); _gifDragging=which;
+      const mm=e2=>onMove(e2.clientX);
+      const mu=()=>{_gifDragging=null;document.removeEventListener('mousemove',mm);document.removeEventListener('mouseup',mu);};
+      document.addEventListener('mousemove',mm);
+      document.addEventListener('mouseup',mu);
+    });
+    h.addEventListener('touchstart',e=>{
+      e.preventDefault(); _gifDragging=which;
+      const tm=e2=>{if(e2.touches[0])onMove(e2.touches[0].clientX);};
+      const tu=()=>{_gifDragging=null;document.removeEventListener('touchmove',tm);document.removeEventListener('touchend',tu);};
+      document.addEventListener('touchmove',tm,{passive:false});
+      document.addEventListener('touchend',tu);
+    },{passive:false});
+  }
+  // Defer until DOM ready
+  window.addEventListener('DOMContentLoaded',()=>{
+    startDrag('gifTlHandleS','start');
+    startDrag('gifTlHandleE','end');
+  });
+  // Also init immediately if already loaded
+  if(document.readyState==='complete'||document.readyState==='interactive'){
+    setTimeout(()=>{startDrag('gifTlHandleS','start');startDrag('gifTlHandleE','end');},100);
+  }
+})();
+
+function onGifTimeInput(which){
+  const s=parseFloat(document.getElementById('gifStartInput').value)||0;
+  const e=parseFloat(document.getElementById('gifEndInput').value)||0;
+  if(which==='start') _gifStart=Math.max(0,Math.min(s,_gifEnd-0.1));
+  else _gifEnd=Math.min(_gifDur,Math.max(e,_gifStart+0.1));
+  updateGifTimeline();
+}
+
+function gifPlayPause(){
+  const v=document.getElementById('gifVideoEl');
+  const btn=document.getElementById('gifPlayBtn');
+  if(v.paused){v.play();btn.textContent='⏸ Pause';}
+  else{v.pause();btn.textContent='▶ Play';}
+}
+
+function gifPlaySelection(){
+  const v=document.getElementById('gifVideoEl');
+  v.currentTime=_gifStart;
+  v.play();
+  function checkEnd(){
+    if(v.currentTime>=_gifEnd){ v.pause(); v.removeEventListener('timeupdate',checkEnd); }
+  }
+  v.addEventListener('timeupdate',checkEnd);
+}
+
+async function exportGif(){
+  clearInlineErr('gifErrorBox');
+  const btn=document.getElementById('gifExportBtn');
+  const pf=document.getElementById('gifProgressFill');
+  const sm=document.getElementById('gifStatusMsg');
+
+  try {
+    if(!_gifFile){
+      showInlineErr('gifErrorBox','Sem video','Selecione um video primeiro.');
+      return;
+    }
+    const fps=parseInt(document.getElementById('gifFps').value)||12;
+    const widthInputVal = document.getElementById('gifWidth').value.trim();
+    // Se nao informou, usa largura original do video
+    const _origVidW = (document.getElementById('gifVideoEl').videoWidth)||0;
+    const outW = (widthInputVal && parseInt(widthInputVal)>0)
+      ? parseInt(widthInputVal)
+      : (_origVidW || 480);
+    const duration=_gifEnd-_gifStart;
+    if(duration <= 0){
+      showInlineErr('gifErrorBox','Duracao invalida','O fim deve ser maior que o inicio.');
+      return;
+    }
+    const totalFrames=Math.round(fps*duration);
+    if(totalFrames <= 0){
+      showInlineErr('gifErrorBox','Sem frames','A duracao multiplicada por FPS resultou em zero frames.');
+      return;
+    }
+
+    btn.disabled=true;
+    document.getElementById('gifProgressWrap').style.display='block';
+    pf.style.width='0%';
+    sm.textContent='Extraindo frames...';
+    document.getElementById('gifOutPreview').style.display='none';
+
+    const video=document.createElement('video');
+    video.src=URL.createObjectURL(_gifFile);
+    video.muted=true; video.preload='auto';
+    await new Promise((res,rej)=>{
+      video.onloadeddata=res;
+      video.onerror=()=>rej(new Error('Nao foi possivel carregar o video.'));
+      video.load();
+    });
+
+    const aspect=video.videoHeight?video.videoWidth/video.videoHeight:16/9;
+    const outH=Math.round(outW/aspect);
+    const canvas=document.createElement('canvas');
+    canvas.width=outW; canvas.height=outH;
+    const ctx=canvas.getContext('2d');
+
+    const frames=[];
+    for(let i=0;i<totalFrames;i++){
+      const t=_gifStart+i*(1/fps);
+      video.currentTime=t;
+      await new Promise((res,rej)=>{
+        video.onseeked=res;
+        video.onerror=()=>rej(new Error('Erro ao buscar frame em '+t.toFixed(2)+'s'));
+      });
+      ctx.drawImage(video,0,0,outW,outH);
+      frames.push(canvas.toDataURL('image/png'));
+      pf.style.width=Math.round((i+1)/totalFrames*60)+'%';
+      sm.textContent='Frame '+(i+1)+'/'+totalFrames;
+      await new Promise(r=>setTimeout(r,0));
+    }
+    video.src='';
+
+    sm.textContent='Codificando GIF...';
+
+    if(typeof GIF==='undefined'){
+      await new Promise((res,rej)=>{
+        const s=document.createElement('script');
+        s.src='https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js';
+        s.onload=res;
+        s.onerror=()=>rej(new Error('Falha ao carregar a biblioteca gif.js (verifique sua conexao).'));
+        document.head.appendChild(s);
+      });
+    }
+
+    const imgEls=await Promise.all(frames.map(src=>new Promise((res,rej)=>{
+      const img=new Image();
+      img.onload=()=>res(img);
+      img.onerror=()=>rej(new Error('Falha ao carregar frame.'));
+      img.src=src;
+    })));
+
+    sm.textContent='Preparando worker...';
+    const workerUrl = await getGifWorkerUrl();
+    const gif=new GIF({
+      workers:2, quality:10, width:outW, height:outH,
+      workerScript: workerUrl
+    });
+    imgEls.forEach(img=>gif.addFrame(img,{delay:Math.round(1000/fps),copy:true}));
+    gif.on('progress',p=>{ pf.style.width=(60+p*40)+'%'; sm.textContent='Codificando GIF... '+Math.round(p*100)+'%'; });
+    gif.on('finished',blob=>{
+      const url=URL.createObjectURL(blob);
+      const name=_gifFile.name.replace(/\.[^.]+$/,'')+'.gif';
+      const dlId = registerDownload(name, blob, url);
+      window._lastGifOutput = { name, blob, url, id: dlId };
+      pf.style.width='100%';
+      const origSize=_gifFile.size;
+      const pctTxt = renderPctChange(origSize, blob.size);
+      sm.textContent='GIF gerado - '+fmtSize(blob.size)+' (original: '+fmtSize(origSize)+')';
+      const prev=document.getElementById('gifOutPreview');
+      prev.innerHTML='<img src="'+url+'" style="max-width:100%;border-radius:8px;border:0.5px solid var(--border);"><br>'+
+        '<div class="size-pred" style="justify-content:center;margin-top:6px;">'+fmtSize(blob.size)+' &middot; '+pctTxt+' vs original</div>'+
+        '<button class="dl-btn" style="margin-top:8px;width:auto;padding:0 20px;" onclick="dlById(\''+dlId+'\')">Baixar GIF</button>';
+      prev.style.display='block';
+      btn.disabled=false;
+    });
+    gif.on('error',e=>{
+      const msg = (e&&e.message)||String(e)||'desconhecido';
+      sm.textContent='';
+      showInlineErr('gifErrorBox','Erro no encoder GIF', msg);
+      showErrToast('Erro ao gerar GIF', msg);
+      btn.disabled=false;
+    });
+    gif.render();
+  } catch(e){
+    console.error('[gif]', e);
+    const msg = (e && e.message) ? e.message : String(e);
+    sm.textContent='';
+    showInlineErr('gifErrorBox','Erro ao gerar GIF', msg);
+    showErrToast('Erro ao gerar GIF', msg);
+    btn.disabled=false;
+  }
+}
+/* ===== VIDEO CONVERTER ===== */
+let _vcFile=null;
+let _vcFmt=null;
+let _vcFileDuration=0;
+
+const vcFormats=[
+  {fmt:'webm', label:'WebM',    mime:'video/webm;codecs=vp9', mimeAlt:['video/webm;codecs=vp8','video/webm'], hint:'WebM VP9 · formato web otimizado · menor tamanho'},
+  {fmt:'mp4',  label:'MP4',     mime:'video/mp4',             mimeAlt:[], hint:'MP4 H.264 · compatível com todos os dispositivos'},
+  {fmt:'gif',  label:'GIF',     mime:null,                    mimeAlt:[], hint:'GIF animado · sem áudio · ideal para loops curtos'},
+  {fmt:'ogg',  label:'OGG',     mime:'video/ogg;codecs=theora',mimeAlt:['video/ogg'], hint:'OGG Theora · codec livre · boa compatibilidade web'},
+  {fmt:'ts',   label:'TS',      mime:'video/mp2t',             mimeAlt:[], hint:'MPEG-2 Transport Stream · compatível com broadcast'},
+];
+const vcQualityLabels=['Baixo','Médio-baixo','Médio','Alto','Máximo'];
+const vcBitrateMap   =[500000,1000000,2500000,5000000,8000000];
+
+function updateVcQualityLabel(){
+  const i=parseInt(document.getElementById('vcQuality').value);
+  document.getElementById('vcQualityVal').textContent=vcQualityLabels[i];
+  updateVcSizePred();
+}
+
+function updateVcSizePred(){
+  const el = document.getElementById('vcSizePred');
+  if(!el) return;
+  if(!_vcFile || !_vcFmt){ el.style.display='none'; return; }
+  if(_vcFmt==='gif'){
+    el.style.display='inline-flex';
+    el.innerHTML = '<span class="pct-neu">previsao GIF varia muito conforme conteudo</span>';
+    return;
+  }
+  // Tenta usar duracao do arquivo
+  let dur = _vcFileDuration || 0;
+  if(!dur){
+    try {
+      const a=document.createElement('video');
+      a.preload='metadata'; a.src=URL.createObjectURL(_vcFile);
+      a.onloadedmetadata=()=>{ _vcFileDuration = isFinite(a.duration)?a.duration:0; URL.revokeObjectURL(a.src); updateVcSizePred(); };
+      el.innerHTML='<span class="pct-neu">calculando previsao...</span>';
+      el.style.display='inline-flex';
+      return;
+    } catch(_){ el.style.display='none'; return; }
+  }
+  const qIdx = parseInt(document.getElementById('vcQuality').value);
+  const bitrate = vcBitrateMap[qIdx];
+  const predicted = estimateVideoSize(dur, bitrate);
+  el.style.display='inline-flex';
+  el.innerHTML = renderSizePred(_vcFile.size, predicted)+' &middot; '+vcQualityLabels[qIdx]+' &middot; ~'+(bitrate/1000000).toFixed(1)+' Mbps';
+}
+
+(function initVcDrop(){
+  const dz=document.getElementById('vcDropZone');
+  dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag-over');});
+  dz.addEventListener('dragleave',()=>dz.classList.remove('drag-over'));
+  dz.addEventListener('drop',e=>{
+    e.preventDefault();dz.classList.remove('drag-over');
+    if(e.dataTransfer.files[0]) handleVcFile(e.dataTransfer.files[0]);
+  });
+})();
+
+function handleVcFile(file){
+  if(!file)return;
+  _vcFile=file; _vcFmt=null;
+  document.getElementById('vcDzTitle').textContent=file.name;
+  document.getElementById('vcFileName').textContent=file.name;
+  document.getElementById('vcFileInfo').style.display='flex';
+  document.getElementById('vcConvertBtn').disabled=true;
+  document.getElementById('vcOutputSection').style.display='none';
+  document.getElementById('vcStatusMsg').textContent='';
+  buildVcFormatButtons();
+  document.getElementById('vcFormatSection').style.display='block';
+  document.getElementById('vcOptionsSection').style.display='none';
+}
+
+function clearVcFile(){
+  _vcFile=null; _vcFmt=null; _vcFileDuration=0;
+  document.getElementById('vcDzTitle').textContent='Soltar vídeo ou GIF aqui';
+  document.getElementById('vcFileInfo').style.display='none';
+  document.getElementById('vcInput').value='';
+  document.getElementById('vcFormatSection').style.display='none';
+  document.getElementById('vcOptionsSection').style.display='none';
+  document.getElementById('vcConvertBtn').disabled=true;
+  document.getElementById('vcOutputSection').style.display='none';
+}
+
+function buildVcFormatButtons(){
+  const row=document.getElementById('vcFormatRow');
+  row.innerHTML=vcFormats.map(f=>{
+    // Check browser support
+    const supported = f.mime===null || MediaRecorder.isTypeSupported(f.mime) ||
+      f.mimeAlt.some(m=>MediaRecorder.isTypeSupported(m));
+    if(!supported) return '';
+    return `<span class="format-chip" data-fmt="${f.fmt}" onclick="selectVcFormat('${f.fmt}')">${f.label}</span>`;
+  }).join('');
+  // If no formats supported, show message
+  if(!row.innerHTML.trim()){
+    row.innerHTML='<span class="hint">Nenhum formato de vídeo suportado neste navegador (use Chrome/Edge)</span>';
+  }
+}
+
+function selectVcFormat(fmt){
+  _vcFmt=fmt;
+  document.querySelectorAll('#vcFormatRow .format-chip').forEach(el=>
+    el.classList.toggle('active',el.dataset.fmt===fmt));
+  const f=vcFormats.find(x=>x.fmt===fmt);
+  document.getElementById('vcFmtHint').textContent=f?f.hint:'';
+  document.getElementById('vcOptionsSection').style.display='block';
+  document.getElementById('vcConvertBtn').disabled=false;
+  updateVcSizePred();
+}
+
+async function convertVideo(){
+  clearInlineErr('vcErrorBox');
+  const btn=document.getElementById('vcConvertBtn');
+  const pf=document.getElementById('vcProgressFill');
+  const sm=document.getElementById('vcStatusMsg');
+
+  try {
+    if(!_vcFile||!_vcFmt) {
+      showInlineErr('vcErrorBox','Faltam dados','Selecione arquivo e formato de saida.');
+      return;
+    }
+    const qualityIdx=parseInt(document.getElementById('vcQuality').value);
+    const targetW=parseInt(document.getElementById('vcWidth').value)||0;
+    const bitrate=vcBitrateMap[qualityIdx];
+
+    btn.disabled=true;
+    document.getElementById('vcProgressWrap').style.display='block';
+    pf.style.width='5%';
+    document.getElementById('vcOutputSection').style.display='none';
+
+    if(_vcFmt==='gif'){
+      sm.textContent='Convertendo para GIF...';
+      await convertVideoToGifFull(btn,pf,sm,targetW,bitrate);
+      return;
+    }
+
+    sm.textContent='Carregando video...';
+    const video=document.createElement('video');
+    video.src=URL.createObjectURL(_vcFile);
+    video.muted=true; video.preload='auto';
+    await new Promise((res,rej)=>{
+      video.onloadeddata=res;
+      video.onerror=()=>rej(new Error('Nao foi possivel carregar o video.'));
+      video.load();
+    });
+    const srcW=video.videoWidth||640, srcH=video.videoHeight||360;
+    const ratio=srcH/srcW;
+    const outW=targetW>0?targetW:srcW;
+    const outH=Math.round(outW*ratio);
+    const dur=video.duration||1;
+
+    const canvas=document.createElement('canvas');
+    canvas.width=outW; canvas.height=outH;
+    const ctx=canvas.getContext('2d');
+
+    const f=vcFormats.find(x=>x.fmt===_vcFmt);
+    let mimeType=null;
+    const candidates=f.mime?[f.mime,...f.mimeAlt]:f.mimeAlt;
+    for(const m of candidates){ if(MediaRecorder.isTypeSupported(m)){mimeType=m;break;} }
+    if(!mimeType){
+      const msg='O formato '+_vcFmt.toUpperCase()+' nao e suportado pelo MediaRecorder neste navegador. Tente WebM.';
+      sm.textContent='';
+      showInlineErr('vcErrorBox','Formato nao suportado', msg);
+      showErrToast('Formato nao suportado', msg);
+      btn.disabled=false;
+      return;
+    }
+
+    const stream=canvas.captureStream(30);
+    const mr=new MediaRecorder(stream,{mimeType,videoBitsPerSecond:bitrate});
+    const chunks=[];
+    mr.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
+
+    const outName=_vcFile.name.replace(/\.[^.]+$/,'')+'.'+_vcFmt;
+    const recordDone=new Promise((res,rej)=>{
+      mr.onstop=()=>{
+        if(!chunks.length){ rej(new Error('Nenhum dado gerado pelo encoder.')); return; }
+        res(new Blob(chunks,{type:mimeType}));
+      };
+      mr.onerror=e=>rej(new Error('Erro do MediaRecorder: '+(e.error&&e.error.message||'desconhecido')));
+    });
+
+    mr.start(100);
+    video.currentTime=0;
+    await new Promise(r=>{video.onseeked=r;});
+    await video.play();
+    sm.textContent='Convertendo...';
+    await new Promise(res=>{
+      function loop(){
+        if(video.paused||video.ended){res();return;}
+        ctx.drawImage(video,0,0,outW,outH);
+        pf.style.width=Math.round((video.currentTime/dur)*90)+'%';
+        requestAnimationFrame(loop);
+      }
+      video.onended=()=>{ctx.drawImage(video,0,0,outW,outH);res();};
+      loop();
+    });
+    mr.stop();
+    const blob=await recordDone;
+    video.src='';
+    pf.style.width='100%';
+    sm.textContent='Conversao concluida - '+fmtSize(blob.size);
+    const url=URL.createObjectURL(blob);
+    const dlId = registerDownload(outName, blob, url);
+    window._lastVcOutput = { name: outName, blob, url, id: dlId };
+    const sec=document.getElementById('vcOutputSection');
+    sec.innerHTML='<div class="audio-out-item">'+
+      '<div class="audio-icon"><svg viewBox="0 0 14 14" fill="none"><rect x="1" y="2" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M4.5 5l5 2.5-5 2.5V5z" fill="currentColor" opacity=".8"/></svg></div>'+
+      '<div class="audio-out-info">'+
+        '<div class="audio-out-name">'+outName.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</div>'+
+        '<div class="audio-out-size">'+fmtSize(blob.size)+' - original: '+fmtSize(_vcFile.size)+' - '+outW+'x'+outH+'</div>'+
+        '<div class="size-pred">'+renderPctChange(_vcFile.size, blob.size)+'</div>'+
+      '</div>'+
+      '<button class="dl-btn" style="min-width:64px;flex-shrink:0;" onclick="dlById(\''+dlId+'\')">baixar</button>'+
+      '</div>';
+    sec.style.display='block';
+    btn.disabled=false;
+  } catch(e){
+    console.error('[vc]', e);
+    const msg = (e && e.message) ? e.message : String(e);
+    sm.textContent='';
+    showInlineErr('vcErrorBox','Erro na conversao', msg);
+    showErrToast('Erro na conversao', msg);
+    btn.disabled=false;
+  }
+}
+async function convertVideoToGifFull(btn,pf,sm,targetW,bitrate){
+  try {
+    const fps=12;
+    const video=document.createElement('video');
+    video.src=URL.createObjectURL(_vcFile);
+    video.muted=true; video.preload='auto';
+    await new Promise((res,rej)=>{
+      video.onloadeddata=res;
+      video.onerror=()=>rej(new Error('Nao foi possivel carregar o video.'));
+      video.load();
+    });
+    const srcW=video.videoWidth||640, srcH=video.videoHeight||360;
+    const ratio=srcH/srcW;
+    const outW=targetW>0?targetW:Math.min(srcW,480);
+    const outH=Math.round(outW*ratio);
+    const dur=video.duration||1;
+    const totalFrames=Math.round(fps*Math.min(dur,10));
+
+    const canvas=document.createElement('canvas');
+    canvas.width=outW; canvas.height=outH;
+    const ctx=canvas.getContext('2d');
+    const frames=[];
+
+    for(let i=0;i<totalFrames;i++){
+      video.currentTime=i*(1/fps);
+      await new Promise((res,rej)=>{
+        video.onseeked=res;
+        video.onerror=()=>rej(new Error('Erro ao buscar frame.'));
+      });
+      ctx.drawImage(video,0,0,outW,outH);
+      frames.push(canvas.toDataURL('image/png'));
+      pf.style.width=Math.round((i+1)/totalFrames*60)+'%';
+      sm.textContent='Frame '+(i+1)+'/'+totalFrames;
+      await new Promise(r=>setTimeout(r,0));
+    }
+    video.src='';
+    sm.textContent='Codificando GIF...';
+
+    if(typeof GIF==='undefined'){
+      await new Promise((res,rej)=>{
+        const s=document.createElement('script');
+        s.src='https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js';
+        s.onload=res;
+        s.onerror=()=>rej(new Error('Falha ao carregar a biblioteca gif.js'));
+        document.head.appendChild(s);
+      });
+    }
+    const imgs=await Promise.all(frames.map(src=>new Promise((res,rej)=>{
+      const i=new Image(); i.onload=()=>res(i); i.onerror=()=>rej(new Error('Falha ao carregar frame.')); i.src=src;
+    })));
+    sm.textContent='Preparando worker...';
+    const workerUrl = await getGifWorkerUrl();
+    const gif=new GIF({workers:2,quality:10,width:outW,height:outH,
+      workerScript: workerUrl});
+    imgs.forEach(img=>gif.addFrame(img,{delay:Math.round(1000/fps),copy:true}));
+    gif.on('progress',p=>{pf.style.width=(60+p*40)+'%';sm.textContent='Codificando GIF... '+Math.round(p*100)+'%';});
+    gif.on('finished',blob=>{
+      const url=URL.createObjectURL(blob);
+      const outName=_vcFile.name.replace(/\.[^.]+$/,'')+'.gif';
+      const dlId = registerDownload(outName, blob, url);
+      window._lastVcOutput = { name: outName, blob, url, id: dlId };
+      pf.style.width='100%';
+      sm.textContent='GIF gerado - '+fmtSize(blob.size);
+      const sec=document.getElementById('vcOutputSection');
+      sec.innerHTML='<div class="audio-out-item">'+
+        '<div class="audio-icon"><svg viewBox="0 0 14 14" fill="none"><rect x="1" y="1" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M3 5h3M3 7h5M3 9h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></div>'+
+        '<div class="audio-out-info">'+
+          '<div class="audio-out-name">'+outName.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</div>'+
+          '<div class="audio-out-size">'+fmtSize(blob.size)+' - '+outW+'x'+outH+' - '+fps+'fps</div>'+
+          '<div class="size-pred">'+renderPctChange(_vcFile.size, blob.size)+'</div>'+
+        '</div>'+
+        '<button class="dl-btn" style="min-width:64px;flex-shrink:0;" onclick="dlById(\''+dlId+'\')">baixar</button>'+
+        '</div>';
+      sec.style.display='block';
+      btn.disabled=false;
+    });
+    gif.on('error',e=>{
+      const msg = (e&&e.message)||String(e)||'desconhecido';
+      sm.textContent='';
+      showInlineErr('vcErrorBox','Erro no encoder GIF', msg);
+      showErrToast('Erro ao gerar GIF', msg);
+      btn.disabled=false;
+    });
+    gif.render();
+  } catch(e){
+    console.error('[v2g]', e);
+    const msg = (e && e.message) ? e.message : String(e);
+    sm.textContent='';
+    showInlineErr('vcErrorBox','Erro na conversao para GIF', msg);
+    showErrToast('Erro na conversao para GIF', msg);
+    btn.disabled=false;
+  }
+}
+</script>
+</body>
+</html>

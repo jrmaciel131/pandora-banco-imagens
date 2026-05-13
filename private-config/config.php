@@ -6,90 +6,98 @@
  * acessível via HTTP. Concentra as constantes globais usadas pelos demais
  * módulos: caminhos, credenciais, política de sessão e definições de bases.
  *
- * ⚠️ ATENÇÃO — versão sanitizada para o GitHub
- * --------------------------------------------------------
- * Os valores reais (senhas, hashes, IDs do Google e chaves) foram
- * substituídos por placeholders. Antes de subir este arquivo para o
- * servidor de produção, troque cada placeholder pelo valor correspondente.
- * NUNCA comite este arquivo já preenchido.
+ * IMPORTANTE: substitua todos os placeholders abaixo (SEU_*, valores de
+ * exemplo) pelos valores reais do seu ambiente antes de subir ao servidor.
  */
-
-if (!defined('WEB_ROOT')) {
-    define('WEB_ROOT', dirname(__DIR__) . '/dominio.com');
-}
-
-define('PRIVATE_CONFIG_PATH', __DIR__);
-
-define('APP_VERSION', 'v19.00');
 
 /**
- * Lista de usuários e seus hashes bcrypt.
+ * Caminho absoluto da pasta pública. Normalmente é definido pelos entry
+ * scripts (handler.php, cron.php) antes do require deste arquivo; o
+ * fallback assume a estrutura padrão `private-config/` irmã do domínio.
+ */
+if (!defined('WEB_ROOT')) {
+    define('WEB_ROOT', dirname(__DIR__) . '/SEU_DOMINIO_OU_PUBLIC_HTML');
+}
+
+/**
+ * Caminho desta pasta privada. Utilizado para localizar arquivos auxiliares
+ * (passwords.json, users_override.json, production_users.json, etc.).
+ */
+define('PRIVATE_CONFIG_PATH', __DIR__);
+
+define('APP_VERSION', 'v21.1');
+
+/**
+ * Usuários estáticos do sistema. As senhas são hashes bcrypt — gere com:
+ *   php -r 'echo password_hash("SUA_SENHA", PASSWORD_DEFAULT) . "\n";'
  *
- * Para gerar um hash novo no PHP:
- *   echo password_hash('senha-em-texto-limpo', PASSWORD_BCRYPT, ['cost'=>12]);
+ * Papéis disponíveis: 'admin' (acesso total) e 'user' (limitado).
  */
 define('USERS', [
-    'adm1'   => ['hash' => 'BCRYPT_HASH_DO_USUARIO_AQUI',   'role' => 'admin'],
-    'lider'  => ['hash' => 'BCRYPT_HASH_DO_USUARIO_AQUI',   'role' => 'admin'],
-    'fabio'  => ['hash' => 'BCRYPT_HASH_DO_USUARIO_AQUI',   'role' => 'admin'],
-    'adm3'   => ['hash' => 'BCRYPT_HASH_DO_USUARIO_AQUI',   'role' => 'user'],
-    'adm6'   => ['hash' => 'BCRYPT_HASH_DO_USUARIO_AQUI',   'role' => 'user'],
-    'adm7'   => ['hash' => 'BCRYPT_HASH_DO_USUARIO_AQUI',   'role' => 'user'],
+    'admin' => ['hash' => '$2y$12$REPLACE_ME_WITH_REAL_BCRYPT_HASH_FOR_ADMIN_USER____________', 'role' => 'admin'],
+    'user1' => ['hash' => '$2y$12$REPLACE_ME_WITH_REAL_BCRYPT_HASH_FOR_USER1____________________', 'role' => 'user'],
 ]);
 
+/**
+ * Bases de dados disponíveis na aplicação.
+ *
+ * Cada base aponta para uma planilha do Google Sheets, uma pasta do Drive
+ * e um conjunto de tabelas MySQL identificadas pelo prefixo `db_prefix`.
+ * A flag `is_test` marca ambientes de sandbox aos quais usuários comuns
+ * têm acesso por padrão.
+ */
 define('BASES', [
     'TESTE' => [
         'label'           => 'Base Teste',
         'emoji'           => '🧪',
-        'spreadsheet_id'  => 'ID_DA_PLANILHA_GOOGLE_AQUI',
+        'spreadsheet_id'  => 'SEU_SPREADSHEET_ID_DA_BASE_TESTE_AQUI',
         'sheet_name'      => 'CASOS ONLINE',
-        'drive_folder_id' => 'ID_DA_PASTA_DO_DRIVE_AQUI',
+        'drive_folder_id' => 'SEU_DRIVE_FOLDER_ID_DA_BASE_TESTE_AQUI',
         'thumb_dir'       => WEB_ROOT . '/thumbs-teste',
         'thumb_base_url'  => '/thumbs-teste',
         'db_prefix'       => 'teste_',
         'is_test'         => true,
     ],
-    'PH' => [
-        'label'           => 'Base PH',
+    'PRODUCAO' => [
+        'label'           => 'Base Produção',
         'emoji'           => '🟦',
-        'spreadsheet_id'  => 'ID_DA_PLANILHA_GOOGLE_AQUI',
+        'spreadsheet_id'  => 'SEU_SPREADSHEET_ID_DA_PRODUCAO_AQUI',
         'sheet_name'      => 'CASOS ONLINE',
-        'drive_folder_id' => 'ID_DA_PASTA_DO_DRIVE_AQUI',
+        'drive_folder_id' => 'SEU_DRIVE_FOLDER_ID_DA_PRODUCAO_AQUI',
         'thumb_dir'       => WEB_ROOT . '/thumbs',
         'thumb_base_url'  => '/thumbs',
         'db_prefix'       => '',
     ],
-    'PO' => [
-        'label'           => 'Base PO',
-        'emoji'           => '🟩',
-        'spreadsheet_id'  => 'ID_DA_PLANILHA_GOOGLE_AQUI',
-        'sheet_name'      => 'CASOS-ONLINE',
-        'drive_folder_id' => 'ID_DA_PASTA_DO_DRIVE_AQUI',
-        'thumb_dir'       => WEB_ROOT . '/thumbs-po',
-        'thumb_base_url'  => '/thumbs-po',
-        'db_prefix'       => 'po_',
-    ],
 ]);
 
-define('PRODUCTION_BASES', ['PH','PO']);
+/**
+ * Conjunto de bases tratadas como ambiente de produção. O acesso é
+ * restrito a administradores e a usuários autorizados em
+ * `production_users.json`. Demais usuários enxergam apenas bases que
+ * não constam desta lista (por convenção, a base TESTE).
+ */
+define('PRODUCTION_BASES', ['PRODUCAO']);
 
+/** Caminho absoluto do JSON de credenciais da conta de serviço Google. */
 define('GOOGLE_CREDENTIALS_PATH', __DIR__ . '/google-credentials.json');
 
-define('DB_HOST', 'HOST_DO_MYSQL_AQUI');
-define('DB_NAME', 'NOME_DO_BANCO_AQUI');
-define('DB_USER', 'USUARIO_DO_BANCO_AQUI');
-define('DB_PASS', 'SENHA_DO_BANCO_AQUI');
-
+define('DB_HOST', 'SEU_HOST_MYSQL_AQUI');
+define('DB_NAME', 'SEU_NOME_DE_BANCO_AQUI');
+define('DB_USER', 'SEU_USUARIO_MYSQL_AQUI');
+define('DB_PASS', 'SUA_SENHA_MYSQL_AQUI');
 define('CACHE_TTL',        300);
 define('THUMB_CACHE_TTL',  2592000);
 define('FOLDER_CACHE_TTL', 3600);
-define('SESSION_LIFETIME',    14400);
+// Duração da sessão. Reduzida de 4h para 2h porque o renew automático
+// (botão "Renovar sessão" e ação do usuário) já mantém logado quem está
+// ativo. 2h limita a janela de risco se alguém esquecer a máquina aberta.
+define('SESSION_LIFETIME',    7200);
 define('SESSION_WARN_BEFORE', 900);
 define('MAX_LOGIN_ATTEMPTS',  5);
 define('LOGIN_BLOCK_MINUTES', 15);
+define('CRON_KEY', 'GERE_UMA_CHAVE_LONGA_E_ALEATORIA_AQUI_USE_OPENSSL_RAND_HEX_32');
 
-/**
- * Chave aleatória usada como "token" na URL do cron.
- * Gerar uma nova em PHP: bin2hex(random_bytes(32)) . '.php'
- */
-define('CRON_KEY', 'TOKEN_LONGO_E_ALEATORIO_AQUI.php');
+// Raio mínimo (em km) entre uma cidade nova e qualquer cidade já em uso no
+// mesmo caso. Usuários comuns são bloqueados se houver conflito; apenas admins
+// podem confirmar para prosseguir. Ajuste conforme necessidade do negócio.
+define('DISTANCE_RADIUS_KM', 80);

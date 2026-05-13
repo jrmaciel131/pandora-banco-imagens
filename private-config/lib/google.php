@@ -168,9 +168,10 @@ class GoogleAPI {
             $cidades = array_values(array_filter(array_map('trim',explode('/',strtoupper($row[3]??'')))));
             $clientes= array_values(array_filter(array_map('trim',explode('/',$row[4]??''))));
             // Coluna F (tags): aceita separadores "/" ou "," e normaliza para uppercase.
+            // mb_strtoupper é necessário para preservar acentos (ESTÉTICA, BOTOX, etc).
             $tagsRaw = trim($row[5] ?? '');
             $tags    = $tagsRaw === '' ? [] : array_values(array_filter(array_map(
-                fn($t)=>strtoupper(trim($t)),
+                fn($t)=>mb_strtoupper(trim($t), 'UTF-8'),
                 preg_split('/[\/,]/', $tagsRaw)
             )));
             $motivo  = trim($row[6] ?? '');

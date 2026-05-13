@@ -17,8 +17,11 @@ $isCli = (PHP_SAPI === 'cli');
 if (!$isCli) {
     if (!defined('WEB_ROOT')) define('WEB_ROOT', dirname(__DIR__));
     require_once __DIR__ . '/../../private-config/config.php';
-    $key = $_GET['key'] ?? '';
-    if (!defined('CRON_KEY') || $key !== CRON_KEY) {
+    // Aceita a chave via header `X-Cron-Key` (preferencial) ou via GET para
+    // compatibilidade com integrações antigas. A versão por header não
+    // aparece nos logs de acesso do servidor web nem no histórico do browser.
+    $key = $_SERVER['HTTP_X_CRON_KEY'] ?? ($_GET['key'] ?? '');
+    if (!defined('CRON_KEY') || !hash_equals(CRON_KEY, $key)) {
         http_response_code(403);
         echo json_encode(['ok'=>false,'error'=>'Chave inválida.']);
         exit;

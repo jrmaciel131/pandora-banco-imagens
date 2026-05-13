@@ -110,9 +110,165 @@ function loadProductionUsers(): array {
     $data = json_decode(file_get_contents($path), true);
     return is_array($data) ? $data : [];
 }
-function saveProductionUsers(array $map): void {
-    $path = PRIVATE_CONFIG_PATH.'/production_users.json';
-    file_put_contents($path, json_encode($map, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE), LOCK_EX);
+
+/**
+ * Normaliza um nome de cidade para casamento contra o CSV de coordenadas:
+ * uppercase e sem acentos. Byte-clean, não depende de extensões opcionais.
+ */
+function normalizeCidade(string $s): string {
+    $s = trim(mb_strtoupper($s, 'UTF-8'));
+    $from = ['Á','À','Ã','Â','Ä','É','È','Ê','Ë','Í','Ì','Î','Ï','Ó','Ò','Ô','Õ','Ö','Ú','Ù','Û','Ü','Ç','Ñ'];
+    $to   = ['A','A','A','A','A','E','E','E','E','I','I','I','I','O','O','O','O','O','U','U','U','U','C','N'];
+    return str_replace($from, $to, $s);
+}
+
+/**
+ * Carrega o CSV `cidades_coords.csv` (IBGE) em memória com 3 índices:
+ *   _uf_name → "UF|NORM" => entry (lookup direto)
+ *   _by_name → NORM       => [entries] (busca por nome, sem saber UF)
+ *   _norms   → array de NORMs únicos (varredura para fuzzy match)
+ *
+ * Em caso de falha retorna `['_error' => msg]` — o chamador deve abortar a
+ * operação e mostrar a mensagem ao usuário.
+ */
+function loadCidadesCoords(): array {
+    static $cache = null;
+    if ($cache !== null) return $cache;
+    $path = PRIVATE_CONFIG_PATH . '/cidades_coords.csv';
+    if (!file_exists($path)) { $cache = ['_error'=>'cidades_coords.csv não encontrado em private-config/']; return $cache; }
+    $UF_MAP = [
+        '12'=>'AC','27'=>'AL','16'=>'AP','13'=>'AM','29'=>'BA','23'=>'CE','53'=>'DF',
+        '32'=>'ES','52'=>'GO','21'=>'MA','51'=>'MT','50'=>'MS','31'=>'MG','15'=>'PA',
+        '25'=>'PB','41'=>'PR','26'=>'PE','22'=>'PI','33'=>'RJ','24'=>'RN','43'=>'RS',
+        '11'=>'RO','14'=>'RR','42'=>'SC','35'=>'SP','28'=>'SE','17'=>'TO',
+    ];
+    $fh = @fopen($path, 'r');
+    if (!$fh) { $cache = ['_error'=>'Não foi possível abrir cidades_coords.csv.']; return $cache; }
+    $header = fgetcsv($fh);
+    if (!$header) { fclose($fh); $cache = ['_error'=>'cidades_coords.csv: header inválido.']; return $cache; }
+    $byUfName = []; $byName = [];
+    while (($row = fgetcsv($fh)) !== false) {
+        if (count($row) < 6) continue;
+        $name = $row[1] ?? '';
+        $lat  = (float)($row[2] ?? 0);
+        $lng  = (float)($row[3] ?? 0);
+        $uf   = $UF_MAP[$row[5] ?? ''] ?? null;
+        if (!$uf || !$lat || !$lng) continue;
+        $norm = normalizeCidade($name);
+        $entry = ['lat'=>$lat, 'lng'=>$lng, 'name'=>$name, 'uf'=>$uf];
+        $byUfName[$uf . '|' . $norm] = $entry;
+        if (!isset($byName[$norm])) $byName[$norm] = [];
+        $byName[$norm][] = $entry;
+    }
+    fclose($fh);
+    if (empty($byUfName)) { $cache = ['_error'=>'cidades_coords.csv: nenhuma linha válida.']; return $cache; }
+    $cache = ['_uf_name'=>$byUfName, '_by_name'=>$byName, '_norms'=>array_keys($byName)];
+    return $cache;
+}
+
+/** Lookup direto por UF+cidade. Retorna ['lat','lng','name','uf'] ou null. */
+function findCidadeCoords(string $uf, string $cidade): ?array {
+    $coords = loadCidadesCoords();
+    if (isset($coords['_error'])) return null;
+    $key = strtoupper(trim($uf)) . '|' . normalizeCidade($cidade);
+    return $coords['_uf_name'][$key] ?? null;
+}
+
+/** Lista todas as ocorrências de um nome normalizado (pode aparecer em várias UFs). */
+function findCidadeAnywhere(string $cidadeNorm): array {
+    $coords = loadCidadesCoords();
+    if (isset($coords['_error'])) return [];
+    return $coords['_by_name'][$cidadeNorm] ?? [];
+}
+
+/** Sugestões fuzzy por Levenshtein (usado no audit pra propor correções). */
+function suggestSimilarCidades(string $cidadeNorm, int $maxDist = 3, int $maxResults = 3): array {
+    $coords = loadCidadesCoords();
+    if (isset($coords['_error'])) return [];
+    $scored = [];
+    $len = strlen($cidadeNorm);
+    foreach ($coords['_norms'] as $norm) {
+        if (abs(strlen($norm) - $len) > $maxDist) continue;
+        $d = levenshtein($cidadeNorm, $norm);
+        if ($d <= $maxDist) {
+            foreach ($coords['_by_name'][$norm] as $entry) {
+                $scored[] = ['name'=>$entry['name'], 'uf'=>$entry['uf'], 'distance'=>$d];
+            }
+        }
+    }
+    usort($scored, fn($a, $b) => $a['distance'] - $b['distance']);
+    return array_slice($scored, 0, $maxResults);
+}
+
+/**
+ * Tenta achar a UF da cidade testando cada UF candidata. Útil para cidades
+ * já gravadas no caso, cuja UF não está mais alinhada por índice depois do
+ * fix da v21.1 (dedup de UF na escrita).
+ */
+function findCidadeCoordsAmongUfs(string $cidade, array $candidateUfs): ?array {
+    foreach ($candidateUfs as $uf) {
+        $c = findCidadeCoords($uf, $cidade);
+        if ($c) return $c;
+    }
+    return null;
+}
+
+/** Distância em km entre dois pontos (lat/lng), fórmula Haversine. */
+function haversineKm(float $lat1, float $lng1, float $lat2, float $lng2): float {
+    $R = 6371.0;
+    $dLat = deg2rad($lat2 - $lat1);
+    $dLng = deg2rad($lng2 - $lng1);
+    $a = sin($dLat/2) ** 2
+       + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng/2) ** 2;
+    return $R * 2 * asin(sqrt($a));
+}
+
+/**
+ * Lista TODAS as cidades existentes no caso que estão dentro do raio
+ * `DISTANCE_RADIUS_KM` da nova cidade. Retorna:
+ *   - array de conflitos [{cidade, distancia_km}] — caso conflitos existam
+ *   - [] — se a nova cidade não tem conflito
+ * Lança Exception se o CSV não puder ser carregado.
+ */
+function findDistanceConflicts(string $novaUf, string $novaCidade, array $caso): array {
+    $coords = loadCidadesCoords();
+    if (isset($coords['_error'])) {
+        throw new Exception('Validação geográfica indisponível: '.$coords['_error']);
+    }
+    $alvo = findCidadeCoords($novaUf, $novaCidade);
+    if (!$alvo) {
+        // Cidade nova não encontrada no CSV → não dá pra calcular. Não bloqueia
+        // (cidade pode ser rara/recente); a regra do raio simplesmente não se aplica.
+        return [];
+    }
+    $raio = defined('DISTANCE_RADIUS_KM') ? (float)DISTANCE_RADIUS_KM : 80;
+    $candidateUfs = $caso['ufs'] ?? [];
+    $conflitos = [];
+    foreach (($caso['cidades'] ?? []) as $cid) {
+        if (!$cid) continue;
+        if (normalizeCidade($cid) === normalizeCidade($novaCidade)) continue;
+        $ex = findCidadeCoordsAmongUfs($cid, $candidateUfs);
+        if (!$ex) continue;
+        $d = haversineKm($alvo['lat'], $alvo['lng'], $ex['lat'], $ex['lng']);
+        if ($d <= $raio) {
+            $conflitos[] = ['cidade'=>$ex['name'], 'uf'=>$ex['uf'], 'distancia_km'=>round($d, 1)];
+        }
+    }
+    return $conflitos;
+}
+
+/**
+ * Lista canônica de tags definida pelo admin. Funciona como vocabulário
+ * controlado: usuários só podem aplicar tags que existem aqui. Se o arquivo
+ * não existe, retorna lista vazia (o endpoint `list_canonical_tags` faz a
+ * migração inicial coletando as tags existentes nos casos).
+ */
+function loadCanonicalTags(): array {
+    $path = PRIVATE_CONFIG_PATH.'/tags.json';
+    if (!file_exists($path)) return [];
+    $data = json_decode(file_get_contents($path), true);
+    if (!is_array($data)) return [];
+    return array_values(array_filter($data, fn($t) => is_string($t) && $t !== ''));
 }
 /** Indica se o usuário possui acesso às bases de produção. */
 function hasProductionAccess(string $user): bool {
@@ -196,20 +352,51 @@ if ($action === 'check_session') {
  * bem-sucedida para prevenir session fixation.
  */
 if ($action === 'login') {
+    $user = trim($_POST['user'] ?? '');
+    $pass = $_POST['pass'] ?? '';
+
+    /*
+     * Chave de bloqueio por (usuário + dispositivo) em vez de IP único.
+     *
+     * Motivação: a empresa toda usa o mesmo WiFi, então o IP público é
+     * compartilhado. Bloquear por IP fazia uma pessoa errar a senha 5x
+     * e impedir todo mundo de acessar. Agora cada navegador carrega um
+     * cookie persistente `bi_device` e o limite é aplicado à dupla
+     * (usuário tentado, dispositivo). Sem cookie (primeiro acesso),
+     * cai num modo de IP para não deixar o sistema desprotegido.
+     */
+    $deviceId = $_COOKIE['bi_device'] ?? '';
+    $blockKey = $deviceId !== ''
+        ? 'u:'.$user.':d:'.substr($deviceId, 0, 32)
+        : 'u:'.$user.':i:'.$ip;
+
     try {
-        if (DB::isBlocked($ip)) {
-            $min = DB::blockRemaining($ip);
+        if (DB::isBlocked($blockKey)) {
+            $min = DB::blockRemaining($blockKey);
             http_response_code(429);
-            echo json_encode(['ok'=>false,'error'=>"IP bloqueado por {$min} min."]);
+            echo json_encode(['ok'=>false,'error'=>"Acesso bloqueado temporariamente por {$min} min após várias tentativas. Aguarde ou tente em outro dispositivo."]);
             exit;
         }
     } catch (Throwable $e) {}
 
-    $user = trim($_POST['user'] ?? '');
-    $pass = $_POST['pass'] ?? '';
     $uData = getUserData($user);
     if ($uData && password_verify($pass, $uData['hash'])) {
-        try { DB::clearFails($ip); } catch (Throwable $e) {}
+        try { DB::clearFails($blockKey); } catch (Throwable $e) {}
+
+        // Emite o cookie de dispositivo no primeiro login bem-sucedido.
+        // 2 anos é suficiente para manter o reconhecimento sem precisar
+        // armazenar no servidor; o cookie é httponly para não vazar via JS.
+        if ($deviceId === '') {
+            $newId = bin2hex(random_bytes(16));
+            setcookie('bi_device', $newId, [
+                'expires'  => time() + 86400 * 365 * 2,
+                'path'     => '/',
+                'secure'   => isset($_SERVER['HTTPS']),
+                'httponly' => true,
+                'samesite' => 'Lax',
+            ]);
+        }
+
         session_regenerate_id(true);
         $_SESSION['user']       = $user;
         $_SESSION['login_time'] = time();
@@ -246,7 +433,7 @@ if ($action === 'login') {
             'warn_at'   => time()+SESSION_LIFETIME-SESSION_WARN_BEFORE,
         ]);
     } else {
-        try { DB::recordFail($ip); } catch (Throwable $e) {}
+        try { DB::recordFail($blockKey); } catch (Throwable $e) {}
         http_response_code(401);
         echo json_encode(['ok'=>false,'error'=>'Usuário ou senha incorretos.']);
     }
@@ -297,6 +484,43 @@ DB::setPrefix($baseCfg['db_prefix']);
 if (!is_dir($thumbDir)) @mkdir($thumbDir, 0755, true);
 
 $api = new GoogleAPI($baseCfg);
+
+/**
+ * Lê-modifica-grava um arquivo JSON sob lock exclusivo de arquivo.
+ *
+ * O callback recebe o conteúdo atual decodificado (array; vazio se o arquivo
+ * não existe) e deve retornar o novo conteúdo a ser gravado, ou null para
+ * abortar a escrita. O lock impede que duas requisições concorrentes leiam
+ * o mesmo estado e gravem por cima uma da outra (perda silenciosa).
+ *
+ * Uso típico: alteração de passwords.json, users_override.json,
+ * production_users.json em chamadas administrativas paralelas.
+ */
+function withJsonLock(string $jsonPath, callable $fn): void {
+    $lockPath = $jsonPath . '.lock';
+    $fp = @fopen($lockPath, 'c+');
+    if (!$fp) {
+        // Fallback best-effort caso o filesystem rejeite o lock: ainda é
+        // melhor do que falhar a operação inteira.
+        $data = file_exists($jsonPath) ? (json_decode(file_get_contents($jsonPath), true) ?? []) : [];
+        $newData = $fn($data);
+        if ($newData !== null) {
+            file_put_contents($jsonPath, json_encode($newData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+        }
+        return;
+    }
+    flock($fp, LOCK_EX);
+    try {
+        $data = file_exists($jsonPath) ? (json_decode(file_get_contents($jsonPath), true) ?? []) : [];
+        $newData = $fn($data);
+        if ($newData !== null) {
+            file_put_contents($jsonPath, json_encode($newData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+        }
+    } finally {
+        flock($fp, LOCK_UN);
+        fclose($fp);
+    }
+}
 
 /**
  * Bloqueio otimista por caso para serializar gravações concorrentes.
@@ -556,7 +780,10 @@ switch ($action) {
     case 'historico':
         $caso_id = preg_replace('/[^A-Z0-9\-]/','',strtoupper($_GET['caso_id']??''));
         $usuario = preg_replace('/[^a-zA-Z0-9_]/','',$_GET['usuario']??'');
-        $limit   = min(500, max(10, (int)($_GET['limit']??200)));
+        // Limite "quase infinito" — o teto de 100k existe só para impedir
+        // que um cliente malicioso peça `limit=999999999` e force o servidor
+        // a alocar memória demais. Para qualquer uso prático isso é suficiente.
+        $limit   = min(100000, max(10, (int)($_GET['limit']??200)));
         try {
             $log = DB::getLog($limit, $caso_id, $usuario);
             foreach ($log as &$e) {
@@ -608,21 +835,46 @@ switch ($action) {
                 echo json_encode(['ok'=>false,'error'=>'Cidade '.ucwords(strtolower($nova_cid)).' já está em uso neste caso.']); break;
             }
 
-            // Estado duplicado dispara warning (precisa confirmação explícita via `force`).
-            if (!$force && in_array($nova_uf, $caso['ufs'])) {
-                $profsNoEstado = [];
-                foreach ($caso['ufs'] as $i => $uf) {
-                    if ($uf === $nova_uf)
-                        $profsNoEstado[] = ($caso['clientes'][$i]??'?').' / '.ucwords(strtolower($caso['cidades'][$i]??''));
+            // Verificação geográfica: cidades em uso dentro de DISTANCE_RADIUS_KM.
+            // Usuário comum é SEMPRE bloqueado (force não bypassa). Admin recebe
+            // warning e confirma com force=1 pra prosseguir.
+            try {
+                $conflitos = findDistanceConflicts($nova_uf, $nova_cid, $caso);
+            } catch (Throwable $e) {
+                echo json_encode(['ok'=>false,'error'=>$e->getMessage().' Não foi possível validar a distância — tente novamente mais tarde ou contate o administrador.']); break;
+            }
+            if (!empty($conflitos)) {
+                $lista = array_map(fn($c) => "{$c['cidade']}/{$c['uf']} ({$c['distancia_km']}km)", $conflitos);
+                $raio = defined('DISTANCE_RADIUS_KM') ? (int)DISTANCE_RADIUS_KM : 80;
+                $msg = "Cidades em uso a menos de {$raio}km de ".ucwords(strtolower($nova_cid)).": ".implode(', ', $lista).".";
+                if (!$isAdmin) {
+                    echo json_encode(['ok'=>false,'error'=>"{$msg} Apenas administradores podem prosseguir — contate um admin."]);
+                    break;
                 }
+                if (!$force) {
+                    echo json_encode(['ok'=>false,'warn'=>true,'msg'=>"⚠️ {$msg} Continuar mesmo assim?"]);
+                    break;
+                }
+            }
+
+            // Estado duplicado dispara warning. Após o fix da v21.1, a UF não é
+            // duplicada na escrita (array ufs vira um conjunto único). Por isso o
+            // alinhamento por índice entre ufs e cidades/clientes deixa de ser
+            // garantido; a mensagem fica genérica em vez de listar quem está em
+            // cada cidade — os detalhes ficam no painel do caso.
+            if (!$force && in_array($nova_uf, $caso['ufs'])) {
                 echo json_encode(['ok'=>false,'warn'=>true,'msg'=>
-                    "ATENÇÃO: {$caso_id} já está em uso no estado {$nova_uf} por: ".implode(', ',$profsNoEstado).". Deseja continuar mesmo assim?"
+                    "ATENÇÃO: {$caso_id} já tem uso registrado no estado {$nova_uf}. Confira no painel. Deseja continuar mesmo assim?"
                 ]);
                 break;
             }
 
             $antes  = ['ufs'=>$caso['ufs'],'cidades'=>$caso['cidades'],'clientes'=>$caso['clientes']];
-            $nufs   = array_merge($caso['ufs'],     [$nova_uf]);
+            // UF só é acrescentada quando ainda não existe — a coluna C do Sheets
+            // passa a guardar um conjunto único. Cidade e cliente entram normalmente.
+            $nufs   = in_array($nova_uf, $caso['ufs'], true)
+                ? array_values($caso['ufs'])
+                : array_merge($caso['ufs'], [$nova_uf]);
             $ncids  = array_merge($caso['cidades'],  [$nova_cid]);
             $nclis  = array_merge($caso['clientes'], [$prof]);
 
@@ -646,6 +898,204 @@ switch ($action) {
             DB::log($me, $caso_id, 'add_uso', $antes, ['ufs'=>$nufs,'cidades'=>$ncids,'clientes'=>$nclis]);
 
             echo json_encode(['ok'=>true,'depois'=>['ufs'=>$nufs,'cidades'=>$ncids,'clientes'=>$nclis]]);
+        } catch (Throwable $e) {
+            echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
+        }
+        break;
+
+    /*
+     * Add em lote: aceita múltiplas tuplas (UF, cidade, prof) e grava todas
+     * de forma ATÔMICA. Pré-flight valida tudo antes de tocar no Sheets — se
+     * uma linha falha, nenhuma é gravada.
+     *
+     * Payload POST:
+     *   caso_id, row, force ('1' opcional pra bypass de warnings)
+     *   entries: JSON [{uf, cidade, profissional}, ...]
+     */
+    case 'add_uso_batch':
+        $caso_id = preg_replace('/[^A-Z0-9\-]/','',strtoupper($_POST['caso_id']??''));
+        $row     = (int)($_POST['row']??0);
+        $force   = !empty($_POST['force']);
+        $entriesRaw = $_POST['entries'] ?? '[]';
+        $entries = json_decode($entriesRaw, true);
+
+        if (!$caso_id || !$row) { echo json_encode(['ok'=>false,'error'=>'Dados inválidos.']); break; }
+        if (!is_array($entries) || empty($entries)) {
+            echo json_encode(['ok'=>false,'error'=>'Informe ao menos uma linha.']); break;
+        }
+        if (count($entries) > 30) {
+            echo json_encode(['ok'=>false,'error'=>'Máximo de 30 linhas por batch.']); break;
+        }
+
+        // Normaliza cada entrada.
+        $clean = [];
+        foreach ($entries as $i => $e) {
+            $uf  = strtoupper(trim($e['uf'] ?? ''));
+            $cid = strtoupper(trim($e['cidade'] ?? ''));
+            $prof= trim($e['profissional'] ?? '');
+            if ($uf === '' || $cid === '' || $prof === '') {
+                echo json_encode(['ok'=>false,'error'=>'Linha '.($i+1).' incompleta.']); break 2;
+            }
+            $clean[] = ['uf'=>$uf, 'cidade'=>$cid, 'profissional'=>$prof];
+        }
+
+        try {
+            if (!acquireCaseLock($caso_id)) {
+                echo json_encode(['ok'=>false,'error'=>'Este caso está sendo editado por outro usuário. Tente novamente em alguns segundos.']);
+                break;
+            }
+            DB::clearSheetCache();
+            $casos = $api->getCasos(true); $caso = null;
+            foreach ($casos as $c) { if ($c['id']===$caso_id) { $caso=$c; break; } }
+            if (!$caso) { echo json_encode(['ok'=>false,'error'=>'Caso não encontrado.']); break; }
+            if (!empty($caso['bloqueado'])) {
+                $motivo = trim($caso['motivo_bloqueio'] ?? '');
+                echo json_encode(['ok'=>false,'error'=>'Caso BLOQUEADO — não pode receber novos usos.'.($motivo!==''?' Motivo: '.$motivo:'')]);
+                break;
+            }
+
+            // Pre-flight: coleta TODOS os erros (não para no primeiro) pra dar
+            // ao usuário uma visão completa do que está errado.
+            $errs = [];
+            $warns = [];
+            $seenCid  = [];
+            $seenPair = [];
+            foreach ($clean as $i => $e) {
+                $tag = 'Linha '.($i+1);
+                // Duplicata interna no batch (mesma cidade).
+                if (isset($seenCid[$e['cidade']])) {
+                    $errs[] = "{$tag}: cidade ".ucwords(strtolower($e['cidade']))." aparece em duas linhas do batch.";
+                }
+                $seenCid[$e['cidade']] = $i;
+                // Duplicata interna no batch (mesma cidade+prof).
+                $pairKey = $e['cidade'].'|'.mb_strtoupper($e['profissional'],'UTF-8');
+                if (isset($seenPair[$pairKey])) {
+                    $errs[] = "{$tag}: mesmo profissional+cidade em duas linhas do batch.";
+                }
+                $seenPair[$pairKey] = $i;
+                // Cidade já em uso no caso (hard-block).
+                if (in_array($e['cidade'], $caso['cidades'], true)) {
+                    $errs[] = "{$tag}: cidade ".ucwords(strtolower($e['cidade']))." já está em uso neste caso.";
+                }
+                // UF já no caso → warning (não bloqueia, só pede confirmação).
+                if (!$force && in_array($e['uf'], $caso['ufs'], true)) {
+                    $warns[] = "{$tag}: estado {$e['uf']} já tem uso registrado neste caso.";
+                }
+            }
+
+            if (count($errs) > 0) {
+                echo json_encode(['ok'=>false,'error'=>'Não foi possível registrar:','errors'=>$errs]);
+                break;
+            }
+
+            // Verificação geográfica de cada linha. Considera cidades já no caso
+            // E as cidades de linhas anteriores do mesmo batch. Usuário comum é
+            // SEMPRE bloqueado (force não bypassa); admin recebe warn e confirma.
+            try {
+                $simulated = ['ufs'=>$caso['ufs'], 'cidades'=>$caso['cidades']];
+                $distErrs = [];
+                $distWarns = [];
+                foreach ($clean as $i => $e) {
+                    $conf = findDistanceConflicts($e['uf'], $e['cidade'], $simulated);
+                    if (!empty($conf)) {
+                        $lista = array_map(fn($c) => "{$c['cidade']}/{$c['uf']} ({$c['distancia_km']}km)", $conf);
+                        $raio = defined('DISTANCE_RADIUS_KM') ? (int)DISTANCE_RADIUS_KM : 80;
+                        $line = "Linha ".($i+1).": cidades em uso a menos de {$raio}km de ".ucwords(strtolower($e['cidade'])).": ".implode(', ', $lista).".";
+                        if (!$isAdmin) $distErrs[] = $line;
+                        else           $distWarns[] = $line;
+                    }
+                    if (!in_array($e['uf'], $simulated['ufs'], true)) $simulated['ufs'][] = $e['uf'];
+                    $simulated['cidades'][] = $e['cidade'];
+                }
+            } catch (Throwable $e) {
+                echo json_encode(['ok'=>false,'error'=>$e->getMessage().' Não foi possível validar a distância — tente novamente mais tarde.']); break;
+            }
+            if (!empty($distErrs)) {
+                echo json_encode(['ok'=>false,'error'=>'Bloqueado por distância — apenas admins podem prosseguir:','errors'=>$distErrs]);
+                break;
+            }
+            if (!$force && (!empty($warns) || !empty($distWarns))) {
+                $allWarns = array_merge($warns, $distWarns);
+                echo json_encode(['ok'=>false,'warn'=>true,
+                    'msg'=>"ATENÇÃO: ".implode(' ', $allWarns)." Deseja continuar mesmo assim?",
+                    'warns'=>$allWarns]);
+                break;
+            }
+
+            // Tudo OK — monta novos arrays e grava UMA vez.
+            $antes = ['ufs'=>$caso['ufs'],'cidades'=>$caso['cidades'],'clientes'=>$caso['clientes']];
+            $nufs  = $caso['ufs'];
+            $ncids = $caso['cidades'];
+            $nclis = $caso['clientes'];
+            foreach ($clean as $e) {
+                if (!in_array($e['uf'], $nufs, true)) $nufs[] = $e['uf'];
+                $ncids[] = $e['cidade'];
+                $nclis[] = $e['profissional'];
+            }
+            $api->updateCaso($row, implode('/',$nufs), implode('/',$ncids), implode('/',$nclis));
+            DB::log($me, $caso_id, 'add_uso_batch', $antes, [
+                'ufs'=>$nufs, 'cidades'=>$ncids, 'clientes'=>$nclis,
+                'count'=>count($clean), 'entries'=>$clean,
+            ]);
+
+            echo json_encode([
+                'ok'=>true,
+                'depois'=>['ufs'=>$nufs,'cidades'=>$ncids,'clientes'=>$nclis],
+                'count'=>count($clean),
+            ]);
+        } catch (Throwable $e) {
+            echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
+        }
+        break;
+
+    /*
+     * Pré-flight do registro em massa: valida o trio (uf, cidade, prof) contra
+     * TODOS os casos selecionados. Devolve `errors` (bloqueios) e `warns` (admin
+     * pode prosseguir). O frontend usa pra implementar atomicidade — só dispara
+     * os writes se errors estiver vazio.
+     */
+    case 'bulk_preflight':
+        $idsRaw   = $_POST['ids'] ?? '';
+        $nova_uf  = strtoupper(trim($_POST['uf'] ?? ''));
+        $nova_cid = strtoupper(trim($_POST['cidade'] ?? ''));
+        $prof     = trim($_POST['profissional'] ?? '');
+        $ids = array_values(array_filter(
+            array_map('trim', explode(',', $idsRaw)),
+            fn($x) => preg_match('/^CASO-\d+$/', $x)
+        ));
+        if (!$ids || !$nova_uf || !$nova_cid || !$prof) {
+            echo json_encode(['ok'=>false,'error'=>'Dados inválidos.']); break;
+        }
+        try {
+            $errs = [];
+            $warns = [];
+            $casosAll = $api->getCasos(false);
+            $raio = defined('DISTANCE_RADIUS_KM') ? (int)DISTANCE_RADIUS_KM : 80;
+            foreach ($ids as $cid) {
+                $caso = null;
+                foreach ($casosAll as $c) if ($c['id'] === $cid) { $caso = $c; break; }
+                if (!$caso) { $errs[] = "{$cid}: não encontrado"; continue; }
+                if (!empty($caso['bloqueado'])) { $errs[] = "{$cid}: caso bloqueado"; continue; }
+                if (in_array($nova_cid, $caso['cidades'], true)) {
+                    $errs[] = "{$cid}: cidade ".ucwords(strtolower($nova_cid))." já está em uso";
+                    continue;
+                }
+                try {
+                    $conf = findDistanceConflicts($nova_uf, $nova_cid, $caso);
+                } catch (Throwable $e) {
+                    echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); break 2;
+                }
+                if (!empty($conf)) {
+                    $lista = array_map(fn($x) => "{$x['cidade']}/{$x['uf']} ({$x['distancia_km']}km)", $conf);
+                    $line = "{$cid}: cidades a <{$raio}km — ".implode(', ', $lista);
+                    if (!$isAdmin) $errs[] = $line;
+                    else           $warns[] = $line;
+                }
+                if (in_array($nova_uf, $caso['ufs'], true)) {
+                    $warns[] = "{$cid}: estado {$nova_uf} já tem uso";
+                }
+            }
+            echo json_encode(['ok'=>true, 'errors'=>$errs, 'warns'=>$warns]);
         } catch (Throwable $e) {
             echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
         }
@@ -847,9 +1297,10 @@ switch ($action) {
         if (($targetData['role'] ?? 'user') === 'admin') {
             echo json_encode(['ok'=>true,'msg'=>'Admins já têm acesso a todas as bases.']); break;
         }
-        $map = loadProductionUsers();
-        if ($allow) $map[$target] = true; else unset($map[$target]);
-        saveProductionUsers($map);
+        withJsonLock(PRIVATE_CONFIG_PATH.'/production_users.json', function($map) use ($target, $allow) {
+            if ($allow) $map[$target] = true; else unset($map[$target]);
+            return $map;
+        });
         DB::log($me, 'sistema', 'set_production_access', ['user'=>$target], ['prod_access'=>$allow]);
         echo json_encode(['ok'=>true,'msg'=>$allow?"'{$target}' agora tem acesso à produção.":"'{$target}' voltou ao modo teste."]);
         break;
@@ -865,10 +1316,10 @@ switch ($action) {
             echo json_encode(['ok'=>false,'error'=>'Não é possível alterar a senha de outro administrador.']); break;
         }
         if (strlen($newpass) < 6) { echo json_encode(['ok'=>false,'error'=>'Senha muito curta.']); break; }
-        $overridePath = PRIVATE_CONFIG_PATH.'/passwords.json';
-        $overrides = file_exists($overridePath) ? json_decode(file_get_contents($overridePath),true) : [];
-        $overrides[$target] = password_hash($newpass, PASSWORD_DEFAULT);
-        file_put_contents($overridePath, json_encode($overrides, JSON_PRETTY_PRINT), LOCK_EX);
+        withJsonLock(PRIVATE_CONFIG_PATH.'/passwords.json', function($overrides) use ($target, $newpass) {
+            $overrides[$target] = password_hash($newpass, PASSWORD_DEFAULT);
+            return $overrides;
+        });
         DB::log($me, 'sistema', 'change_password', ['user'=>$target], ['changed'=>true]);
         echo json_encode(['ok'=>true,'msg'=>"Senha de '{$target}' alterada."]);
         break;
@@ -883,9 +1334,16 @@ switch ($action) {
         if (isset(USERS[$newUser])) { echo json_encode(['ok'=>false,'error'=>'Usuário já existe no config.php.']); break; }
         if (strlen($newPass) < 6) { echo json_encode(['ok'=>false,'error'=>'Senha muito curta.']); break; }
         $usersPath = PRIVATE_CONFIG_PATH.'/users_override.json';
-        $usersOvr  = file_exists($usersPath) ? json_decode(file_get_contents($usersPath),true) : [];
-        $usersOvr[$newUser] = ['hash'=>password_hash($newPass,PASSWORD_DEFAULT),'role'=>$newRole];
-        file_put_contents($usersPath, json_encode($usersOvr, JSON_PRETTY_PRINT), LOCK_EX);
+        // Verifica duplicidade DENTRO do lock para impedir que dois admins
+        // criem o mesmo usuário simultaneamente; o sinalizador "duplicate"
+        // sai do callback para devolver o erro correto ao cliente.
+        $duplicate = false;
+        withJsonLock($usersPath, function($usersOvr) use ($newUser, $newPass, $newRole, &$duplicate) {
+            if (isset($usersOvr[$newUser])) { $duplicate = true; return null; }
+            $usersOvr[$newUser] = ['hash'=>password_hash($newPass,PASSWORD_DEFAULT),'role'=>$newRole];
+            return $usersOvr;
+        });
+        if ($duplicate) { echo json_encode(['ok'=>false,'error'=>'Usuário já existe.']); break; }
         DB::log($me, 'sistema', 'add_user', null, ['user'=>$newUser,'role'=>$newRole]);
         echo json_encode(['ok'=>true,'msg'=>"Usuário '{$newUser}' criado."]);
         break;
@@ -903,10 +1361,10 @@ switch ($action) {
         if ($targetData && ($targetData['role']??'user') === 'admin') {
             echo json_encode(['ok'=>false,'error'=>'Não é possível remover um administrador.']); break;
         }
-        $usersPath = PRIVATE_CONFIG_PATH.'/users_override.json';
-        $usersOvr  = file_exists($usersPath) ? json_decode(file_get_contents($usersPath),true) : [];
-        unset($usersOvr[$target]);
-        file_put_contents($usersPath, json_encode($usersOvr, JSON_PRETTY_PRINT), LOCK_EX);
+        withJsonLock(PRIVATE_CONFIG_PATH.'/users_override.json', function($usersOvr) use ($target) {
+            unset($usersOvr[$target]);
+            return $usersOvr;
+        });
         DB::log($me, 'sistema', 'remove_user', ['user'=>$target], null);
         echo json_encode(['ok'=>true]);
         break;
@@ -985,17 +1443,30 @@ switch ($action) {
         } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
         break;
 
-    // Adiciona uma tag ao caso. Aceita letras, números, espaço, &, + e -; máx. 30 caracteres.
+    // Adiciona uma tag ao caso. Aceita letras (incluindo acentuadas), números,
+    // espaço, &, + e -; máx. 30 caracteres. `mb_strtoupper` é essencial:
+    // `strtoupper` é byte-oriented e não converte caracteres não-ASCII.
     case 'add_tag':
         $caso_id = preg_replace('/[^A-Z0-9\-]/','',strtoupper($_POST['caso_id']??''));
         $row     = (int)($_POST['row']??0);
-        $tag     = strtoupper(trim($_POST['tag']??''));
-        $tag = preg_replace('/[^A-Z0-9 \&\+\-]/u','',$tag);
+        $tag     = mb_strtoupper(trim($_POST['tag']??''), 'UTF-8');
+        $tag = preg_replace('/[^\p{L}\p{N} \&\+\-]/u','',$tag);
         $tag = trim(preg_replace('/\s+/',' ',$tag));
         if (!$caso_id || !$row) { echo json_encode(['ok'=>false,'error'=>'Dados inválidos.']); break; }
         if ($tag === '' || mb_strlen($tag) > 30) { echo json_encode(['ok'=>false,'error'=>'Tag inválida (1–30 caracteres).']); break; }
         try {
-            $casos = $api->getCasos(false); $caso = null;
+            // Validação contra a lista canônica de tags definida pelo admin.
+            $canonical = loadCanonicalTags();
+            if (!in_array($tag, $canonical, true)) {
+                echo json_encode(['ok'=>false,'error'=>"A tag '{$tag}' não está cadastrada na lista global. Peça a um administrador para adicioná-la em Admin Mode → Gerenciar tags."]);
+                break;
+            }
+            if (!acquireCaseLock($caso_id)) {
+                echo json_encode(['ok'=>false,'error'=>'Este caso está sendo editado por outro usuário. Tente novamente em alguns segundos.']);
+                break;
+            }
+            DB::clearSheetCache();
+            $casos = $api->getCasos(true); $caso = null;
             foreach ($casos as $c) { if ($c['id']===$caso_id) { $caso=$c; break; } }
             if (!$caso) { echo json_encode(['ok'=>false,'error'=>'Caso não encontrado.']); break; }
             $cur = $caso['tags'] ?? [];
@@ -1012,10 +1483,16 @@ switch ($action) {
     case 'remove_tag':
         $caso_id = preg_replace('/[^A-Z0-9\-]/','',strtoupper($_POST['caso_id']??''));
         $row     = (int)($_POST['row']??0);
-        $tag     = strtoupper(trim($_POST['tag']??''));
+        // mb_strtoupper preserva o casing correto de caracteres acentuados.
+        $tag     = mb_strtoupper(trim($_POST['tag']??''), 'UTF-8');
         if (!$caso_id || !$row || $tag === '') { echo json_encode(['ok'=>false,'error'=>'Dados inválidos.']); break; }
         try {
-            $casos = $api->getCasos(false); $caso = null;
+            if (!acquireCaseLock($caso_id)) {
+                echo json_encode(['ok'=>false,'error'=>'Este caso está sendo editado por outro usuário. Tente novamente em alguns segundos.']);
+                break;
+            }
+            DB::clearSheetCache();
+            $casos = $api->getCasos(true); $caso = null;
             foreach ($casos as $c) { if ($c['id']===$caso_id) { $caso=$c; break; } }
             if (!$caso) { echo json_encode(['ok'=>false,'error'=>'Caso não encontrado.']); break; }
             $cur = $caso['tags'] ?? [];
@@ -1027,7 +1504,7 @@ switch ($action) {
         } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
         break;
 
-    // Tags únicas em todos os casos (consumido pelo autocomplete da interface).
+    // Tags únicas em todos os casos (consumido pelo filtro da interface).
     case 'list_tags':
         try {
             $casos = $api->getCasos(false);
@@ -1036,6 +1513,111 @@ switch ($action) {
             $list = array_keys($set); sort($list);
             echo json_encode(['ok'=>true,'tags'=>$list]);
         } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'tags'=>[]]); }
+        break;
+
+    // Lista canônica de tags (vocabulário controlado). Bootstrap-migração:
+    // na primeira execução (tags.json ausente) coleta as tags em uso em todas
+    // as bases e usa como ponto de partida.
+    case 'list_canonical_tags':
+        try {
+            $path = PRIVATE_CONFIG_PATH.'/tags.json';
+            if (!file_exists($path)) {
+                $set = [];
+                $savedPrefix = DB::getPrefix();
+                foreach (BASES as $bk => $bc) {
+                    try {
+                        DB::setPrefix($bc['db_prefix']);
+                        $apiB = new GoogleAPI($bc);
+                        foreach ($apiB->getCasos(false) as $c) {
+                            foreach (($c['tags'] ?? []) as $t) {
+                                if ($t !== '') $set[$t] = true;
+                            }
+                        }
+                    } catch (Throwable $e) { /* ignora bases com erro */ }
+                }
+                DB::setPrefix($savedPrefix);
+                $list = array_keys($set); sort($list);
+                file_put_contents($path, json_encode($list, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE), LOCK_EX);
+            }
+            $tags = loadCanonicalTags();
+            sort($tags);
+            echo json_encode(['ok'=>true, 'tags'=>$tags]);
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'tags'=>[]]); }
+        break;
+
+    // Adiciona uma tag à lista canônica (admin).
+    case 'add_canonical_tag':
+        requireAdmin($isAdmin);
+        $tag = mb_strtoupper(trim($_POST['tag'] ?? ''), 'UTF-8');
+        $tag = preg_replace('/[^\p{L}\p{N} \&\+\-]/u', '', $tag);
+        $tag = trim(preg_replace('/\s+/', ' ', $tag));
+        if ($tag === '' || mb_strlen($tag) > 30) {
+            echo json_encode(['ok'=>false,'error'=>'Tag inválida (1–30 caracteres).']); break;
+        }
+        $duplicate = false;
+        withJsonLock(PRIVATE_CONFIG_PATH.'/tags.json', function($list) use ($tag, &$duplicate) {
+            if (!is_array($list)) $list = [];
+            if (in_array($tag, $list, true)) { $duplicate = true; return null; }
+            $list[] = $tag;
+            sort($list);
+            return $list;
+        });
+        if ($duplicate) {
+            echo json_encode(['ok'=>true, 'msg'=>"Tag '{$tag}' já existia.", 'tags'=>loadCanonicalTags()]);
+            break;
+        }
+        DB::log($me, 'sistema', 'add_canonical_tag', null, ['tag'=>$tag]);
+        echo json_encode(['ok'=>true, 'msg'=>"Tag '{$tag}' adicionada.", 'tags'=>loadCanonicalTags()]);
+        break;
+
+    // Remove uma tag da lista canônica e em CASCATA de todos os casos em todas
+    // as bases (admin). Em caso de falha parcial, devolve estatísticas.
+    case 'remove_canonical_tag':
+        requireAdmin($isAdmin);
+        $tag = mb_strtoupper(trim($_POST['tag'] ?? ''), 'UTF-8');
+        if ($tag === '') { echo json_encode(['ok'=>false,'error'=>'Tag não informada.']); break; }
+
+        // 1. Remove da lista canônica.
+        withJsonLock(PRIVATE_CONFIG_PATH.'/tags.json', function($list) use ($tag) {
+            if (!is_array($list)) return null;
+            return array_values(array_filter($list, fn($t) => $t !== $tag));
+        });
+
+        // 2. Cascata: remove dos casos em todas as bases.
+        $totalAffected = 0;
+        $errors = [];
+        $savedPrefix = DB::getPrefix();
+        foreach (BASES as $baseKey => $bc) {
+            try {
+                DB::setPrefix($bc['db_prefix']);
+                $apiB = new GoogleAPI($bc);
+                $cs = $apiB->getCasos(true);
+                foreach ($cs as $c) {
+                    $tags = $c['tags'] ?? [];
+                    if (in_array($tag, $tags, true)) {
+                        $newTags = array_values(array_filter($tags, fn($t) => $t !== $tag));
+                        try {
+                            $apiB->updateCasoTags($c['row'], implode('/', $newTags));
+                            DB::log($me, $c['id'], 'remove_tag_cascade', ['tags'=>$tags], ['tags'=>$newTags]);
+                            $totalAffected++;
+                        } catch (Throwable $e) {
+                            $errors[] = "{$baseKey}/{$c['id']}: ".$e->getMessage();
+                        }
+                    }
+                }
+            } catch (Throwable $e) {
+                $errors[] = "base {$baseKey}: ".$e->getMessage();
+            }
+        }
+        DB::setPrefix($savedPrefix);
+        DB::log($me, 'sistema', 'remove_canonical_tag', ['tag'=>$tag], ['cases_affected'=>$totalAffected]);
+        echo json_encode([
+            'ok'=>true,
+            'msg'=>"Tag '{$tag}' removida. {$totalAffected} caso(s) afetado(s).".(count($errors) ? " ".count($errors)." erro(s)." : ''),
+            'cases_affected'=>$totalAffected,
+            'errors'=>$errors,
+            'tags'=>loadCanonicalTags(),
+        ]);
         break;
 
     // ── Download direto de uma foto/arquivo do Drive ───────────
@@ -1121,6 +1703,107 @@ switch ($action) {
         @unlink($tmpZip);
         DB::log($me, 'sistema', 'download_bulk', null, ['ids'=>$ids,'files'=>$totalFiles,'errors'=>count($errors)]);
         exit;
+
+    /*
+     * Auditoria de qualidade dos dados (admin). Varre todos os casos de todas
+     * as bases e devolve relatório de:
+     *   - UFs inválidas (não estão nas 27 BR + marcadores de bloqueio)
+     *   - Cidades não reconhecidas pelo CSV de coordenadas (com sugestões fuzzy)
+     *   - Cidades cadastradas em UF que não consta no caso
+     *   - Duplicatas com escritas diferentes no mesmo caso
+     */
+    case 'audit_data':
+        requireAdmin($isAdmin);
+        $VALID_UFS = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO','NA','LINDA'];
+        $report = [
+            'csv_loaded'   => true,
+            'csv_error'    => null,
+            'uf_issues'    => [],
+            'cidade_unknown' => [],
+            'cidade_wrong_uf'=> [],
+            'cidade_dups'  => [],
+            'summary'      => [
+                'bases'              => 0,
+                'casos'              => 0,
+                'uf_entries'         => 0,
+                'cidade_entries'     => 0,
+                'uf_invalid_count'   => 0,
+                'cidade_unknown_count' => 0,
+                'cidade_wrong_uf_count'=> 0,
+                'cidade_dups_count'  => 0,
+            ],
+        ];
+
+        $coordsCheck = loadCidadesCoords();
+        if (isset($coordsCheck['_error'])) {
+            $report['csv_loaded'] = false;
+            $report['csv_error']  = $coordsCheck['_error'];
+        }
+
+        $savedPrefix = DB::getPrefix();
+        foreach (BASES as $baseKey => $bc) {
+            try {
+                DB::setPrefix($bc['db_prefix']);
+                $apiB = new GoogleAPI($bc);
+                $cs = $apiB->getCasos(false);
+                $report['summary']['bases']++;
+                foreach ($cs as $c) {
+                    $report['summary']['casos']++;
+
+                    foreach (($c['ufs'] ?? []) as $uf) {
+                        $report['summary']['uf_entries']++;
+                        if (!in_array($uf, $VALID_UFS, true)) {
+                            $report['uf_issues'][] = ['base'=>$baseKey, 'caso_id'=>$c['id'], 'uf'=>$uf];
+                            $report['summary']['uf_invalid_count']++;
+                        }
+                    }
+
+                    $normMap = [];
+                    foreach (($c['cidades'] ?? []) as $cid) {
+                        $report['summary']['cidade_entries']++;
+                        if (!$cid) continue;
+                        $norm = normalizeCidade($cid);
+
+                        if (isset($normMap[$norm])) {
+                            if ($normMap[$norm] !== $cid) {
+                                $report['cidade_dups'][] = ['base'=>$baseKey, 'caso_id'=>$c['id'], 'a'=>$normMap[$norm], 'b'=>$cid, 'normalized'=>$norm];
+                                $report['summary']['cidade_dups_count']++;
+                            }
+                        } else {
+                            $normMap[$norm] = $cid;
+                        }
+
+                        if ($report['csv_loaded']) {
+                            $matches = findCidadeAnywhere($norm);
+                            if (empty($matches)) {
+                                $sugs = suggestSimilarCidades($norm);
+                                $report['cidade_unknown'][] = ['base'=>$baseKey, 'caso_id'=>$c['id'], 'cidade'=>$cid, 'suggestions'=>$sugs];
+                                $report['summary']['cidade_unknown_count']++;
+                            } else {
+                                $caseUfs = $c['ufs'] ?? [];
+                                $hitInCaseUf = false;
+                                foreach ($matches as $m) {
+                                    if (in_array($m['uf'], $caseUfs, true)) { $hitInCaseUf = true; break; }
+                                }
+                                if (!$hitInCaseUf && !empty($caseUfs)) {
+                                    $report['cidade_wrong_uf'][] = [
+                                        'base'=>$baseKey, 'caso_id'=>$c['id'], 'cidade'=>$cid,
+                                        'found_in'=>array_values(array_unique(array_map(fn($m)=>$m['uf'], $matches))),
+                                        'case_ufs'=>$caseUfs,
+                                    ];
+                                    $report['summary']['cidade_wrong_uf_count']++;
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable $e) {
+                $report['errors'][] = "base {$baseKey}: ".$e->getMessage();
+            }
+        }
+        DB::setPrefix($savedPrefix);
+        echo json_encode(['ok'=>true, 'report'=>$report]);
+        break;
 
     default:
         http_response_code(400);

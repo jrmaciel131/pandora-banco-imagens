@@ -85,12 +85,20 @@ class DB {
         catch (PDOException $e) {}
 
         $db->exec("CREATE TABLE IF NOT EXISTS ".self::t('login_attempts')." (
-            ip            VARCHAR(45) NOT NULL,
-            tentativas    INT         NOT NULL DEFAULT 1,
+            ip            VARCHAR(120) NOT NULL,
+            tentativas    INT          NOT NULL DEFAULT 1,
             bloqueado_ate DATETIME,
-            ultima_vez    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            ultima_vez    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (ip)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        // Migração idempotente: a coluna `ip` foi expandida para 120 chars
+        // porque agora pode armazenar chaves compostas no formato
+        // "u:USUARIO:d:DEVICE_ID" (rate limit por dispositivo+usuário,
+        // em vez de só IP — IP compartilhado em rede corporativa bloqueava
+        // toda a empresa quando uma pessoa errava a senha).
+        try { $db->exec("ALTER TABLE ".self::t('login_attempts')." MODIFY COLUMN ip VARCHAR(120) NOT NULL"); }
+        catch (PDOException $e) {}
     }
 
     // ─────────────────────────────────────────────────────

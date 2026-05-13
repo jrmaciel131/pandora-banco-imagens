@@ -1,61 +1,58 @@
-# Deploy — Hardening completo: tudo o que é privado fora do site público
+# Deploy — Banco de Imagens v21
 
+## O que mudou na v21
 
-## O que mudou
-
-Saíram do document root (pasta pública `dominio.com/`) e foram para `private-config/` (pasta irmã, fora do alcance do Apache):
-
-| Tipo | De | Para |
-|---|---|---|
-| Configs e segredos | `adm.../config/config.php` etc. | `private-config/config.php` |
-| Credenciais Google | `adm.../config/google-credentials.json` | `private-config/google-credentials.json` |
-| Hash de senhas (overrides) | `adm.../config/passwords.json` | `private-config/passwords.json` |
-| Cache de token Google | `adm.../config/.token_cache.json` | `private-config/.token_cache.json` |
-| Bibliotecas PHP (DB) | `adm.../api/db.php` | `private-config/lib/db.php` |
-| Bibliotecas PHP (Google) | `adm.../api/google.php` | `private-config/lib/google.php` |
-| Pasta de sessões | `adm.../sessions/` | `private-config/sessions/` |
-
-Continua público (porque precisa ser):
-- `api/handler.php` (único endpoint do app)
-- `api/cron.php` (cache warmer — chamado por URL ou CLI)
-- `index.html`, `404.html`, `403.html`, `500.html`, `.htaccess`
-- `thumbs/`, `thumbs-po/` (servidos como imagens via URL)
+- **Frontend modular**: o `index.html` antes monolítico (≈3000 linhas) foi dividido em `assets/` com dois arquivos CSS e oito JS.
+- **Hardening**: locks em escritas concorrentes (tags e JSONs de configuração), rate-limit por dispositivo, CRON_KEY via header, sessão de 2h.
+- **Export ZIP**: JSZip agora hospedado localmente em `export/lib/jszip.min.js` (sem dependência de CDN).
 
 ## Estrutura final no servidor (DreamHost)
 
 ```
 /home/SEU_USUARIO/                                  ← raiz da conta
-├── private-config/                                 ← PRIVADA — sobe via FTP
+├── private-config/                                 ← PRIVADA (sobe via SFTP)
 │   ├── config.php
 │   ├── google-credentials.json
 │   ├── passwords.json
+│   ├── users_override.json
+│   ├── production_users.json
 │   ├── lib/
 │   │   ├── db.php
 │   │   └── google.php
 │   └── sessions/                                   ← PHP escreve aqui
-└── dominio.com/            ← PÚBLICA (document root)
+└── seu-dominio.com/            ← PÚBLICA (document root)
     ├── .htaccess
     ├── 404.html  403.html  500.html
     ├── index.html
+    ├── assets/                                     ← NOVO (v21)
+    │   ├── theme.css   app.css
+    │   ├── utils.js    theme.js   casos.js   panel.js
+    │   ├── bulk.js     admin.js   auth.js    app.js
     ├── api/
     │   ├── handler.php
     │   ├── cron.php
-    │   ├── db.php          ← stub 410 Gone (pode apagar do servidor)
-    │   ├── google.php      ← stub 410 Gone (pode apagar do servidor)
-    │   └── .htaccess       ← bloqueia .php que não seja handler/cron
-    ├── thumbs/
-    └── thumbs-po/
+    │   └── .htaccess
+    ├── export/
+    │   ├── index.html
+    │   └── lib/
+    │       └── jszip.min.js                        ← NOVO (v21)
+    ├── thumbs/      thumbs-po/      thumbs-teste/
+    └── favicon.ico  favicon.gif
 ```
 
-## Passos de deploy (ordem importa!)
+## Passos de deploy (ordem importa)
 
 ### 1. Subir `private-config/` para FORA do site público
 
-Via FTP/SFTP, faça upload da pasta `raizdosite/private-config/` para `/home/SEU_USUARIO/private-config/` — **ao lado** do domínio, NÃO dentro dele.
+Via SFTP, faça upload de `raizdosite/private-config/` para `/home/SEU_USUARIO/private-config/` — ao lado do domínio, NÃO dentro dele. Se a pasta já existe (deploy v20+), basta sobrescrever:
 
-A pasta `private-config/sessions/` deve subir vazia (PHP cria os arquivos sozinho em runtime).
+- `private-config/config.php`
+- `private-config/lib/db.php`
+- `private-config/lib/google.php`
 
-### 2. Definir permissões
+A pasta `private-config/sessions/` deve permanecer (sem mexer).
+
+### 2. Permissões
 
 ```bash
 chmod 700 ~/private-config
@@ -66,73 +63,79 @@ chmod 600 ~/private-config/config.php
 chmod 600 ~/private-config/lib/*.php
 ```
 
-### 3. Subir os arquivos atualizados do site público
+### 3. Subir o site público
 
-- `dominio.com/.htaccess`
-- `dominio.com/404.html`
-- `dominio.com/403.html`
-- `dominio.com/500.html`
-- `dominio.com/api/handler.php`
-- `dominio.com/api/cron.php`
-- `dominio.com/api/.htaccess`
-- (os stubs `api/db.php` e `api/google.php` podem subir, mas o ideal é apagá-los — passo 4)
+Substitua/crie no servidor:
 
----
+- `adm.../index.html` (versão enxuta, ~330 linhas)
+- `adm.../assets/` **(pasta nova — criar)**
+  - `theme.css`, `app.css`
+  - `utils.js`, `theme.js`, `casos.js`, `panel.js`
+  - `bulk.js`, `admin.js`, `auth.js`, `app.js`
+- `adm.../api/handler.php`
+- `adm.../api/cron.php`
+- `adm.../export/index.html`
+- `adm.../export/lib/jszip.min.js` **(arquivo novo — 97KB)**
 
-> **A partir daqui o conteúdo é reconstituído.** Confira contra o que você lembra do original.
+Os arquivos `.htaccess`, páginas de erro e thumbnails existentes ficam.
 
-### 4. Limpar o legado no servidor
+### 4. Verificações pós-deploy
 
-Apague do servidor qualquer arquivo que tenha sido movido para `private-config/`. Em particular:
+1. Abra o domínio no navegador (modo anônimo para não pegar cache antigo).
+2. Login deve carregar sem flash de "Verificando sessão..." indefinido.
+3. Liste casos — confirma Sheets + cache.
+4. Abra um caso → veja fotos no painel — confirma Drive.
+5. Modal "📋 Por ID" → preview de chips em 240×240.
+6. Criar uma tag com acento (ex.: `ESTÉTICA`) — deve salvar preservando o acento.
+7. Em `/export/`, baixar tudo como ZIP — deve funcionar sem CDN.
+8. Como admin, abra `Admin Mode → Diagnóstico` e confirme todas as seções OK.
 
-- `adm.../config/` — a pasta inteira (config.php, google-credentials.json, passwords.json, .token_cache.json) já está em `private-config/`. Pode apagar tudo.
-- `adm.../api/db.php` e `adm.../api/google.php` — depois de confirmar que tudo está funcionando, apague esses stubs. O `.htaccess` em `api/` já bloqueia o acesso, mas remover é mais higiênico.
-- `adm.../sessions/` — apague essa pasta também. As sessões agora vivem em `private-config/sessions/`.
+### 5. Configurar/atualizar o cron
 
-### 5. Testar
+**CLI (recomendado)** — sem mudança em relação à v20:
 
-Acesse o domínio no navegador:
+```
+/usr/local/php83/bin/php /home/SEU_USER/seu-dominio.com/api/cron.php
+```
 
-1. Página inicial deve carregar normalmente.
-2. Login deve funcionar com qualquer usuário válido.
-3. Liste casos de uma base — confirma que o Google Sheets está respondendo.
-4. Clique em um caso e veja as fotos — confirma que o Drive está respondendo.
-5. Acesse `/api/handler.php?action=diagnostico` (logado como admin) — verifica conexão com banco, credenciais, schema, cache.
+**HTTP — preferir header (novo na v21)**:
 
-### 6. Configurar o cron (cache warmer)
+```
+curl -s -H "X-Cron-Key: SEU_CRON_KEY" https://seu-site.com/api/cron.php
+```
 
-No painel do DreamHost (Goodies → Cron Jobs), crie um cron novo:
+O método antigo `?key=...` continua funcionando, mas vaza a chave em logs de acesso.
 
-- **Comando:**
-  ```
-  /usr/local/php83/bin/php /home/SEU_USUARIO/dominio.com/api/cron.php
-  ```
-- **Frequência sugerida:** a cada 1 hora.
+### 6. Rollback
 
-> Como alternativa via URL (caso prefira gatilho HTTP), use a `CRON_KEY` definida em `config.php`:
-> ```
-> curl https://dominio.com/api/cron.php?key=CRON_KEY_AQUI
-> ```
+Se algo der errado:
 
-### 7. Rollback (se algo quebrar)
+1. Restaurar o `index.html` antigo (monolítico) — preserva todo o app funcionando como na v20.
+2. Olhar `~/logs/seu-dominio.com/http/error.log`.
+3. Testar `api/handler.php?action=diagnostico` (admin) — aponta onde está falhando.
+4. Para problemas no rate-limit: `DELETE FROM login_attempts;` no MySQL libera todos os bloqueios.
 
-Se algo der errado depois do deploy:
+## Cache busting
 
-1. **Reverter `.htaccess`** — deixe o do `.htaccess` antigo de volta no document root.
-2. **Reativar `config/` antigo** — caso ainda tenha cópia no servidor, restaure os arquivos lá.
-3. **Olhar logs do PHP** — em `/home/SEU_USUARIO/logs/dominio.com/http/error.log` no DreamHost.
-4. **Testar `diagnostico`** — endpoint em `api/handler.php?action=diagnostico` mostra exatamente onde está falhando (DB, credenciais, Google, cache).
+A partir da v21, as referências em `index.html` levam sufixo `?v=21`. Quando alterar qualquer arquivo em `assets/`:
+
+1. Edite o arquivo.
+2. No `index.html`, incremente o número (`?v=21` → `?v=22`).
+3. Suba `index.html` + o(s) asset(s) alterado(s).
+
+Sem o incremento, os browsers podem servir o asset antigo do cache por horas.
 
 ## Checklist final
 
-- [ ] `private-config/` subiu para `/home/SEU_USUARIO/private-config/`
-- [ ] Permissões 700/600 aplicadas em `private-config/` e seu conteúdo
-- [ ] `.htaccess` (root e `api/`) atualizados
-- [ ] `handler.php` e `cron.php` atualizados em `api/`
-- [ ] Stubs `api/db.php` e `api/google.php` apagados
-- [ ] Pasta `config/` antiga apagada do document root
-- [ ] Pasta `sessions/` antiga apagada do document root
+- [ ] `private-config/config.php`, `lib/db.php`, `lib/google.php` atualizados
+- [ ] Permissões 700/600 mantidas em `private-config/`
+- [ ] `adm.../index.html` substituído (versão modular)
+- [ ] Pasta `adm.../assets/` criada com 10 arquivos (2 CSS + 8 JS)
+- [ ] `adm.../api/handler.php` e `cron.php` atualizados
+- [ ] `adm.../export/index.html` atualizado
+- [ ] Pasta `adm.../export/lib/` criada com `jszip.min.js`
 - [ ] Login funciona
-- [ ] Listagem de casos funciona
+- [ ] Tags com acento salvam corretamente
+- [ ] Export ZIP funciona
 - [ ] Cron configurado
 - [ ] `diagnostico` retorna OK em todas as seções

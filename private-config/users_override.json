@@ -1,11 +1,1 @@
-{
-    "_comentario": "Overrides dinâmicos de usuários (substituem a entrada em config.php USERS). Estrutura: { username: { hash, role } }. Substituir pelos hashes bcrypt reais. NUNCA comitar preenchido.",
-    "adm2": {
-        "hash": "BCRYPT_HASH_DO_USUARIO_AQUI",
-        "role": "user"
-    },
-    "adm5": {
-        "hash": "BCRYPT_HASH_DO_USUARIO_AQUI",
-        "role": "user"
-    }
-}
+{}
