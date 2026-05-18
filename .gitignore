@@ -1,0 +1,77 @@
+# ───────────────────────────────────────────────────────────
+# .gitignore — Banco de Imagens (Projeto PANDORA)
+# ───────────────────────────────────────────────────────────
+# Tudo que estiver listado aqui o Git IGNORA. Ou seja: mesmo
+# se o arquivo existir na sua pasta, ele NÃO vai para o GitHub.
+# Use isso para proteger segredos, caches, sessões e lixo do SO.
+# ───────────────────────────────────────────────────────────
+
+# ── Segredos e credenciais (NUNCA versionar) ──────────────
+private-config/google-credentials.json
+private-config/passwords.json
+private-config/users_override.json
+private-config/.token_cache.json
+private-config/production_users.json
+
+# Atenção: o config.php ENTRA no repositório, MAS já está
+# sanitizado (com placeholders "dado x aqui"). Se você
+# preencher os valores reais para usar localmente, ANTES de
+# comitar troque-os pelos placeholders de novo — ou mova o
+# config.php para a lista abaixo descomentando esta linha:
+# private-config/config.php
+
+# ── Sessões PHP em runtime ────────────────────────────────
+private-config/sessions/*
+!private-config/sessions/.gitkeep
+
+# ── Caches gerados em runtime ─────────────────────────────
+adm1-projectcasos.euemeunegocio.com/thumbs/*
+!adm1-projectcasos.euemeunegocio.com/thumbs/.gitkeep
+adm1-projectcasos.euemeunegocio.com/thumbs-po/*
+!adm1-projectcasos.euemeunegocio.com/thumbs-po/.gitkeep
+adm1-projectcasos.euemeunegocio.com/thumbs-teste/*
+!adm1-projectcasos.euemeunegocio.com/thumbs-teste/.gitkeep
+
+# ── Arquivos do Windows / Mac / Linux ─────────────────────
+desktop.ini
+Thumbs.db
+ehthumbs.db
+.DS_Store
+*.swp
+*.swo
+*~
+
+# ── IDEs e editores ───────────────────────────────────────
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.history/
+
+# ── Logs e dumps ──────────────────────────────────────────
+*.log
+*.sql
+*.sqlite
+*.sqlite3
+*.dump
+error_log
+debug.log
+
+# ── Backups e temporários ─────────────────────────────────
+*.bak
+*.backup
+*.old
+*.orig
+*.tmp
+~$*
+
+# ── Variáveis de ambiente locais ──────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── Dependências (se um dia o projeto usar) ───────────────
+vendor/
+node_modules/
+composer.lock
+package-lock.json
