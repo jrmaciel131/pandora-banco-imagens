@@ -73,6 +73,8 @@ function setThumbSourceHighlight(src){
 
 async function loadAdminPanel(){
   loadCanonicalTagsPanel();
+  loadDistanceConfig();
+  loadCoringas();
   try{
     const r = await api('list_users');
     if(!r.ok) return;
@@ -660,6 +662,305 @@ function exportAuditReport(){
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+/* Configuração e auditoria de distâncias (raio mínimo entre cidades). */
+let _lastDistAudit = null;
+let _distAuditBase = 'all';
+
+async function loadDistanceConfig(){
+  const input = document.getElementById('dist-radius-input');
+  if(!input) return;
+  try{
+    const r = await api('get_distance_config');
+    if(r.ok) input.value = r.radius_km;
+  } catch(e){}
+}
+
+async function saveDistanceConfig(){
+  const input = document.getElementById('dist-radius-input');
+  const msg = document.getElementById('dist-radius-msg');
+  const val = parseFloat(input.value);
+  if(!(val >= 1 && val <= 5000)){
+    msg.textContent = 'Informe um valor entre 1 e 5000 km.';
+    msg.style.color = 'var(--rtx)';
+    return;
+  }
+  msg.textContent = 'Salvando...';
+  msg.style.color = 'var(--tx3)';
+  try{
+    const r = await api('set_distance_config', {radius_km: val}, 'POST');
+    if(r.ok){
+      input.value = r.radius_km;
+      msg.textContent = r.msg || 'Raio salvo.';
+      msg.style.color = 'var(--gtx)';
+      showToast(`Raio mínimo atualizado para ${r.radius_km} km`);
+    } else {
+      msg.textContent = r.error || 'Erro ao salvar.';
+      msg.style.color = 'var(--rtx)';
+    }
+  } catch(e){
+    msg.textContent = `Erro de conexão: ${e.message}`;
+    msg.style.color = 'var(--rtx)';
+  }
+}
+
+async function runDistanceAudit(){
+  const box = document.getElementById('dist-audit-result');
+  const expBtn = document.getElementById('dist-audit-export-btn');
+  box.style.display = 'block';
+  box.innerHTML = '<div style="padding:1rem;color:var(--tx2)"><span class="spin"></span> Varrendo todas as bases — pode demorar alguns segundos...</div>';
+  expBtn.style.display = 'none';
+  try{
+    const r = await api('audit_distances');
+    if(!r.ok){ box.innerHTML = `<div style="color:var(--rtx)">Erro: ${esc(r.error||'')}</div>`; return; }
+    _lastDistAudit = r.report;
+    _distAuditBase = 'all';
+    renderDistanceAudit();
+    expBtn.style.display = 'inline-flex';
+  } catch(e){
+    box.innerHTML = `<div style="color:var(--rtx)">Erro de conexão: ${esc(e.message)}</div>`;
+  }
+}
+
+function switchDistAuditBase(baseKey){
+  _distAuditBase = baseKey;
+  renderDistanceAudit();
+}
+
+function renderDistanceAudit(){
+  if(!_lastDistAudit) return;
+  const full = _lastDistAudit;
+  const box = document.getElementById('dist-audit-result');
+
+  const filterFn = e => _distAuditBase === 'all' || e.base === _distAuditBase;
+  const conflicts  = (full.conflicts||[]).filter(filterFn);
+  const unresolved = (full.unresolved||[]).filter(filterFn);
+  const s = full.summary || {};
+
+  /* Abas por base — contagem de pares em conflito. */
+  const byBase = {};
+  (full.conflicts||[]).forEach(e => byBase[e.base] = (byBase[e.base]||0) + 1);
+  const bases = Object.keys(byBase).sort();
+  const totalAll = Object.values(byBase).reduce((acc, n) => acc + n, 0);
+  const tabCss = (active) => `padding:6px 14px;border-radius:20px;border:0.5px solid var(--bds);cursor:pointer;font-size:12px;font-weight:500;background:${active?'var(--accent)':'transparent'};color:${active?'#fff':'var(--tx2)'};transition:all .15s`;
+  let tabs = `<button onclick="switchDistAuditBase('all')" style="${tabCss(_distAuditBase==='all')}">Todas <span style="opacity:.7;margin-left:4px">(${totalAll})</span></button>`;
+  bases.forEach(b => {
+    tabs += `<button onclick="switchDistAuditBase('${esc(b).replace(/'/g,"\\'")}')" style="${tabCss(_distAuditBase===b)}">${esc(b)} <span style="opacity:.7;margin-left:4px">(${byBase[b]})</span></button>`;
+  });
+
+  let html = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:.75rem">${tabs}</div>`;
+
+  html += `<div style="background:var(--bg);padding:.75rem 1rem;border-radius:var(--rs);border:1px solid var(--bd);margin-bottom:.75rem">
+    <div style="font-weight:700;margin-bottom:.4rem">Resumo${_distAuditBase!=='all'?` — base ${esc(_distAuditBase)}`:''}</div>
+    <div style="font-size:12px;color:var(--tx2);line-height:1.7">
+      Raio configurado: <b>${esc(String(full.radius_km))} km</b><br>
+      ${s.bases||0} base(s) · ${s.casos||0} caso(s) varridos<br>
+      ${full.csv_loaded
+        ? `✓ CSV de coordenadas carregado`
+        : `<span style="color:var(--rtx)">❌ CSV não carregou: ${esc(full.csv_error||'')}</span>`}
+    </div>
+  </div>`;
+
+  html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:1rem">
+    ${auditCountCard('Pares em conflito', conflicts.length, 'var(--rtx)')}
+    ${auditCountCard('Cidades sem coordenada', unresolved.length, 'var(--atx)')}
+  </div>`;
+
+  if(conflicts.length){
+    html += auditSection('Pares de cidades dentro do raio mínimo', conflicts, e =>
+      `<tr><td>${esc(e.base)}</td><td>${esc(e.caso_id)}</td><td><code>${esc(e.cidade_a)}</code>/${esc(e.uf_a)}</td><td><code>${esc(e.cidade_b)}</code>/${esc(e.uf_b)}</td><td>${esc(String(e.distancia_km))} km</td><td>${esc(String(e.raio_km))} km</td></tr>`,
+      ['Base', 'Caso', 'Cidade A', 'Cidade B', 'Distância', 'Limite do par']);
+  }
+
+  if(unresolved.length){
+    html += auditSection('Cidades sem coordenada no CSV (não entram no cálculo)', unresolved, e =>
+      `<tr><td>${esc(e.base)}</td><td>${esc(e.caso_id)}</td><td><code>${esc(e.cidade)}</code></td></tr>`,
+      ['Base', 'Caso', 'Cidade']);
+  }
+
+  if(full.errors && full.errors.length){
+    html += `<div style="background:var(--rbg);border:1px solid var(--rtx);border-radius:var(--rs);padding:.75rem;margin-bottom:.75rem;font-size:12px;color:var(--rtx)">
+      <div style="font-weight:700;margin-bottom:.3rem">Erros ao ler bases:</div>
+      ${full.errors.map(e => `<div>• ${esc(e)}</div>`).join('')}
+    </div>`;
+  }
+
+  if(conflicts.length === 0 && full.csv_loaded){
+    const scopeLabel = _distAuditBase === 'all' ? '' : ` na base ${esc(_distAuditBase)}`;
+    html += `<div style="background:var(--gbg);color:var(--gtx);padding:1rem;border-radius:var(--rs);text-align:center;font-weight:600">✅ Nenhum conflito de distância${scopeLabel} — todos os casos respeitam o raio de ${esc(String(full.radius_km))} km.</div>`;
+  }
+
+  box.innerHTML = html;
+}
+
+function exportDistanceAudit(){
+  if(!_lastDistAudit) return;
+  const r = _lastDistAudit;
+  const s = r.summary || {};
+  const lines = [];
+  lines.push('=== AUDITORIA DE DISTÂNCIAS ===');
+  lines.push(`Data: ${new Date().toLocaleString('pt-BR')}`);
+  lines.push(`Raio mínimo configurado: ${r.radius_km} km`);
+  lines.push(`Bases: ${s.bases||0} · Casos: ${s.casos||0}`);
+  lines.push(`CSV: ${r.csv_loaded ? 'OK' : 'ERRO ('+(r.csv_error||'')+')'}`);
+  lines.push('');
+
+  if(r.conflicts && r.conflicts.length){
+    lines.push(`-- Pares em conflito (${r.conflicts.length}) --`);
+    r.conflicts.forEach(e =>
+      lines.push(`  ${e.base}/${e.caso_id}: ${e.cidade_a}/${e.uf_a} <-> ${e.cidade_b}/${e.uf_b} = ${e.distancia_km} km (limite do par: ${e.raio_km} km)`)
+    );
+    lines.push('');
+  } else {
+    lines.push('Nenhum conflito de distância encontrado.');
+    lines.push('');
+  }
+
+  if(r.unresolved && r.unresolved.length){
+    lines.push(`-- Cidades sem coordenada no CSV (${r.unresolved.length}) --`);
+    r.unresolved.forEach(e => lines.push(`  ${e.base}/${e.caso_id}: "${e.cidade}"`));
+    lines.push('');
+  }
+
+  const blob = new Blob([lines.join('\n')], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `auditoria_distancias_${new Date().toISOString().slice(0,10)}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/* Cidades coringa — raio mínimo reduzido em cidades populosas. */
+let _coringaDefaultKm = null;
+let coringaCities = [];
+
+/* Carrega os municípios da UF escolhida (API do IBGE) para o autocomplete,
+   espelhando o comportamento do formulário de registro de uso. */
+async function onCoringaUF(){
+  const uf = document.getElementById('coringa-uf').value;
+  const ci = document.getElementById('coringa-cidade');
+  ci.value = ''; ci.dataset.val = '';
+  coringaCities = [];
+  document.getElementById('coringa-cidade-dd').classList.remove('open');
+  if(!uf){
+    ci.readOnly = true;
+    ci.placeholder = 'Selecione a UF primeiro...';
+    return;
+  }
+  ci.readOnly = true;
+  ci.placeholder = 'Carregando cidades...';
+  try{
+    const r = await fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios?orderBy=nome`);
+    const d = await r.json();
+    coringaCities = d.map(x => x.nome.toUpperCase());
+  } catch(e){
+    coringaCities = [];
+  }
+  ci.readOnly = false;
+  ci.placeholder = 'Pesquise a cidade...';
+}
+
+function onCoringaCityInp(){
+  const ci = document.getElementById('coringa-cidade');
+  renderFormDD('coringa-cidade-dd', coringaCities, ci.value, c => {
+    ci.value = cap(c);
+    ci.dataset.val = c;
+    document.getElementById('coringa-cidade-dd').classList.remove('open');
+  });
+}
+
+function openCoringaCityDD(){
+  if(!document.getElementById('coringa-cidade').readOnly) onCoringaCityInp();
+}
+
+async function loadCoringas(){
+  const box = document.getElementById('coringas-list');
+  if(!box) return;
+  box.innerHTML = '<span style="font-size:12px;color:var(--tx3)"><span class="spin"></span> Carregando coringas...</span>';
+  try{
+    const r = await api('list_distance_overrides');
+    if(!r.ok){ box.innerHTML = '<span style="font-size:12px;color:var(--rtx)">Erro ao carregar.</span>'; return; }
+    _coringaDefaultKm = r.default_km;
+    const dk = document.getElementById('coringa-default-km');
+    if(dk) dk.textContent = r.default_km;
+    const list = Array.isArray(r.overrides) ? r.overrides : [];
+    if(!list.length){
+      box.innerHTML = '<span style="font-size:12px;color:var(--tx3)">Nenhuma cidade coringa cadastrada. Use o formulário abaixo para criar a primeira.</span>';
+      return;
+    }
+    const th = 'padding:.4rem .6rem;text-align:left;border-bottom:1px solid var(--bds);font-weight:600;color:var(--tx2);font-size:10px;text-transform:uppercase;letter-spacing:.04em';
+    const td = 'padding:.4rem .6rem;border-bottom:1px solid var(--bd)';
+    box.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr>
+        <th style="${th}">Cidade</th><th style="${th}">UF</th><th style="${th}">Raio</th><th style="border-bottom:1px solid var(--bds)"></th>
+      </tr></thead>
+      <tbody>${list.map(o => {
+        const warn = (_coringaDefaultKm != null && o.radius_km >= _coringaDefaultKm)
+          ? ` <span title="Raio maior ou igual ao padrão — não terá efeito prático" style="color:var(--atx)">⚠</span>` : '';
+        const unknown = o.known ? '' : ` <span title="Cidade não encontrada no CSV de coordenadas atual" style="color:var(--rtx);font-size:10px">(fora do CSV)</span>`;
+        return `<tr>
+          <td style="${td}">${esc(o.cidade)}${unknown}</td>
+          <td style="${td}">${esc(o.uf)}</td>
+          <td style="${td}"><b>${esc(String(o.radius_km))} km</b>${warn}</td>
+          <td style="${td};text-align:right"><button class="btn-revert" style="border-color:var(--rtx);color:var(--rtx);padding:3px 9px;font-size:11px" onclick="removeCoringa('${esc(o.key).replace(/'/g,"\\'")}', '${esc(o.cidade).replace(/'/g,"\\'")}', '${esc(o.uf)}')">Remover</button></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  } catch(e){
+    box.innerHTML = '<span style="font-size:12px;color:var(--rtx)">Erro de conexão.</span>';
+  }
+}
+
+async function addCoringa(){
+  const cidEl  = document.getElementById('coringa-cidade');
+  const ufEl   = document.getElementById('coringa-uf');
+  const raioEl = document.getElementById('coringa-raio');
+  const err    = document.getElementById('coringa-err');
+  err.textContent = '';
+  const uf = ufEl.value;
+  let cidade = (cidEl.dataset.val || '').toUpperCase();
+  /* Também aceita o texto digitado se bater exatamente com uma cidade da lista. */
+  if(!cidade){
+    const typed = cidEl.value.trim().toUpperCase();
+    if(typed && coringaCities.includes(typed)) cidade = typed;
+  }
+  const radius_km = parseFloat(raioEl.value);
+  if(!uf){ err.textContent = 'Selecione a UF.'; return; }
+  if(!cidade){ err.textContent = 'Selecione uma cidade da lista (digite e escolha no menu).'; return; }
+  if(!(radius_km >= 1 && radius_km <= 5000)){ err.textContent = 'Informe um raio entre 1 e 5000 km.'; return; }
+  try{
+    const r = await api('add_distance_override', {cidade, uf, radius_km}, 'POST');
+    if(r.ok){
+      showToast(r.msg || 'Coringa salvo.');
+      cidEl.value = ''; cidEl.dataset.val = ''; cidEl.readOnly = true;
+      cidEl.placeholder = 'Selecione a UF primeiro...';
+      ufEl.value = '';
+      raioEl.value = '';
+      coringaCities = [];
+      loadCoringas();
+    } else err.textContent = r.error || 'Erro.';
+  } catch(e){ err.textContent = 'Erro de conexão.'; }
+}
+
+function removeCoringa(key, cidade, uf){
+  showConfirm(
+    'Remover cidade coringa',
+    `Remover <b>${esc(cidade)}/${esc(uf)}</b> da lista de coringas? Ela volta a usar o raio padrão.`,
+    [{label:'Cidade', val:`${cidade}/${uf}`}],
+    async () => {
+      try{
+        const r = await api('remove_distance_override', {key}, 'POST');
+        if(r.ok){
+          showToast(r.msg || 'Coringa removido.');
+          loadCoringas();
+        } else showToast('Erro: '+(r.error||''));
+      } catch(e){ showToast('Erro de conexão.'); }
+    }
+  );
 }
 
 /* Gerenciamento de tags canônicas (vocabulário controlado). */

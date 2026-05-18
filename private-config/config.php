@@ -99,5 +99,19 @@ define('CRON_KEY', 'GERE_UMA_CHAVE_LONGA_E_ALEATORIA_AQUI_USE_OPENSSL_RAND_HEX_3
 
 // Raio mínimo (em km) entre uma cidade nova e qualquer cidade já em uso no
 // mesmo caso. Usuários comuns são bloqueados se houver conflito; apenas admins
-// podem confirmar para prosseguir. Ajuste conforme necessidade do negócio.
-define('DISTANCE_RADIUS_KM', 80);
+// podem confirmar para prosseguir.
+//
+// O valor padrão abaixo pode ser sobrescrito em tempo de execução pelo arquivo
+// `distance_config.json` (gravado pelo painel admin), evitando editar este
+// arquivo manualmente. O JSON tem o formato {"radius_km": 80}.
+$_distRadius = 80;
+$_distOverride = PRIVATE_CONFIG_PATH . '/distance_config.json';
+if (is_file($_distOverride)) {
+    $_distData = json_decode(@file_get_contents($_distOverride), true);
+    if (is_array($_distData) && isset($_distData['radius_km'])
+        && is_numeric($_distData['radius_km']) && $_distData['radius_km'] > 0) {
+        $_distRadius = (float) $_distData['radius_km'];
+    }
+}
+define('DISTANCE_RADIUS_KM', $_distRadius);
+unset($_distRadius, $_distOverride, $_distData);

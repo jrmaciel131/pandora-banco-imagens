@@ -224,9 +224,40 @@ function haversineKm(float $lat1, float $lng1, float $lat2, float $lng2): float 
 }
 
 /**
- * Lista TODAS as cidades existentes no caso que estão dentro do raio
- * `DISTANCE_RADIUS_KM` da nova cidade. Retorna:
- *   - array de conflitos [{cidade, distancia_km}] — caso conflitos existam
+ * Carrega o mapa de "cidades coringa" de `distance_overrides.json` — cidades
+ * muito populosas onde o raio mínimo é menor que o padrão global. O arquivo é
+ * um objeto { "UF|CIDADE_NORMALIZADA": raio_km }. Cacheado por requisição.
+ */
+function loadDistanceOverrides(): array {
+    static $cache = null;
+    if ($cache !== null) return $cache;
+    $path = PRIVATE_CONFIG_PATH . '/distance_overrides.json';
+    if (!file_exists($path)) { $cache = []; return $cache; }
+    $data = json_decode(file_get_contents($path), true);
+    $cache = is_array($data) ? $data : [];
+    return $cache;
+}
+
+/**
+ * Raio mínimo (km) aplicável a uma cidade: o valor coringa, se a cidade estiver
+ * cadastrada em `distance_overrides.json`, senão o padrão `DISTANCE_RADIUS_KM`.
+ */
+function cidadeRadiusKm(string $uf, string $cidade): float {
+    $default = defined('DISTANCE_RADIUS_KM') ? (float)DISTANCE_RADIUS_KM : 80;
+    $key = strtoupper(trim($uf)) . '|' . normalizeCidade($cidade);
+    $ovr = loadDistanceOverrides();
+    if (isset($ovr[$key]) && is_numeric($ovr[$key]) && $ovr[$key] > 0) {
+        return (float)$ovr[$key];
+    }
+    return $default;
+}
+
+/**
+ * Lista TODAS as cidades existentes no caso que estão dentro do raio mínimo
+ * da nova cidade. O raio de cada par é o MENOR entre o raio da nova cidade e
+ * o da cidade existente — assim uma cidade coringa (raio reduzido) "puxa" para
+ * baixo qualquer par de que participe. Retorna:
+ *   - array de conflitos [{cidade, uf, distancia_km, raio_km}] — se houver
  *   - [] — se a nova cidade não tem conflito
  * Lança Exception se o CSV não puder ser carregado.
  */
@@ -241,7 +272,7 @@ function findDistanceConflicts(string $novaUf, string $novaCidade, array $caso):
         // (cidade pode ser rara/recente); a regra do raio simplesmente não se aplica.
         return [];
     }
-    $raio = defined('DISTANCE_RADIUS_KM') ? (float)DISTANCE_RADIUS_KM : 80;
+    $raioNova = cidadeRadiusKm($alvo['uf'], $alvo['name']);
     $candidateUfs = $caso['ufs'] ?? [];
     $conflitos = [];
     foreach (($caso['cidades'] ?? []) as $cid) {
@@ -250,8 +281,9 @@ function findDistanceConflicts(string $novaUf, string $novaCidade, array $caso):
         $ex = findCidadeCoordsAmongUfs($cid, $candidateUfs);
         if (!$ex) continue;
         $d = haversineKm($alvo['lat'], $alvo['lng'], $ex['lat'], $ex['lng']);
+        $raio = min($raioNova, cidadeRadiusKm($ex['uf'], $ex['name']));
         if ($d <= $raio) {
-            $conflitos[] = ['cidade'=>$ex['name'], 'uf'=>$ex['uf'], 'distancia_km'=>round($d, 1)];
+            $conflitos[] = ['cidade'=>$ex['name'], 'uf'=>$ex['uf'], 'distancia_km'=>round($d, 1), 'raio_km'=>$raio];
         }
     }
     return $conflitos;
@@ -844,9 +876,8 @@ switch ($action) {
                 echo json_encode(['ok'=>false,'error'=>$e->getMessage().' Não foi possível validar a distância — tente novamente mais tarde ou contate o administrador.']); break;
             }
             if (!empty($conflitos)) {
-                $lista = array_map(fn($c) => "{$c['cidade']}/{$c['uf']} ({$c['distancia_km']}km)", $conflitos);
-                $raio = defined('DISTANCE_RADIUS_KM') ? (int)DISTANCE_RADIUS_KM : 80;
-                $msg = "Cidades em uso a menos de {$raio}km de ".ucwords(strtolower($nova_cid)).": ".implode(', ', $lista).".";
+                $lista = array_map(fn($c) => "{$c['cidade']}/{$c['uf']} ({$c['distancia_km']}km, limite {$c['raio_km']}km)", $conflitos);
+                $msg = "Cidades em uso perto demais de ".ucwords(strtolower($nova_cid)).": ".implode(', ', $lista).".";
                 if (!$isAdmin) {
                     echo json_encode(['ok'=>false,'error'=>"{$msg} Apenas administradores podem prosseguir — contate um admin."]);
                     break;
@@ -998,9 +1029,8 @@ switch ($action) {
                 foreach ($clean as $i => $e) {
                     $conf = findDistanceConflicts($e['uf'], $e['cidade'], $simulated);
                     if (!empty($conf)) {
-                        $lista = array_map(fn($c) => "{$c['cidade']}/{$c['uf']} ({$c['distancia_km']}km)", $conf);
-                        $raio = defined('DISTANCE_RADIUS_KM') ? (int)DISTANCE_RADIUS_KM : 80;
-                        $line = "Linha ".($i+1).": cidades em uso a menos de {$raio}km de ".ucwords(strtolower($e['cidade'])).": ".implode(', ', $lista).".";
+                        $lista = array_map(fn($c) => "{$c['cidade']}/{$c['uf']} ({$c['distancia_km']}km, limite {$c['raio_km']}km)", $conf);
+                        $line = "Linha ".($i+1).": cidades em uso perto demais de ".ucwords(strtolower($e['cidade'])).": ".implode(', ', $lista).".";
                         if (!$isAdmin) $distErrs[] = $line;
                         else           $distWarns[] = $line;
                     }
@@ -1070,7 +1100,6 @@ switch ($action) {
             $errs = [];
             $warns = [];
             $casosAll = $api->getCasos(false);
-            $raio = defined('DISTANCE_RADIUS_KM') ? (int)DISTANCE_RADIUS_KM : 80;
             foreach ($ids as $cid) {
                 $caso = null;
                 foreach ($casosAll as $c) if ($c['id'] === $cid) { $caso = $c; break; }
@@ -1086,8 +1115,8 @@ switch ($action) {
                     echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); break 2;
                 }
                 if (!empty($conf)) {
-                    $lista = array_map(fn($x) => "{$x['cidade']}/{$x['uf']} ({$x['distancia_km']}km)", $conf);
-                    $line = "{$cid}: cidades a <{$raio}km — ".implode(', ', $lista);
+                    $lista = array_map(fn($x) => "{$x['cidade']}/{$x['uf']} ({$x['distancia_km']}km, limite {$x['raio_km']}km)", $conf);
+                    $line = "{$cid}: cidades perto demais — ".implode(', ', $lista);
                     if (!$isAdmin) $errs[] = $line;
                     else           $warns[] = $line;
                 }
@@ -1796,6 +1825,208 @@ switch ($action) {
                             }
                         }
                     }
+                }
+            } catch (Throwable $e) {
+                $report['errors'][] = "base {$baseKey}: ".$e->getMessage();
+            }
+        }
+        DB::setPrefix($savedPrefix);
+        echo json_encode(['ok'=>true, 'report'=>$report]);
+        break;
+
+    // Lê o raio mínimo de distância atualmente em vigor (admin).
+    case 'get_distance_config':
+        requireAdmin($isAdmin);
+        echo json_encode([
+            'ok'        => true,
+            'radius_km' => defined('DISTANCE_RADIUS_KM') ? (float)DISTANCE_RADIUS_KM : 80,
+        ]);
+        break;
+
+    /*
+     * Grava o raio mínimo de distância em `distance_config.json` (admin).
+     * O novo valor passa a valer a partir da próxima requisição — a constante
+     * DISTANCE_RADIUS_KM já foi definida no bootstrap deste request.
+     */
+    case 'set_distance_config':
+        requireAdmin($isAdmin);
+        $raw = $_POST['radius_km'] ?? '';
+        if (!is_numeric($raw)) {
+            echo json_encode(['ok'=>false,'error'=>'Valor inválido — informe um número em km.']); break;
+        }
+        $novoRaio = round((float)$raw, 1);
+        if ($novoRaio < 1 || $novoRaio > 5000) {
+            echo json_encode(['ok'=>false,'error'=>'Raio fora do intervalo permitido (1–5000 km).']); break;
+        }
+        $antigo = defined('DISTANCE_RADIUS_KM') ? (float)DISTANCE_RADIUS_KM : 80;
+        withJsonLock(PRIVATE_CONFIG_PATH.'/distance_config.json', function($d) use ($novoRaio) {
+            if (!is_array($d)) $d = [];
+            $d['radius_km'] = $novoRaio;
+            return $d;
+        });
+        DB::log($me, 'sistema', 'set_distance_config', ['radius_km'=>$antigo], ['radius_km'=>$novoRaio]);
+        echo json_encode(['ok'=>true,'radius_km'=>$novoRaio,'msg'=>"Raio atualizado para {$novoRaio} km. Vale a partir da próxima ação."]);
+        break;
+
+    // Lista as cidades coringa cadastradas em distance_overrides.json (admin).
+    // Resolve o nome canônico de cada cidade pelo CSV de coordenadas.
+    case 'list_distance_overrides':
+        requireAdmin($isAdmin);
+        $ovr = loadDistanceOverrides();
+        $list = [];
+        foreach ($ovr as $key => $raioOvr) {
+            [$kUf, $kNorm] = array_pad(explode('|', $key, 2), 2, '');
+            $c = findCidadeCoords($kUf, $kNorm);
+            $list[] = [
+                'key'       => $key,
+                'uf'        => $kUf,
+                'cidade'    => $c ? $c['name'] : $kNorm,
+                'radius_km' => (float)$raioOvr,
+                'known'     => (bool)$c,
+            ];
+        }
+        usort($list, fn($a, $b) => strcmp($a['cidade'].$a['uf'], $b['cidade'].$b['uf']));
+        echo json_encode([
+            'ok'         => true,
+            'overrides'  => $list,
+            'default_km' => defined('DISTANCE_RADIUS_KM') ? (float)DISTANCE_RADIUS_KM : 80,
+        ]);
+        break;
+
+    // Cadastra/atualiza uma cidade coringa (admin). A cidade precisa existir no
+    // CSV de coordenadas — caso contrário não há como calcular distâncias dela.
+    case 'add_distance_override':
+        requireAdmin($isAdmin);
+        $ufIn  = strtoupper(trim($_POST['uf'] ?? ''));
+        $cidIn = trim($_POST['cidade'] ?? '');
+        $raw   = $_POST['radius_km'] ?? '';
+        if (!is_numeric($raw)) {
+            echo json_encode(['ok'=>false,'error'=>'Raio inválido — informe um número em km.']); break;
+        }
+        $raioOvr = round((float)$raw, 1);
+        if ($raioOvr < 1 || $raioOvr > 5000) {
+            echo json_encode(['ok'=>false,'error'=>'Raio fora do intervalo permitido (1–5000 km).']); break;
+        }
+        $padrao = defined('DISTANCE_RADIUS_KM') ? (float)DISTANCE_RADIUS_KM : 80;
+        if ($raioOvr > $padrao) {
+            echo json_encode(['ok'=>false,'error'=>"O raio do coringa ({$raioOvr} km) não pode ser maior que o raio padrão ({$padrao} km) — cidade coringa serve para reduzir o raio."]); break;
+        }
+        $c = findCidadeCoords($ufIn, $cidIn);
+        if (!$c) {
+            echo json_encode(['ok'=>false,'error'=>"Cidade \"{$cidIn}/{$ufIn}\" não encontrada no CSV de coordenadas. Confira o nome e a UF."]); break;
+        }
+        $key = $c['uf'].'|'.normalizeCidade($c['name']);
+        withJsonLock(PRIVATE_CONFIG_PATH.'/distance_overrides.json', function($d) use ($key, $raioOvr) {
+            if (!is_array($d)) $d = [];
+            $d[$key] = $raioOvr;
+            return $d;
+        });
+        DB::log($me, 'sistema', 'add_distance_override', null, ['cidade'=>$c['name'],'uf'=>$c['uf'],'radius_km'=>$raioOvr]);
+        echo json_encode(['ok'=>true,'msg'=>"Coringa {$c['name']}/{$c['uf']} salvo com raio de {$raioOvr} km. Vale a partir da próxima ação."]);
+        break;
+
+    // Remove uma cidade coringa (admin). A chave é "UF|CIDADE_NORMALIZADA".
+    case 'remove_distance_override':
+        requireAdmin($isAdmin);
+        $key = trim($_POST['key'] ?? '');
+        if ($key === '') { echo json_encode(['ok'=>false,'error'=>'Coringa não informado.']); break; }
+        $removed = false;
+        withJsonLock(PRIVATE_CONFIG_PATH.'/distance_overrides.json', function($d) use ($key, &$removed) {
+            if (!is_array($d) || !isset($d[$key])) return null;
+            unset($d[$key]);
+            $removed = true;
+            return $d;
+        });
+        if ($removed) DB::log($me, 'sistema', 'remove_distance_override', ['key'=>$key], null);
+        echo json_encode(['ok'=>true,'msg'=>$removed ? 'Coringa removido.' : 'Coringa não estava cadastrado.']);
+        break;
+
+    /*
+     * Auditoria de distâncias (admin). Simula a regra de raio mínimo sobre os
+     * casos já existentes: varre todos os casos de todas as bases e detecta
+     * pares de cidades DENTRO do mesmo caso cuja distância em linha reta
+     * (Haversine) é menor ou igual a DISTANCE_RADIUS_KM. Aponta também as
+     * cidades cujas coordenadas não puderam ser resolvidas no CSV.
+     */
+    case 'audit_distances':
+        requireAdmin($isAdmin);
+        $raio = defined('DISTANCE_RADIUS_KM') ? (float)DISTANCE_RADIUS_KM : 80;
+        $report = [
+            'radius_km'  => $raio,
+            'csv_loaded' => true,
+            'csv_error'  => null,
+            'conflicts'  => [],
+            'unresolved' => [],
+            'errors'     => [],
+            'summary'    => [
+                'bases'            => 0,
+                'casos'            => 0,
+                'casos_conflito'   => 0,
+                'conflict_count'   => 0,
+                'unresolved_count' => 0,
+            ],
+        ];
+
+        $coordsCheck = loadCidadesCoords();
+        if (isset($coordsCheck['_error'])) {
+            $report['csv_loaded'] = false;
+            $report['csv_error']  = $coordsCheck['_error'];
+            echo json_encode(['ok'=>true, 'report'=>$report]);
+            break;
+        }
+
+        $savedPrefix = DB::getPrefix();
+        foreach (BASES as $baseKey => $bc) {
+            try {
+                DB::setPrefix($bc['db_prefix']);
+                $apiB = new GoogleAPI($bc);
+                $cs = $apiB->getCasos(false);
+                $report['summary']['bases']++;
+                foreach ($cs as $c) {
+                    $report['summary']['casos']++;
+                    $caseUfs = $c['ufs'] ?? [];
+
+                    // Resolve as coordenadas de cada cidade do caso, testando as
+                    // UFs presentes no caso (mesma estratégia do formulário).
+                    $pts = [];
+                    foreach (($c['cidades'] ?? []) as $cid) {
+                        if (!$cid) continue;
+                        $co = findCidadeCoordsAmongUfs($cid, $caseUfs);
+                        if ($co) {
+                            $pts[] = ['cidade'=>$cid, 'uf'=>$co['uf'], 'lat'=>$co['lat'], 'lng'=>$co['lng']];
+                        } else {
+                            $report['unresolved'][] = ['base'=>$baseKey, 'caso_id'=>$c['id'], 'cidade'=>$cid];
+                            $report['summary']['unresolved_count']++;
+                        }
+                    }
+
+                    // Compara todos os pares de cidades resolvidas do caso. O raio
+                    // de cada par é o MENOR entre os raios das duas cidades, de modo
+                    // que uma cidade coringa aperta o limite de qualquer par seu.
+                    $temConflito = false;
+                    $n = count($pts);
+                    for ($i = 0; $i < $n; $i++) {
+                        for ($j = $i + 1; $j < $n; $j++) {
+                            if (normalizeCidade($pts[$i]['cidade']) === normalizeCidade($pts[$j]['cidade'])) continue;
+                            $d = haversineKm($pts[$i]['lat'], $pts[$i]['lng'], $pts[$j]['lat'], $pts[$j]['lng']);
+                            $raioPar = min(
+                                cidadeRadiusKm($pts[$i]['uf'], $pts[$i]['cidade']),
+                                cidadeRadiusKm($pts[$j]['uf'], $pts[$j]['cidade'])
+                            );
+                            if ($d <= $raioPar) {
+                                $report['conflicts'][] = [
+                                    'base'=>$baseKey, 'caso_id'=>$c['id'],
+                                    'cidade_a'=>$pts[$i]['cidade'], 'uf_a'=>$pts[$i]['uf'],
+                                    'cidade_b'=>$pts[$j]['cidade'], 'uf_b'=>$pts[$j]['uf'],
+                                    'distancia_km'=>round($d, 1),
+                                    'raio_km'=>$raioPar,
+                                ];
+                                $report['summary']['conflict_count']++;
+                                $temConflito = true;
+                            }
+                        }
+                    }
+                    if ($temConflito) $report['summary']['casos_conflito']++;
                 }
             } catch (Throwable $e) {
                 $report['errors'][] = "base {$baseKey}: ".$e->getMessage();

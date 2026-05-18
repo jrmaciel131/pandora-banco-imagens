@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Banco de Imagens</title>
-<link rel="stylesheet" href="assets/theme.css?v=24">
-<link rel="stylesheet" href="assets/app.css?v=24">
+<link rel="stylesheet" href="assets/theme.css?v=25">
+<link rel="stylesheet" href="assets/app.css?v=25">
 </head>
 <body>
 
@@ -259,6 +259,54 @@
       </div>
 
       <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:.35rem">📏 Auditoria de distâncias</h3>
+        <p style="font-size:12px;color:var(--tx2);margin-bottom:.85rem;line-height:1.5">
+          Simula a regra de raio mínimo sobre os casos já existentes: varre todas as bases e aponta pares de cidades no mesmo caso que estão a uma distância em linha reta menor ou igual ao raio configurado.
+        </p>
+        <div style="background:var(--bg);border-radius:var(--rs);padding:.75rem 1rem;border:1px solid var(--bd);margin-bottom:.75rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <label style="font-size:12px;color:var(--tx2);font-weight:600">Raio mínimo (km):</label>
+          <input type="number" id="dist-radius-input" min="1" max="5000" step="1" style="padding:6px 10px;border:1px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none;width:90px">
+          <button class="btn bp" style="padding:6px 12px;font-size:12px" onclick="saveDistanceConfig()">Salvar raio</button>
+          <span id="dist-radius-msg" style="font-size:11px;color:var(--tx3)"></span>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:.75rem">
+          <button class="btn bp" style="padding:7px 14px;font-size:13px" onclick="runDistanceAudit()">Executar auditoria de distâncias</button>
+          <button class="btn bs" style="padding:7px 14px;font-size:13px;display:none" id="dist-audit-export-btn" onclick="exportDistanceAudit()">Exportar (.txt)</button>
+        </div>
+        <div id="dist-audit-result" style="display:none;font-size:12px"></div>
+      </div>
+
+      <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:.35rem">🃏 Cidades coringa (raio reduzido)</h3>
+        <p style="font-size:12px;color:var(--tx2);margin-bottom:.85rem;line-height:1.5">
+          Cidades muito populosas onde o raio mínimo é menor que o padrão. Ao comparar duas cidades vale sempre o <b>menor</b> raio entre as duas — então o raio reduzido do coringa prevalece em qualquer par de que ele participe. O padrão atual é <b id="coringa-default-km">—</b> km.
+        </p>
+        <div id="coringas-list" style="margin-bottom:1rem"></div>
+        <div style="background:var(--bg);border-radius:var(--rs);padding:1rem;border:1px solid var(--bd)">
+          <h4 style="font-size:13px;font-weight:600;margin-bottom:.75rem">➕ Adicionar coringa</h4>
+          <p style="font-size:11px;color:var(--tx3);margin-bottom:.6rem">Escolha a UF, digite a cidade e selecione uma da lista (IBGE). Só cidades reconhecidas são aceitas.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <select id="coringa-uf" onchange="onCoringaUF()" style="padding:7px 10px;border:1px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none">
+              <option value="">UF</option>
+              <option>AC</option><option>AL</option><option>AP</option><option>AM</option><option>BA</option>
+              <option>CE</option><option>DF</option><option>ES</option><option>GO</option><option>MA</option>
+              <option>MT</option><option>MS</option><option>MG</option><option>PA</option><option>PB</option>
+              <option>PR</option><option>PE</option><option>PI</option><option>RJ</option><option>RN</option>
+              <option>RS</option><option>RO</option><option>RR</option><option>SC</option><option>SP</option>
+              <option>SE</option><option>TO</option>
+            </select>
+            <div class="ddw" style="flex:2;min-width:160px">
+              <input type="text" id="coringa-cidade" placeholder="Selecione a UF primeiro..." readonly oninput="onCoringaCityInp()" onfocus="openCoringaCityDD()" autocomplete="off" data-val="" style="box-sizing:border-box;width:100%;padding:7px 10px;border:1px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none">
+              <div class="dd" id="coringa-cidade-dd"></div>
+            </div>
+            <input type="number" id="coringa-raio" placeholder="km" min="1" max="5000" step="1" style="box-sizing:border-box;padding:7px 10px;border:1px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none;width:80px">
+            <button class="btn bp" style="padding:7px 14px;font-size:13px" onclick="addCoringa()">Adicionar</button>
+          </div>
+          <div class="err" id="coringa-err"></div>
+        </div>
+      </div>
+
+      <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)">
         <h3 style="font-size:14px;font-weight:600;margin-bottom:.35rem">🏷 Gerenciar tags</h3>
         <p style="font-size:12px;color:var(--tx2);margin-bottom:.85rem;line-height:1.5">
           Apenas tags cadastradas aqui ficam disponíveis no autocomplete dos casos. Ao remover uma tag, ela é apagada de TODOS os casos em TODAS as bases.
@@ -432,13 +480,13 @@
 <div class="toast" id="toast"></div>
 
 <!-- A ordem dos scripts é significativa: utils define globais usados pelos demais. -->
-<script src="assets/utils.js?v=24"></script>
-<script src="assets/theme.js?v=24"></script>
-<script src="assets/casos.js?v=24"></script>
-<script src="assets/panel.js?v=24"></script>
-<script src="assets/bulk.js?v=24"></script>
-<script src="assets/admin.js?v=24"></script>
-<script src="assets/auth.js?v=24"></script>
-<script src="assets/app.js?v=24"></script>
+<script src="assets/utils.js?v=25"></script>
+<script src="assets/theme.js?v=25"></script>
+<script src="assets/casos.js?v=25"></script>
+<script src="assets/panel.js?v=25"></script>
+<script src="assets/bulk.js?v=25"></script>
+<script src="assets/admin.js?v=25"></script>
+<script src="assets/auth.js?v=25"></script>
+<script src="assets/app.js?v=25"></script>
 </body>
 </html>
