@@ -5,6 +5,7 @@
 - **Frontend modular**: o `index.html` antes monolítico (≈3000 linhas) foi dividido em `assets/` com dois arquivos CSS e oito JS.
 - **Hardening**: locks em escritas concorrentes (tags e JSONs de configuração), rate-limit por dispositivo, CRON_KEY via header, sessão de 2h.
 - **Export ZIP**: JSZip agora hospedado localmente em `export/lib/jszip.min.js` (sem dependência de CDN).
+- **v21.2:** novas ferramentas no painel admin (auditoria de distâncias, cidades coringa, raio editável). `config.php` ganhou bloco que lê override de `distance_config.json`. Cache busting bumpado para `?v=25`.
 
 ## Estrutura final no servidor (DreamHost)
 
@@ -16,6 +17,10 @@
 │   ├── passwords.json
 │   ├── users_override.json
 │   ├── production_users.json
+│   ├── cidades_coords.csv                          ← (v21.1) CSV IBGE de coordenadas
+│   ├── tags.json                                   ← runtime: NÃO sobrescrever no deploy
+│   ├── distance_config.json                        ← (v21.2) runtime: NÃO sobrescrever
+│   ├── distance_overrides.json                     ← (v21.2) runtime: NÃO sobrescrever
 │   ├── lib/
 │   │   ├── db.php
 │   │   └── google.php
@@ -44,13 +49,21 @@
 
 ### 1. Subir `private-config/` para FORA do site público
 
-Via SFTP, faça upload de `raizdosite/private-config/` para `/home/SEU_USUARIO/private-config/` — ao lado do domínio, NÃO dentro dele. Se a pasta já existe (deploy v20+), basta sobrescrever:
+Via SFTP, faça upload de `raizdosite/private-config/` para `/home/SEU_USUARIO/private-config/` — ao lado do domínio, NÃO dentro dele. Se a pasta já existe (deploy v20+), basta sobrescrever **apenas estes arquivos**:
 
 - `private-config/config.php`
 - `private-config/lib/db.php`
 - `private-config/lib/google.php`
 
-A pasta `private-config/sessions/` deve permanecer (sem mexer).
+**NÃO sobrescrever os arquivos de runtime** — eles guardam estado gerenciado pela aplicação:
+
+- `private-config/sessions/` (sessões PHP ativas)
+- `private-config/tags.json` (tags canônicas — v21.1)
+- `private-config/distance_config.json` (raio padrão editado pelo admin — v21.2)
+- `private-config/distance_overrides.json` (cidades coringa — v21.2)
+- `private-config/passwords.json`, `users_override.json`, `production_users.json` (senhas e papéis trocados pelo admin)
+- `private-config/.token_cache.json` (token OAuth cacheado)
+- `private-config/cidades_coords.csv` (sobe **apenas uma vez** na v21.1; depois fica fixo)
 
 ### 2. Permissões
 
@@ -117,13 +130,15 @@ Se algo der errado:
 
 ## Cache busting
 
-A partir da v21, as referências em `index.html` levam sufixo `?v=21`. Quando alterar qualquer arquivo em `assets/`:
+A partir da v21, as referências em `index.html` levam sufixo `?v=N`. Versão atual: **`?v=25`** (v21.2). Quando alterar qualquer arquivo em `assets/`:
 
 1. Edite o arquivo.
-2. No `index.html`, incremente o número (`?v=21` → `?v=22`).
+2. No `index.html`, incremente o número (ex.: `?v=25` → `?v=26`).
 3. Suba `index.html` + o(s) asset(s) alterado(s).
 
-Sem o incremento, os browsers podem servir o asset antigo do cache por horas.
+Sem o incremento, os browsers podem servir o asset antigo do cache por horas. Foi exatamente isso que aconteceu no rollout da v21.2 — o `admin.js` cacheado da v21.1 disparou `ReferenceError` ao clicar nos botões novos.
+
+> **Próximo passo opcional:** renomear `index.html` → `index.php` e usar `filemtime()` pra gerar o `?v=` automaticamente. Elimina a necessidade de bumpar manualmente.
 
 ## Checklist final
 

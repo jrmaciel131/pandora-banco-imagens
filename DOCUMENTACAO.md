@@ -134,7 +134,7 @@ Todas as constantes globais ficam em `private-config/config.php`. As principais 
 | `MAX_LOGIN_ATTEMPTS`    | Tentativas antes do bloqueio (por usuário+dispositivo desde v21).         |
 | `LOGIN_BLOCK_MINUTES`   | Duração do bloqueio (min).                                                |
 | `CRON_KEY`              | Chave necessária para invocar o cache warmer via HTTP.                    |
-| `DISTANCE_RADIUS_KM`    | Raio mínimo (km) entre uma cidade nova e qualquer já em uso no mesmo caso. Default: 80. Apenas admin pode prosseguir em caso de conflito. |
+| `DISTANCE_RADIUS_KM`    | Raio mínimo (km) entre uma cidade nova e qualquer já em uso no mesmo caso. Default: 80. Apenas admin pode prosseguir em caso de conflito. **v21.2:** o valor pode ser sobrescrito em runtime por `private-config/distance_config.json` (gravado pelo painel admin); cidades coringa (raio reduzido) em `distance_overrides.json` — em pares mistos vale `min(raioA, raioB)`. |
 
 ### Bases
 
@@ -216,6 +216,12 @@ Todas as requisições são despachadas pelo front controller `api/handler.php`.
 | `add_uso_batch` | POST   | **(v21.1)** Registro atômico de várias linhas no mesmo caso. Pré-flight valida tudo antes do write; nenhuma linha é gravada se houver erro. Payload: `entries` (JSON array). |
 | `bulk_preflight`| POST   | **(v21.1)** Verifica em lote antes do registro em massa: cidade-block, bloqueio, distância. Devolve `errors[]` e `warns[]`. |
 | `audit_data`    | GET    | **(v21.1, admin)** Varre todos os casos de todas as bases procurando UFs inválidas, cidades não reconhecidas pelo CSV (com sugestões fuzzy via Levenshtein), cidades cadastradas em UF errada e duplicatas com escritas diferentes. Usado pra limpar a planilha antes da validação por distância funcionar bem. |
+| `audit_distances`     | GET    | **(v21.2, admin)** Simula a regra de raio mínimo sobre os casos existentes: aponta pares de cidades no mesmo caso a uma distância em linha reta menor ou igual ao raio efetivo do par (`min(raioA, raioB)`). |
+| `get_distance_config` | GET    | **(v21.2, admin)** Retorna o `DISTANCE_RADIUS_KM` em vigor (lê o override de `distance_config.json` quando presente). |
+| `set_distance_config` | POST   | **(v21.2, admin)** Grava o novo raio padrão em `distance_config.json` (faixa 1–5000 km). Vale a partir da próxima requisição. |
+| `list_distance_overrides`  | GET    | **(v21.2, admin)** Lista as cidades coringa cadastradas em `distance_overrides.json`, já resolvendo o nome canônico pelo CSV de coordenadas. |
+| `add_distance_override`    | POST   | **(v21.2, admin)** Cadastra/atualiza uma cidade coringa (UF + cidade do CSV + raio em km). Recusa raio maior que o padrão. |
+| `remove_distance_override` | POST   | **(v21.2, admin)** Remove uma cidade coringa pela chave `UF\|CIDADE_NORMALIZADA`. |
 | `remove_uso`    | POST   | Remove uma entrada inteira por índice.                                                 |
 | `remove_item`   | POST   | Remove uma única UF, cidade ou cliente, opcionalmente por índice.                      |
 | `set_block`     | POST   | Bloqueia caso adicionando o marcador `NA` e gravando o motivo.                         |
@@ -400,6 +406,17 @@ O endpoint `diagnostico` (admin) verifica:
 
 ## 11. Histórico de mudanças
 
+### v21.2 (2026-05-18)
+
+**Bugs corrigidos**
+- Bump de `?v=24` → `?v=25` em todos os assets do `index.html`. Sem o incremento, o navegador continuava servindo o `admin.js` cacheado da v21.1, e os cliques nos botões novos disparavam `ReferenceError`.
+
+**Novos recursos**
+- **Auditoria de distâncias** (`audit_distances`): admin pode rodar uma varredura completa que detecta pares de cidades no mesmo caso já fora do raio mínimo. Espelha a validação que o formulário aplica, mas retroativamente sobre os dados existentes. Resultado por base, com coluna "Limite do par" e export `.txt`.
+- **Cidades coringa**: cidades populosas onde o raio mínimo é menor que o padrão (ex.: São Paulo/SP a 25 km). Lista editável no painel admin com autocomplete IBGE (igual ao form de registro de uso). Storage em `private-config/distance_overrides.json` (gitignored). Backend recusa raio coringa maior que o padrão.
+- **Regra `min` por par**: tanto no formulário quanto na auditoria, o raio efetivo de cada par de cidades é o **menor** entre os dois — uma cidade coringa "puxa" pra baixo qualquer par de que participe. Mensagens de conflito agora mostram o limite efetivo (ex.: `"Campinas/SP (40km, limite 25km)"`).
+- **Raio padrão editável pelo admin**: `DISTANCE_RADIUS_KM` agora aceita override via `distance_config.json` (gravado pelo painel admin). O `config.php` lê esse arquivo no boot — não precisa mais editar PHP na mão pra ajustar o raio.
+
 ### v21.1 (2026-05-13)
 
 **Bugs corrigidos**
@@ -411,7 +428,7 @@ O endpoint `diagnostico` (admin) verifica:
 **Novos recursos**
 - **Multi-row no formulário "Registrar uso"**: usuário pode adicionar várias linhas (UF/cidade/profissional) antes de submeter. Endpoint atômico `add_uso_batch` valida tudo antes; se uma linha falha, nada é gravado.
 - **Tags canônicas (vocabulário controlado)**: admin gerencia a lista global em `private-config/tags.json` via nova seção em Admin Mode → Gerenciar tags. Usuários só podem aplicar tags que existem na lista. Remoção em cascata: ao apagar uma tag, ela some de todos os casos em todas as bases. Migração automática na primeira execução.
-- **Validação por distância (Haversine)**: ao registrar uso, o backend verifica se há cidades em uso a menos de `DISTANCE_RADIUS_KM` (default 80) da nova cidade, no mesmo caso. Usuário comum é bloqueado; admin recebe warning e confirma. CSV de coordenadas IBGE em `private-config/cidades_coords.csv`. Se o CSV não puder ser carregado, todo registro é bloqueado com erro explícito.
+- **Validação por distância (Haversine)**: ao registrar uso, o backend verifica se há cidades em uso a menos de `DISTANCE_RADIUS_KM` (default 80) da nova cidade, no mesmo caso. Usuário comum é bloqueado; admin recebe warning e confirma. CSV de coordenadas IBGE em `private-config/cidades_coords.csv`. Se o CSV não puder ser carregado, todo registro é bloqueado com erro explícito. **v21.2:** o raio por par passou a ser `min(raioA, raioB)` para acomodar cidades coringa (raio reduzido).
 - **Atomicidade no Registro em massa**: novo endpoint `bulk_preflight` checa todos os casos selecionados ANTES de qualquer write. Se algum falha, nenhum é gravado.
 - **Auditoria de qualidade dos dados** (`audit_data`): admin pode rodar uma varredura completa que identifica UFs inválidas, cidades não reconhecidas (com sugestões fuzzy por Levenshtein), cidades cadastradas em UF errada e duplicatas. Resultado exportável como `.txt`. Ferramenta principal pra limpar a planilha antes da validação por distância funcionar bem.
 

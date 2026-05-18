@@ -284,3 +284,49 @@ Ajuste o valor se 80km não fizer sentido para algum cenário específico. Mexer
 | Atualizar os 4 PHPs/HTMLs públicos | 2 min |
 | Testes em aba anônima | 5 min |
 | **Total** | **≈ 13 min** |
+
+---
+
+## Parte 7 — Mudanças específicas da v21.2
+
+### Pré-deploy
+
+Nenhum arquivo novo precisa subir em `private-config/` — os dois JSONs novos (`distance_config.json` e `distance_overrides.json`) são criados em runtime pelo painel admin. Já estão protegidos pelo `.gitignore`.
+
+Apenas garanta que o `private-config/config.php` no servidor contenha o novo bloco de override (substitui o `define('DISTANCE_RADIUS_KM', 80);` simples por uma versão que lê `distance_config.json` antes do `define`).
+
+### Pós-deploy — primeiras ações do admin
+
+**1. Ajustar o raio padrão (opcional)**
+
+Em vez de editar o `config.php` no servidor, agora dá pra editar pela tela:
+
+- **Admin Mode → 📏 Auditoria de distâncias → Raio mínimo (km)** → digita o valor → **Salvar raio**
+
+Cria `private-config/distance_config.json` automaticamente.
+
+**2. Cadastrar cidades coringa**
+
+Cidades muito populosas onde o raio padrão é grande demais (ex.: São Paulo/SP):
+
+- **Admin Mode → 🃏 Cidades coringa → Adicionar coringa**
+- Escolhe a UF → digita a cidade → seleciona no dropdown (autocomplete IBGE)
+- Define o raio em km (precisa ser menor que o padrão)
+
+Regra: em pares mistos vale `min(raioA, raioB)`. SP com 25 km bloqueia outras cidades até 25 km dela — mas a cidade vizinha, mesmo com o raio padrão de 80 km, **não** bloqueia SP de volta, porque o par sempre usa o menor dos dois raios.
+
+**3. Auditar conflitos existentes**
+
+- **Admin Mode → 📏 Auditoria de distâncias → Executar auditoria de distâncias**
+- Mostra todos os pares de cidades no mesmo caso que hoje violam o raio efetivo, com a coluna "Limite do par"
+- Export `.txt` para corrigir manualmente na planilha
+
+### Configuração
+
+Mexer no `config.php` deixou de ser necessário pra ajustar `DISTANCE_RADIUS_KM` — pode editar pela tela. O `config.php` agora lê `distance_config.json` no boot, com fallback pro valor hardcoded.
+
+### Comportamento novo
+
+- Mensagens de conflito agora mostram **o limite efetivo de cada par** em vez do raio global: `"Campinas/SP (40km, limite 25km)"`.
+- Form de cidades coringa usa o mesmo autocomplete IBGE do form de registro de uso — só aceita cidade reconhecida pelo CSV.
+- Bump `?v=24` → `?v=25` nos assets do `index.html` (cache busting do `admin.js` cacheado da v21.1).
