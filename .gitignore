@@ -25,12 +25,18 @@ private-config/sessions/*
 !private-config/sessions/.gitkeep
 
 # ── Caches gerados em runtime ─────────────────────────────
-adm1-projectcasos.euemeunegocio.com/thumbs/*
-!adm1-projectcasos.euemeunegocio.com/thumbs/.gitkeep
-adm1-projectcasos.euemeunegocio.com/thumbs-po/*
-!adm1-projectcasos.euemeunegocio.com/thumbs-po/.gitkeep
-adm1-projectcasos.euemeunegocio.com/thumbs-teste/*
-!adm1-projectcasos.euemeunegocio.com/thumbs-teste/.gitkeep
+# A pasta `dominio.com/` é o document root local. No seu servidor pode ter
+# outro nome (ex.: `public_html/` ou o nome real do seu domínio).
+dominio.com/thumbs/*
+!dominio.com/thumbs/.gitkeep
+dominio.com/thumbs-po/*
+!dominio.com/thumbs-po/.gitkeep
+dominio.com/thumbs-teste/*
+!dominio.com/thumbs-teste/.gitkeep
+private-config/.token_cache.json
+private-config/tags.json
+private-config/distance_config.json
+private-config/distance_overrides.json
 
 # ── Arquivos do Windows / Mac / Linux ─────────────────────
 desktop.ini

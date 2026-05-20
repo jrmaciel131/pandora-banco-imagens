@@ -1508,6 +1508,46 @@ switch ($action) {
         } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
         break;
 
+    // Aplica UMA tag a VÁRIOS casos numa única leitura da planilha. Otimização do
+    // add_tag para operações em lote: o gargalo do add_tag chamado em loop era
+    // reler a planilha inteira (getCasos(true)) a cada caso. Aqui lemos 1× e
+    // gravamos as N linhas. Sem trava canônica (a UI sugere as tags cadastradas,
+    // mas permite aplicar livremente em massa).
+    case 'bulk_add_tag':
+        $tag = mb_strtoupper(trim($_POST['tag'] ?? ''), 'UTF-8');
+        $tag = preg_replace('/[^\p{L}\p{N} \&\+\-]/u', '', $tag);
+        $tag = trim(preg_replace('/\s+/', ' ', $tag));
+        $ids = array_values(array_filter(array_map(
+            fn($s) => preg_replace('/[^A-Z0-9\-]/', '', strtoupper(trim($s))),
+            explode(',', $_POST['ids'] ?? '')
+        )));
+        if (empty($ids))                         { echo json_encode(['ok'=>false,'error'=>'Nenhum caso informado.']); break; }
+        if ($tag === '' || mb_strlen($tag) > 30) { echo json_encode(['ok'=>false,'error'=>'Tag inválida (1–30 caracteres).']); break; }
+        try {
+            // Leitura ÚNICA da planilha (não por caso).
+            DB::clearSheetCache();
+            $casos = $api->getCasos(true);
+            $byId = [];
+            foreach ($casos as $c) { $byId[$c['id']] = $c; }
+
+            $applied = []; $skipped = []; $errors = [];
+            foreach ($ids as $id) {
+                $caso = $byId[$id] ?? null;
+                if (!$caso)                     { $errors[] = "{$id}: não encontrado"; continue; }
+                $cur = $caso['tags'] ?? [];
+                if (in_array($tag, $cur, true)) { $skipped[] = $id; continue; }
+                if (count($cur) >= 20)          { $errors[] = "{$id}: máximo de 20 tags"; continue; }
+                $nv = array_values(array_merge($cur, [$tag]));
+                try {
+                    $api->updateCasoTags((int)$caso['row'], implode('/', $nv));
+                    DB::log($me, $id, 'add_tag', ['tags'=>$cur], ['tags'=>$nv]);
+                    $applied[] = $id;
+                } catch (Throwable $e) { $errors[] = "{$id}: ".$e->getMessage(); }
+            }
+            echo json_encode(['ok'=>true, 'applied'=>$applied, 'skipped'=>$skipped, 'errors'=>$errors]);
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+        break;
+
     // Remove uma tag do caso (idempotente: tag inexistente devolve a lista atual).
     case 'remove_tag':
         $caso_id = preg_replace('/[^A-Z0-9\-]/','',strtoupper($_POST['caso_id']??''));

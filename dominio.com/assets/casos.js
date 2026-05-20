@@ -13,6 +13,9 @@ let _highPriorityIds = new Set();
 let _loadingCount = 0;
 let casos = [], filtered = [], page = 1;
 let mode = 'estado', selUF = '', selCity = '', selProf = '';
+window._presetRecente = false;
+let density = localStorage.getItem('s-density') || 'normal';
+let viewMode = localStorage.getItem('s-view') || 'grid';
 let ibgeCities = [];
 let allProfs = [];
 let allTags = [];
@@ -26,7 +29,7 @@ function isBlockMarker(v){ return BLOCK_MARKERS.includes((v||'').toString().trim
 
 async function loadCasos(silent = false){
   if(!silent){
-    document.getElementById('grid').innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:2.5rem;color:var(--tx2)"><span class="spin"></span> Carregando...</div>';
+    renderGridLoading();
     document.getElementById('empty').style.display = 'none';
   }
   try{
@@ -126,7 +129,9 @@ async function onUFChange(){
   selCity = '';
   ibgeCities = [];
   document.getElementById('fci').value = '';
-  if(selUF && mode === 'cidade') await loadIBGE(selUF, 'filter');
+  document.getElementById('cdd').classList.remove('open');
+  document.getElementById('cw').style.display = selUF ? 'block' : 'none';
+  if(selUF) await loadIBGE(selUF, 'filter');
   applyFilter();
 }
 
@@ -192,9 +197,8 @@ function clearFilters(){
   _userTouchedShow = false;
   document.getElementById('fshow').value = 'disponivel';
   document.getElementById('cw').style.display = 'none';
-  mode = 'estado';
-  document.getElementById('te').classList.add('active');
-  document.getElementById('tc').classList.remove('active');
+  mode = 'cidade';
+  window._presetRecente = false;
   document.getElementById('btn-clf').style.display = 'none';
   applyFilter();
 }
@@ -276,6 +280,8 @@ function applyFilter(){
       document.getElementById('st').textContent = list.length;
       document.getElementById('sd').textContent = '—';
       document.getElementById('su').textContent = '—';
+      renderActiveFilterChips();
+      updateQuickTabCounts();
       renderGrid();
       return;
     }
@@ -302,13 +308,168 @@ function applyFilter(){
   else if(show === 'em_uso')   list = list.filter(c =>  c.emUso && !c.bloqueado);
   else if(show === 'bloqueado')list = list.filter(c =>  !!c.bloqueado);
 
+  if(window._presetRecente){
+    list = _getRecentes(list);
+  }
+
   filtered = list; page = 1;
   document.getElementById('st').textContent = list.length;
   document.getElementById('sd').textContent = hasStateFilter ? dispCount : '—';
   document.getElementById('su').textContent = hasStateFilter ? usoCount : '—';
   list.slice(0, PER).forEach(c => _highPriorityIds.add(c.id));
+  renderActiveFilterChips();
+  updateQuickTabCounts();
+  if(list.length === 0) renderEmptyState();
   renderGrid();
 }
+
+function renderActiveFilterChips(){
+  const wrap = document.getElementById('s-active-filters');
+  const list = document.getElementById('s-af-chips');
+  if(!wrap || !list) return;
+
+  const chips = [];
+  if(selUF)   chips.push({ label: 'UF: ' + selUF,           remove: () => { selUF = ''; document.getElementById('fuf').value = ''; }});
+  if(selCity) chips.push({ label: 'Cidade: ' + cap(selCity), remove: () => { selCity = ''; document.getElementById('fci').value = ''; }});
+  if(selProf) chips.push({ label: 'Prof: ' + selProf,        remove: () => { selProf = ''; document.getElementById('fpro').value = ''; }});
+  [...selTags].forEach(t => chips.push({ label: 'Tag: ' + t, remove: () => { selTags.delete(t); renderTagFilterChips(); }}));
+  const ids = document.getElementById('fids')?.value?.trim();
+  if(ids) chips.push({ label: 'IDs: ' + ids, remove: () => { document.getElementById('fids').value = ''; }});
+
+  if(chips.length === 0){ wrap.style.display = 'none'; return; }
+  wrap.style.display = 'flex';
+  list.innerHTML = chips.map((c, i) =>
+    `<span class="s-af-chip">${esc(c.label)}<span class="x" data-i="${i}">×</span></span>`
+  ).join('');
+  list.querySelectorAll('.x').forEach((el, i) => {
+    el.onclick = () => { chips[i].remove(); applyFilter(); };
+  });
+}
+
+/* Tenta filtrar pelos últimos 7 dias via campos de data conhecidos.
+   Se nenhum campo de data existir, cai no fallback: últimos 50 IDs. */
+function _getRecentes(arr){
+  const cutoff = Date.now() - 7 * 86400000;
+  const byDate = arr.filter(c => {
+    const raw = c.data_criacao || c.criado_em || c.created_at || c.data || c.added_at;
+    if(!raw) return false;
+    const t = new Date(String(raw).replace(' ', 'T')).getTime();
+    return !isNaN(t) && t >= cutoff;
+  });
+  if(byDate.length > 0) return byDate;
+  return [...arr].sort((a, b) => {
+    const na = parseInt((a.id || '').replace(/\D/g, '')) || 0;
+    const nb = parseInt((b.id || '').replace(/\D/g, '')) || 0;
+    return nb - na;
+  }).slice(0, 50);
+}
+
+function updateQuickTabCounts(){
+  const profQ = norm(selProf);
+  const withStatus = casos.map(c => {
+    let emUso = false;
+    if(profQ)       emUso = c.clientes.some(p => norm(p).includes(profQ));
+    else if(selUF){
+      if(mode === 'estado') emUso = c.ufs.includes(selUF);
+      else                  emUso = selCity ? c.cidades.includes(selCity) : c.ufs.includes(selUF);
+    }
+    return {...c, emUso};
+  });
+  const el = id => document.getElementById(id);
+  if(el('qt-c-todos')) el('qt-c-todos').textContent = casos.length;
+  if(el('qt-c-disp'))  el('qt-c-disp').textContent  = withStatus.filter(c => !c.emUso && !c.bloqueado).length;
+  if(el('qt-c-uso'))   el('qt-c-uso').textContent   = withStatus.filter(c =>  c.emUso && !c.bloqueado).length;
+  if(el('qt-c-bloq'))  el('qt-c-bloq').textContent  = casos.filter(c => !!c.bloqueado).length;
+  if(el('qt-c-rec'))   el('qt-c-rec').textContent   = '+' + _getRecentes(casos).length;
+}
+
+function setFilterPreset(preset){
+  const fshow = document.getElementById('fshow');
+  const map = { todos: 'todos', disponivel: 'disponivel', em_uso: 'em_uso', bloqueado: 'bloqueado' };
+  if(map[preset]){
+    fshow.value = map[preset];
+    _userTouchedShow = true;
+    window._presetRecente = false;
+  } else if(preset === 'recente'){
+    fshow.value = 'todos';
+    window._presetRecente = true;
+  }
+  document.querySelectorAll('.s-qt-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.preset === preset);
+  });
+  applyFilter();
+}
+
+// Fase C — registrar listeners dos quick tabs
+document.querySelectorAll('.s-qt-btn').forEach(b => {
+  b.onclick = () => setFilterPreset(b.dataset.preset);
+});
+
+function renderGridLoading(n = 24){
+  const grid = document.getElementById('grid');
+  if(!grid) return;
+  grid.innerHTML = Array(n).fill(0).map(() =>
+    '<div class="cc cc-skeleton"><div class="ct"></div><div class="cb"></div></div>'
+  ).join('');
+}
+
+function renderEmptyState(){
+  const empty = document.getElementById('empty');
+  if(!empty) return;
+  const filters = [];
+  if(selUF) filters.push(selUF);
+  [...selTags].forEach(t => filters.push(t));
+  const fshow = document.getElementById('fshow');
+  if(fshow && fshow.value !== 'todos') filters.push(fshow.selectedOptions[0].text);
+
+  const suggestions = [];
+  if(selUF) suggestions.push(`<button class="btn bp" style="font-size:12px;padding:6px 12px" onclick="selUF='';document.getElementById('fuf').value='';applyFilter()">↻ Trocar ${esc(selUF)} por outro estado</button>`);
+  [...selTags].forEach(t => suggestions.push(`<button class="btn bs" style="font-size:12px;padding:6px 12px" onclick="selTags.delete('${esc(t)}');renderTagFilterChips();applyFilter()">✕ Remover ${esc(t)}</button>`));
+  suggestions.push('<button class="btn bs" style="font-size:12px;padding:6px 12px" onclick="clearFilters()">Limpar tudo</button>');
+
+  empty.innerHTML = `
+    <div class="s-empty">
+      <div class="s-empty-ic">🔍</div>
+      <h3>0 casos com esses filtros</h3>
+      <p>Filtros aplicados: <b>${esc(filters.join(' · ')) || 'nenhum'}</b>.<br>Tenta remover algum ou ampliar o escopo.</p>
+      <div class="s-empty-actions">${suggestions.join('')}</div>
+    </div>
+  `;
+}
+
+function setDensity(d){
+  density = d;
+  localStorage.setItem('s-density', d);
+  const grid = document.getElementById('grid');
+  if(grid) grid.classList.remove('s-density-comfort', 's-density-normal', 's-density-compact');
+  if(grid) grid.classList.add('s-density-' + d);
+  document.querySelectorAll('.s-density-toggle button').forEach(b => {
+    b.classList.toggle('active', b.dataset.density === d);
+  });
+}
+
+function setViewMode(v){
+  viewMode = v;
+  localStorage.setItem('s-view', v);
+  const grid = document.getElementById('grid');
+  if(grid) grid.classList.toggle('s-view-list', v === 'list');
+  document.querySelectorAll('.s-view-toggle button').forEach(b => {
+    b.classList.toggle('active', b.dataset.view === v);
+  });
+  const densityEl = document.getElementById('s-density');
+  if(densityEl) densityEl.style.display = v === 'list' ? 'none' : 'inline-flex';
+  renderGrid();
+}
+
+// Fase D — inicializar density e view (listeners + estado inicial)
+document.querySelectorAll('.s-density-toggle button').forEach(b => {
+  b.onclick = () => setDensity(b.dataset.density);
+});
+document.querySelectorAll('.s-view-toggle button').forEach(b => {
+  b.onclick = () => setViewMode(b.dataset.view);
+});
+setDensity(density);
+// setViewMode chamado após primeiro renderGrid para não disparar render vazio
 
 function renderGrid(){
   const grid = document.getElementById('grid'), empty = document.getElementById('empty');
@@ -358,6 +519,30 @@ function renderGrid(){
       tagChips = `<div class="ctags">${shown.map(t => `<span class="ctag">${esc(t)}</span>`).join('')}${more>0 ? `<span class="ctag" style="background:transparent;color:var(--tx3);border:0.5px dashed var(--bds)">+${more}</span>` : ''}</div>`;
     }
 
+    /* ── List view (tabela) ── */
+    if(viewMode === 'list'){
+      const cids  = Array.isArray(c.cidades)  ? c.cidades  : [];
+      const profs = Array.isArray(c.clientes) ? c.clientes : [];
+      const listField = (arr, fmt = v => v, max = 3) => {
+        if(!arr.length) return '<span class="cl-empty">—</span>';
+        const chips = arr.slice(0, max).map(v => `<span class="cl-chip">${esc(fmt(v))}</span>`).join('');
+        const rest  = arr.length - max;
+        if(rest <= 0) return chips;
+        const hidden = arr.slice(max).map(v => `<span class="cl-chip">${esc(fmt(v))}</span>`).join('');
+        return `${chips}<button class="cl-more" onclick="event.stopPropagation();this.closest('.cc').classList.toggle('cl-exp')">+${rest}</button><span class="cl-hidden">${hidden}</span>`;
+      };
+      return `<div class="cc${isSel?' sel':''}${isBlocked?' blocked':''}" id="card-${c.id}" onclick="${selMode ? `toggleCardSel('${c.id}',event)` : `openModal('${c.id}')`}">
+        ${selMode ? `<div class="csel csel-list">${isSel?'✓':''}</div>` : ''}
+        <div class="ct" id="ct-${c.id}">${innerHtml}</div>
+        <div class="cl-id"><span class="ci">${c.id}</span></div>
+        <div class="cl-status"><span class="badge ${cls}">${lbl}</span></div>
+        <div class="cl-field">${listField(realUfs)}</div>
+        <div class="cl-field">${listField(cids, cap)}</div>
+        <div class="cl-field">${listField(profs)}</div>
+        <div class="cl-field">${tags.length ? tags.slice(0,3).map(t=>`<span class="ctag">${esc(t)}</span>`).join('')+(tags.length>3?`<span class="ctag cl-tag-more">+${tags.length-3}</span>`:'') : '<span class="cl-empty">—</span>'}</div>
+      </div>`;
+    }
+
     return `<div class="cc${isSel?' sel':''}${isBlocked?' blocked':''}" id="card-${c.id}" style="position:relative" onclick="${selMode ? `toggleCardSel('${c.id}',event)` : `openModal('${c.id}')`}" title="${isBlocked && c.motivo_bloqueio ? 'Motivo: '+esc(c.motivo_bloqueio) : ''}">
       ${selMode ? `<div class="csel">${isSel?'✓':''}</div>` : ''}
       <div class="ct" id="ct-${c.id}">${innerHtml}</div>
@@ -369,6 +554,14 @@ function renderGrid(){
       </div>
     </div>`;
   }).join('');
+
+  /* Header da tabela no modo lista */
+  if(viewMode === 'list'){
+    grid.innerHTML = `<div class="cl-header">
+      <div></div><div>ID</div><div>Status</div>
+      <div>Estados</div><div>Cidades</div><div>Profissionais</div><div>Tags</div>
+    </div>` + grid.innerHTML;
+  }
 
   renderPager(Math.ceil(filtered.length / PER));
   lazyLoadThumbs(slice);

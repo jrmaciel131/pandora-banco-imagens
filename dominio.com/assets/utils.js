@@ -34,11 +34,41 @@ async function api(action, data = {}, method = 'GET'){
   return resp.json();
 }
 
-function showToast(msg){
+/* showToast(msg) — string simples, 3 s
+   showToast(msg, { undoLabel, onUndo }) — com botão desfazer, 8 s */
+function showToast(msg, opts = {}){
   const t = document.getElementById('toast');
-  t.textContent = msg;
+  clearTimeout(t._tid);
+  const duration = opts.onUndo ? 8000 : 3000;
+  if(opts.onUndo){
+    t.innerHTML = `<span class="s-toast-msg">${esc(String(msg))}</span>
+      <button class="s-toast-undo" onclick="_toastUndo()">${esc(opts.undoLabel || 'Desfazer')}</button>
+      <div class="s-toast-bar"></div>`;
+    t._onUndo = opts.onUndo;
+    const bar = t.querySelector('.s-toast-bar');
+    if(bar){
+      bar.style.transition = 'none';
+      bar.style.width = '100%';
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        bar.style.transition = `width ${duration}ms linear`;
+        bar.style.width = '0%';
+      }));
+    }
+  } else {
+    t.innerHTML = `<span class="s-toast-msg">${esc(String(msg))}</span>`;
+    t._onUndo = null;
+  }
   t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'), 3000);
+  t._tid = setTimeout(() => { t.classList.remove('show'); t._onUndo = null; }, duration);
+}
+
+function _toastUndo(){
+  const t = document.getElementById('toast');
+  clearTimeout(t._tid);
+  t.classList.remove('show');
+  const fn = t._onUndo;
+  t._onUndo = null;
+  if(fn) fn();
 }
 
 function showConfirm(title, desc, changes, onOk){

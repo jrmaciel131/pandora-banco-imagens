@@ -473,3 +473,79 @@ function onBulkProf(t){
   if(t === 'ba') buildProfAC('bapro', 'baprodd', 'baprosug');
   else           buildProfAC('bipro', 'biprodd', 'biprosug');
 }
+
+/* ── Aplicar tag em massa ─────────────────────────────────── */
+function openBulkTag(){
+  if(!selIds.size){ showToast('Selecione ao menos 1 caso.'); return; }
+  const info = document.getElementById('bt-info');
+  if(info) info.textContent = `Aplicar tag em ${selIds.size} caso(s) selecionado(s).`;
+  const inp = document.getElementById('bt-inp');
+  if(inp){ inp.value = ''; }
+  const dd = document.getElementById('bt-dd');
+  if(dd){ dd.innerHTML = ''; dd.classList.remove('open'); }
+  const errEl = document.getElementById('bt-err');
+  if(errEl) errEl.textContent = '';
+  document.getElementById('btv').classList.add('open');
+  /* Pré-popula lista de tags canônicas */
+  onBulkTagInput();
+}
+
+function onBulkTagInput(){
+  const inp = document.getElementById('bt-inp');
+  const dd  = document.getElementById('bt-dd');
+  if(!inp || !dd) return;
+  const q = inp.value.trim().toUpperCase();
+  const list = typeof canonicalTags !== 'undefined' ? canonicalTags : [];
+  const matches = list.filter(t => !q || t.includes(q));
+  dd.innerHTML = matches.slice(0, 30).map(t =>
+    `<div class="ddi" onclick="document.getElementById('bt-inp').value='${esc(t)}';document.getElementById('bt-dd').classList.remove('open')">${esc(t)}</div>`
+  ).join('') || `<div class="ddi" style="color:var(--tx3);pointer-events:none">Nenhuma tag encontrada</div>`;
+  dd.classList.toggle('open', matches.length > 0 || q.length > 0);
+}
+
+async function submitBulkTag(){
+  const inp   = document.getElementById('bt-inp');
+  const errEl = document.getElementById('bt-err');
+  const tag   = inp ? inp.value.trim().toUpperCase() : '';
+  if(!tag){ errEl.textContent = 'Digite ou selecione uma tag.'; return; }
+  if(!selIds.size){ errEl.textContent = 'Nenhum caso selecionado.'; return; }
+  errEl.textContent = '';
+
+  const ids   = [...selIds];
+  const total = ids.length;
+  const btnEl = document.getElementById('bt-submit');
+  if(btnEl){ btnEl.disabled = true; btnEl.textContent = `Aplicando em ${total}…`; }
+
+  try{
+    /* Uma única chamada — backend lê a planilha 1× e grava as N linhas. */
+    const r = await api('bulk_add_tag', {ids: ids.join(','), tag}, 'POST');
+    if(btnEl){ btnEl.disabled = false; btnEl.textContent = 'Aplicar em todos'; }
+    document.getElementById('btv').classList.remove('open');
+
+    if(!r.ok){ showToast('Erro: ' + (r.error || 'falha ao aplicar tag')); return; }
+
+    /* Atualização local — evita reload completo da base. */
+    const applied = r.applied || [];
+    applied.forEach(id => {
+      const c = casos.find(x => x.id === id);
+      if(c){
+        if(!Array.isArray(c.tags)) c.tags = [];
+        if(!c.tags.includes(tag)) c.tags.push(tag);
+      }
+    });
+    if(typeof applyFilter === 'function') applyFilter();
+
+    const okN   = applied.length;
+    const skipN = (r.skipped || []).length;
+    const errN  = (r.errors  || []).length;
+    if(errN){
+      showToast(`Tag "${tag}": ${okN} aplicada(s)${skipN?`, ${skipN} já tinha(m)`:''}, ${errN} erro(s)`);
+    } else {
+      showToast(`✅ Tag "${tag}" em ${okN} caso(s)${skipN?` (${skipN} já tinha)`:''}!`);
+      clearSel();
+    }
+  } catch(e){
+    if(btnEl){ btnEl.disabled = false; btnEl.textContent = 'Aplicar em todos'; }
+    showToast('Erro de conexão: ' + e.message);
+  }
+}

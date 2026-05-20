@@ -1,11 +1,22 @@
+<?php
+/* Cache busting automático — gera ?v= baseado na data de modificação do arquivo.
+   Sem tocar em nada: sempre que um .css ou .js é salvo no servidor, o hash muda
+   automaticamente e o browser baixa a versão nova. */
+function v($f){ $p = __DIR__.'/'.$f; return $f.'?v='.(file_exists($p) ? filemtime($p) : '0'); }
+?>
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Banco de Imagens</title>
-<link rel="stylesheet" href="assets/theme.css?v=25">
-<link rel="stylesheet" href="assets/app.css?v=25">
+<!-- Google Fonts (Inter + JetBrains Mono) — pré-conectar pra acelerar -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="<?php echo v('assets/theme.css'); ?>">
+<link rel="stylesheet" href="<?php echo v('assets/app.css'); ?>">
 </head>
 <body>
 
@@ -43,7 +54,7 @@
 <div id="as">
 
   <div class="topbar">
-    <div class="tb-brand">Banco de imagens <span class="vbadge">v21</span> <span id="tb-base-badge" style="display:none;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--accent);color:#fff;margin-left:4px"></span></div>
+    <div class="tb-brand">Banco de imagens <span class="vbadge">v22</span> <span id="tb-base-badge" style="display:none;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--accent);color:#fff;margin-left:4px"></span></div>
     <div class="tb-spacer"></div>
 
     <div class="tb-user">
@@ -98,80 +109,148 @@
   <div class="main">
 
     <div id="view-main" class="view active">
-
-      <div id="dp">
-        <div class="dh" onclick="runDiag()">
-          <div style="font-size:14px;font-weight:600">🔧 Diagnóstico de conexão</div>
-          <span id="ds" style="font-size:12px;color:var(--tx2)">Clique para testar</span>
-        </div>
-        <div class="db" id="db" style="display:none"></div>
+      <div id="s-sticky-stats" class="s-sticky-stats" style="display:none">
+        <span class="s-ss-dot"></span>
+        <b id="s-ss-disp">—</b><span> disponíveis</span>
+        <span class="s-ss-sep"></span>
+        <b id="s-ss-sel">0</b><span> selecionados</span>
+        <span class="s-ss-sep"></span>
+        <span id="s-ss-filters" class="s-ss-filters">—</span>
       </div>
 
-      <div class="fc">
-        <div class="ft">
-          <span class="tl">Validar por:</span>
-          <button class="toggle-mode active" id="te" onclick="setMode('estado')">Estado</button>
-          <button class="toggle-mode" id="tc" onclick="setMode('cidade')">Cidade</button>
-          <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-            <button class="btn bs" id="btn-clf" style="padding:5px 10px;font-size:12px;display:none" onclick="clearFilters()">✕ Limpar filtros</button>
-            <button class="btn bs" id="btn-selall" style="padding:5px 10px;font-size:12px" onclick="toggleSelAll()">☑ Sel. todos</button>
-            <button class="btn bs" id="btn-sel" style="padding:5px 10px;font-size:12px" onclick="toggleSel()">☑ Selecionar</button>
-            <button class="btn bs" style="padding:5px 10px;font-size:12px" onclick="openBulkModal()">📋 Por ID</button>
-          </div>
-        </div>
-        <div class="frow">
-          <div class="fw">
-            <label>Estado</label>
-            <select id="fuf" onchange="onUFChange()"><option value="">Todos os estados</option></select>
-          </div>
-          <div class="fw" id="cw" style="display:none">
-            <label>Cidade</label>
-            <div class="ddw"><input type="text" id="fci" placeholder="Pesquise a cidade..." oninput="onCityInput()" onfocus="openCityDD()" autocomplete="off"><div class="dd" id="cdd"></div></div>
-          </div>
-          <div class="fw">
-            <label>Profissional</label>
-            <div class="ddw"><input type="text" id="fpro" placeholder="Nome do profissional..." oninput="onProfSearch()" onfocus="openProfDD()" autocomplete="off"><div class="dd" id="prodd"></div></div>
-          </div>
-          <div class="fw" style="max-width:140px">
-            <label>Exibir</label>
-            <select id="fshow" onchange="onShowFilterChange()">
-              <option value="todos">Todos</option>
-              <option value="disponivel" selected>Disponíveis</option>
-              <option value="em_uso">Em uso</option>
-              <option value="bloqueado">Bloqueados</option>
-            </select>
-          </div>
-        </div>
-        <div style="margin-top:.65rem;padding-top:.65rem;border-top:0.5px solid var(--bd);display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
-          <div class="fw" style="flex:2;min-width:200px">
-            <label>Tags (categorias)</label>
-            <div class="ddw"><input type="text" id="ftag" placeholder="Adicione tags para filtrar (ex: RINO, BOTOX)..." oninput="onTagFilterInput()" onfocus="openTagFilterDD()" autocomplete="off"><div class="dd" id="ftagdd"></div></div>
+      <div class="s-layout">
+
+        <!-- Rail vertical de filtros -->
+        <aside class="s-rail" id="filters-rail">
+          <button class="s-rail-close" aria-label="Fechar filtros" onclick="document.getElementById('filters-rail').classList.remove('s-open')">×</button>
+
+          <section class="s-rail-section">
+            <h3>Estado</h3>
+            <div class="fw">
+              <select id="fuf" onchange="onUFChange()"><option value="">Todos os estados</option></select>
+            </div>
+          </section>
+
+          <section class="s-rail-section" id="cw" style="display:none">
+            <h3>Cidade</h3>
+            <div class="fw">
+              <div class="ddw">
+                <input type="text" id="fci" placeholder="Pesquise a cidade..." oninput="onCityInput()" onfocus="openCityDD()" autocomplete="off">
+                <div class="dd" id="cdd"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="s-rail-section">
+            <h3>Profissional</h3>
+            <div class="fw">
+              <div class="ddw">
+                <input type="text" id="fpro" placeholder="Nome do profissional..." oninput="onProfSearch()" onfocus="openProfDD()" autocomplete="off">
+                <div class="dd" id="prodd"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="s-rail-section" style="display:none">
+            <h3>Status</h3>
+            <div class="fw">
+              <select id="fshow" onchange="onShowFilterChange()">
+                <option value="todos">Todos</option>
+                <option value="disponivel" selected>Disponíveis</option>
+                <option value="em_uso">Em uso</option>
+                <option value="bloqueado">Bloqueados</option>
+              </select>
+            </div>
+          </section>
+
+          <section class="s-rail-section">
+            <h3>Tags</h3>
+            <div class="fw">
+              <div class="ddw">
+                <input type="text" id="ftag" placeholder="Adicione tags para filtrar..." oninput="onTagFilterInput()" onfocus="openTagFilterDD()" autocomplete="off">
+                <div class="dd" id="ftagdd"></div>
+              </div>
+            </div>
             <div id="ftag-chips" style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px"></div>
+          </section>
+
+          <section class="s-rail-section">
+            <h3>IDs específicos</h3>
+            <div class="fw">
+              <input type="text" id="fids" placeholder="244, 255, 834…" oninput="applyFilter()" autocomplete="off">
+            </div>
+          </section>
+
+          <section class="s-rail-section s-rail-actions">
+            <button class="btn bs" id="btn-clf" style="display:none" onclick="clearFilters()">✕ Limpar filtros</button>
+          </section>
+        </aside>
+
+        <!-- Main content -->
+        <main class="s-main">
+          <div id="dp">
+            <div class="dh" onclick="runDiag()">
+              <div style="font-size:14px;font-weight:600">🔧 Diagnóstico de conexão</div>
+              <span id="ds" style="font-size:12px;color:var(--tx2)">Clique para testar</span>
+            </div>
+            <div class="db" id="db" style="display:none"></div>
           </div>
-          <div class="fw" style="flex:2;min-width:200px">
-            <label>Filtrar por IDs específicos</label>
-            <input type="text" id="fids" placeholder="Ex: 244, 255, 834 — separados por vírgula" oninput="applyFilter()" autocomplete="off">
+
+          <div class="s-content-head">
+            <div>
+              <h1 class="s-page-title">Banco de imagens</h1>
+            </div>
+            <div style="flex:1"></div>
+            <div class="s-density-toggle" id="s-density">
+              <button data-density="comfort" title="Confortável">⊞</button>
+              <button data-density="normal" class="active" title="Denso">▦</button>
+              <button data-density="compact" title="Compacto">▤</button>
+            </div>
+            <div class="s-view-toggle" id="s-view-toggle">
+              <button data-view="grid" class="active" title="Grid">▦</button>
+              <button data-view="list" title="Lista">☰</button>
+            </div>
+            <button class="btn bs" id="btn-mobile-filters">Filtros</button>
+            <div class="s-sel-group">
+              <button class="btn bs" id="btn-sel" onclick="toggleSel()">Selecionar</button>
+              <button class="btn bs" id="btn-selall" onclick="toggleSelAll()">Todos</button>
+            </div>
           </div>
-          <button class="btn bs" style="padding:7px 12px;font-size:12px;flex-shrink:0" onclick="document.getElementById('fids').value='';selTags.clear();renderTagFilterChips();applyFilter()">✕</button>
-        </div>
-      </div>
 
-      <div class="stats">
-        <div class="stat"><div class="sn" id="st">—</div><div class="sl">Total</div></div>
-        <div class="stat"><div class="sn" id="sd" style="color:var(--gtx)">—</div><div class="sl">Disponíveis</div></div>
-        <div class="stat"><div class="sn" id="su" style="color:var(--rtx)">—</div><div class="sl">Em uso</div></div>
-      </div>
+          <div id="s-quick-tabs" class="s-quick-tabs">
+            <button class="s-qt-btn" data-preset="todos">Todos <span class="s-qt-count" id="qt-c-todos">—</span></button>
+            <button class="s-qt-btn active" data-preset="disponivel">Disponíveis <span class="s-qt-count" id="qt-c-disp">—</span></button>
+            <button class="s-qt-btn" data-preset="em_uso">Em uso <span class="s-qt-count" id="qt-c-uso">—</span></button>
+            <button class="s-qt-btn" data-preset="bloqueado">Bloqueados <span class="s-qt-count" id="qt-c-bloq">—</span></button>
+            <span class="s-qt-sep"></span>
+            <button class="s-qt-btn" data-preset="recente">Recém-adicionados <span class="s-qt-count" id="qt-c-rec">—</span></button>
+          </div>
 
-      <div id="bb">
-        <div style="font-size:13px;font-weight:600;color:var(--btx);flex:1" id="bc">0 selecionados</div>
-        <button class="btn bp" style="padding:6px 13px;font-size:12px" onclick="openBulkApply()">Registrar uso nos selecionados</button>
-        <button class="btn bs" style="padding:6px 13px;font-size:12px" onclick="downloadBulkZip()" title="Até 30 casos por download">📦 Baixar (ZIP)</button>
-        <button class="btn bs" style="padding:6px 13px;font-size:12px" onclick="clearSel()">Limpar seleção</button>
-      </div>
+          <div class="stats">
+            <div class="stat"><div class="sn" id="st">—</div><div class="sl">Total</div></div>
+            <div class="stat"><div class="sn" id="sd" style="color:var(--gtx)">—</div><div class="sl">Disponíveis</div></div>
+            <div class="stat"><div class="sn" id="su" style="color:var(--rtx)">—</div><div class="sl">Em uso</div></div>
+          </div>
 
-      <div class="cg" id="grid"></div>
-      <div class="empty" id="empty" style="display:none">Nenhum caso encontrado.</div>
-      <div class="pager" id="pager"></div>
+          <div id="s-active-filters" class="s-active-filters" style="display:none">
+            <span class="s-af-label">Filtros ativos</span>
+            <div id="s-af-chips"></div>
+            <button class="s-af-clear" onclick="clearFilters()">✕ Limpar tudo</button>
+          </div>
+
+          <div id="bb">
+            <div style="font-size:13px;font-weight:600;flex:1" id="bc">0 selecionados</div>
+            <button class="btn bp" style="padding:6px 13px;font-size:12px" onclick="openBulkApply()">Registrar uso nos selecionados</button>
+            <button class="btn bs" style="padding:6px 13px;font-size:12px" onclick="openBulkTag()">🏷 Aplicar tag</button>
+            <button class="btn bs" style="padding:6px 13px;font-size:12px" onclick="downloadBulkZip()" title="Até 30 casos por download">📦 Baixar (ZIP)</button>
+            <button class="btn bs" style="padding:6px 13px;font-size:12px" onclick="clearSel()">Limpar seleção</button>
+          </div>
+
+          <div class="cg" id="grid"></div>
+          <div class="empty" id="empty" style="display:none">Nenhum caso encontrado.</div>
+          <div class="pager" id="pager"></div>
+        </main>
+      </div>
     </div>
 
     <div id="view-hist" class="view">
@@ -195,6 +274,9 @@
         <h2 style="font-size:18px;font-weight:700;flex:1">⚡ Admin Mode <span style="font-size:12px;font-weight:400;color:var(--tx2);margin-left:6px">Acesso restrito a administradores</span></h2>
         <button class="btn bs" style="padding:6px 12px;font-size:12px" onclick="showView('main')">← Voltar</button>
       </div>
+
+      <!-- G: Audit dashboard always-on -->
+      <div id="s-audit-dash" class="s-audit-dash" style="display:none;margin-bottom:1rem"></div>
 
       <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);margin-bottom:1rem;box-shadow:var(--shadow-sm)">
         <div class="dh" onclick="runDiag('admin')">
@@ -220,6 +302,14 @@
           Usuários novos começam em <b style="color:#92400e">🧪 Modo teste</b> — só veem a base sandbox para aprender o sistema.
           Quando estiverem prontos, clique em <b>"Promover p/ produção"</b> para liberar acesso às bases reais (PH e PO).
         </p>
+        <!-- G: Bulk bar de usuários -->
+        <div id="s-users-bulk-bar" class="s-users-bulk-bar" style="display:none">
+          <span class="s-ub-count"></span>
+          <button class="btn bp" style="padding:5px 12px;font-size:12px" onclick="bulkSetProdAccess(true)">Promover p/ produção</button>
+          <button class="btn bs" style="padding:5px 12px;font-size:12px" onclick="bulkSetProdAccess(false)">Voltar p/ teste</button>
+          <button class="btn bd-r" style="padding:5px 12px;font-size:12px" onclick="bulkRemoveUsers()">Remover</button>
+          <button class="btn bs" style="padding:5px 12px;font-size:12px" onclick="_checkedUsers.clear();updateUserBulkBar();document.querySelectorAll('.s-user-cb').forEach(c=>c.checked=false)">Limpar</button>
+        </div>
         <div id="users-list" style="margin-bottom:1rem"></div>
         <div style="background:var(--bg);border-radius:var(--rs);padding:1rem;border:1px solid var(--bd);margin-top:.75rem">
           <h4 style="font-size:13px;font-weight:600;margin-bottom:.75rem">➕ Adicionar usuário</h4>
@@ -340,59 +430,91 @@
         <div style="font-size:10px;color:var(--tx2);font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px">Painel do caso</div>
         <div class="mt" id="mid"></div>
       </div>
-      <button class="mx" onclick="closeModal()">×</button>
+      <div style="display:flex;align-items:center;gap:4px">
+        <button class="s-modal-nav" id="s-modal-prev" onclick="modalNavStep(-1)" title="Anterior (←)">‹</button>
+        <span class="s-modal-pos" id="s-modal-pos"></span>
+        <button class="s-modal-nav" id="s-modal-next" onclick="modalNavStep(1)" title="Próximo (→)">›</button>
+        <button class="mx" onclick="closeModal()">×</button>
+      </div>
     </div>
     <div class="painel-status" id="painel-status"></div>
     <div id="block-banner-wrap"></div>
-    <div class="painel-section">
-      <div class="ps-title">Tags (categorias)</div>
-      <div class="tag-editor" id="tag-editor"></div>
+    <div class="s-modal-tabs" id="s-modal-tabs">
+      <button class="s-mt-btn active" data-tab="overview">Visão geral</button>
+      <button class="s-mt-btn" data-tab="photos">Conteúdos <span class="s-mt-count" id="mt-photos-count">—</span></button>
+      <button class="s-mt-btn" data-tab="history">Histórico <span class="s-mt-count" id="mt-history-count">—</span></button>
+      <button class="s-mt-btn" data-tab="block">Bloqueio</button>
     </div>
-    <div class="mb">
-      <div class="is">
-        <div class="it">Estados em uso</div>
-        <div class="chips" id="mufs"></div>
+
+    <!-- Panel: Visão geral -->
+    <div class="s-modal-panel" data-panel="overview">
+      <div class="painel-section">
+        <div class="ps-title">Tags (categorias)</div>
+        <div class="tag-editor" id="tag-editor"></div>
       </div>
-      <div class="is">
-        <div class="it">Cidades em uso</div>
-        <div class="chips" id="mcities"></div>
-      </div>
-      <div class="is">
-        <div class="it">Profissionais</div>
-        <div class="chips" id="mpers"></div>
-      </div>
-      <div class="is" id="remove-uso-section" style="display:none">
-        <div class="it">Remover uso</div>
-        <div id="remove-uso-list"></div>
-      </div>
-    </div>
-    <div class="painel-photos">
-      <h4>Fotos / Vídeos</h4>
-      <div id="mps"><div style="padding:.5rem 0;font-size:12px;color:var(--tx2)"><span class="spin"></span> Carregando fotos...</div></div>
-    </div>
-    <div class="af" id="addform" style="display:none">
-      <h4>Registrar novo(s) uso(s)</h4>
-      <div id="pending-usos-list" style="display:none;margin-bottom:.65rem"></div>
-      <div class="fg">
-        <div class="ff"><label>Estado (UF)</label><select id="auf" onchange="onAddUF()"><option value="">Selecione...</option></select></div>
-        <div class="ff"><label>Cidade</label>
-          <div class="ddw"><input type="text" id="aci" placeholder="Selecione estado primeiro..." readonly oninput="onAddCityInp()" onfocus="openAddCityDD()" autocomplete="off" data-val=""><div class="dd" id="acdd"></div></div>
+      <div class="mb">
+        <div class="is">
+          <div class="it">Estados em uso</div>
+          <div class="chips" id="mufs"></div>
+        </div>
+        <div class="is">
+          <div class="it">Cidades em uso</div>
+          <div class="chips" id="mcities"></div>
+        </div>
+        <div class="is">
+          <div class="it">Profissionais</div>
+          <div class="chips" id="mpers"></div>
+        </div>
+        <div class="is" id="remove-uso-section" style="display:none">
+          <div class="it">Remover uso</div>
+          <div id="remove-uso-list"></div>
         </div>
       </div>
-      <div class="fg full">
-        <div class="ff"><label>Profissional</label>
-          <div class="ddw"><input type="text" id="apro" placeholder="Nome completo..." oninput="onAddProf()" autocomplete="off"><div class="dd" id="aprodd"></div></div>
-          <div class="psug" id="prosug"></div>
+      <div id="s-register-preview" class="s-register-preview" style="display:none"></div>
+      <div class="af" id="addform" style="display:none">
+        <h4>Registrar novo(s) uso(s)</h4>
+        <div id="pending-usos-list" style="display:none;margin-bottom:.65rem"></div>
+        <div class="fg">
+          <div class="ff"><label>Estado (UF)</label><select id="auf" onchange="onAddUF()"><option value="">Selecione...</option></select></div>
+          <div class="ff"><label>Cidade</label>
+            <div class="ddw"><input type="text" id="aci" placeholder="Selecione estado primeiro..." readonly oninput="onAddCityInp()" onfocus="openAddCityDD()" autocomplete="off" data-val=""><div class="dd" id="acdd"></div></div>
+          </div>
         </div>
+        <div class="fg full">
+          <div class="ff"><label>Profissional</label>
+            <div class="ddw"><input type="text" id="apro" placeholder="Nome completo..." oninput="onAddProf()" autocomplete="off"><div class="dd" id="aprodd"></div></div>
+            <div class="psug" id="prosug"></div>
+          </div>
+        </div>
+        <div class="warn-box" id="state-warn"></div>
+        <div style="display:flex;gap:8px;margin-top:.5rem;flex-wrap:wrap">
+          <button class="btn bs" type="button" onclick="addPendingUso()" style="padding:8px 14px" title="Adiciona esta linha à lista e limpa o formulário pra você cadastrar mais uma">+ Adicionar mais um</button>
+          <button class="btn bp" style="flex:1;justify-content:center" id="abtn" onclick="prepareConfirm('add')">Registrar uso</button>
+          <button class="btn bs" onclick="cancelAddForm()">Cancelar</button>
+        </div>
+        <div class="err" id="aerr"></div>
       </div>
-      <div class="warn-box" id="state-warn"></div>
-      <div style="display:flex;gap:8px;margin-top:.5rem;flex-wrap:wrap">
-        <button class="btn bs" type="button" onclick="addPendingUso()" style="padding:8px 14px" title="Adiciona esta linha à lista e limpa o formulário pra você cadastrar mais uma">+ Adicionar mais um</button>
-        <button class="btn bp" style="flex:1;justify-content:center" id="abtn" onclick="prepareConfirm('add')">Registrar uso</button>
-        <button class="btn bs" onclick="cancelAddForm()">Cancelar</button>
-      </div>
-      <div class="err" id="aerr"></div>
     </div>
+
+    <!-- Panel: Fotos -->
+    <div class="s-modal-panel" data-panel="photos" style="display:none">
+      <div class="painel-photos">
+        <h4>Fotos / Vídeos</h4>
+        <div id="mps"><div style="padding:.5rem 0;font-size:12px;color:var(--tx2)"><span class="spin"></span> Carregando fotos...</div></div>
+      </div>
+    </div>
+
+    <!-- Panel: Histórico -->
+    <div class="s-modal-panel" data-panel="history" style="display:none">
+      <div id="s-timeline-overview" class="s-timeline-overview"></div>
+      <div id="s-timeline-full" class="s-timeline-full"></div>
+    </div>
+
+    <!-- Panel: Bloqueio -->
+    <div class="s-modal-panel" data-panel="block" style="display:none">
+      <div id="s-block-panel" class="s-block-panel-content" style="padding:1rem 1.6rem"></div>
+    </div>
+
     <div class="ma" id="mact" style="flex-wrap:wrap"></div>
   </div>
 </div>
@@ -406,6 +528,28 @@
     <div class="ma">
       <button class="btn bp" style="flex:1;justify-content:center" id="confirm-ok-btn">Confirmar</button>
       <button class="btn bs" onclick="document.getElementById('confirm-modal').classList.remove('open')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Aplicar tag em massa -->
+<div class="ov" id="btv" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal" style="max-width:400px">
+    <div class="mh"><div class="mt">🏷 Aplicar tag em massa</div><button class="mx" onclick="this.closest('.ov').classList.remove('open')">×</button></div>
+    <div style="padding:1.5rem">
+      <p id="bt-info" style="font-size:13px;color:var(--tx2);margin-bottom:1rem"></p>
+      <div class="fw">
+        <label>Tag a aplicar</label>
+        <div class="ddw">
+          <input type="text" id="bt-inp" placeholder="Pesquise ou selecione uma tag..." oninput="onBulkTagInput()" onfocus="onBulkTagInput()" autocomplete="off">
+          <div class="dd" id="bt-dd"></div>
+        </div>
+      </div>
+      <div class="err" id="bt-err" style="margin-top:.5rem"></div>
+      <div style="display:flex;gap:8px;margin-top:1.25rem">
+        <button class="btn bp" id="bt-submit" style="flex:1;justify-content:center" onclick="submitBulkTag()">Aplicar em todos</button>
+        <button class="btn bs" onclick="this.closest('.ov').classList.remove('open')">Cancelar</button>
+      </div>
     </div>
   </div>
 </div>
@@ -477,16 +621,38 @@
   </div>
 </div>
 
+<!-- Overlay de atalhos de teclado (? para abrir) -->
+<div id="s-shortcuts" class="s-shortcuts" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+  <div class="s-sh-box">
+    <div class="s-sh-head">
+      <span>Atalhos de teclado</span>
+      <button onclick="document.getElementById('s-shortcuts').style.display='none'">×</button>
+    </div>
+    <div class="s-sh-body">
+      <div class="s-sh-group">
+        <div class="s-sh-row"><kbd>?</kbd><span>Mostrar / ocultar atalhos</span></div>
+        <div class="s-sh-row"><kbd>Esc</kbd><span>Fechar painel ou overlay</span></div>
+      </div>
+      <div class="s-sh-sep"></div>
+      <div class="s-sh-group">
+        <div class="s-sh-label">Dentro do painel do caso</div>
+        <div class="s-sh-row"><kbd>←</kbd> <kbd>k</kbd><span>Caso anterior</span></div>
+        <div class="s-sh-row"><kbd>→</kbd> <kbd>j</kbd><span>Próximo caso</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <!-- A ordem dos scripts é significativa: utils define globais usados pelos demais. -->
-<script src="assets/utils.js?v=25"></script>
-<script src="assets/theme.js?v=25"></script>
-<script src="assets/casos.js?v=25"></script>
-<script src="assets/panel.js?v=25"></script>
-<script src="assets/bulk.js?v=25"></script>
-<script src="assets/admin.js?v=25"></script>
-<script src="assets/auth.js?v=25"></script>
-<script src="assets/app.js?v=25"></script>
+<script src="<?php echo v('assets/utils.js'); ?>"></script>
+<script src="<?php echo v('assets/theme.js'); ?>"></script>
+<script src="<?php echo v('assets/casos.js'); ?>"></script>
+<script src="<?php echo v('assets/panel.js'); ?>"></script>
+<script src="<?php echo v('assets/bulk.js'); ?>"></script>
+<script src="<?php echo v('assets/admin.js'); ?>"></script>
+<script src="<?php echo v('assets/auth.js'); ?>"></script>
+<script src="<?php echo v('assets/app.js'); ?>"></script>
 </body>
 </html>

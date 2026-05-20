@@ -1,0 +1,2 @@
+# Placeholder — esta pasta recebe os arquivos de sessão do PHP em runtime.
+# Permissão recomendada no servidor: chmod 700 private-config/sessions

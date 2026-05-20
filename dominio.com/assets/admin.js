@@ -2,6 +2,7 @@
 
 let adminModeVisible = false;
 let thumbSourceMode = 'auto';
+let _checkedUsers = new Set();
 
 function showView(n){
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -72,6 +73,9 @@ function setThumbSourceHighlight(src){
 }
 
 async function loadAdminPanel(){
+  _checkedUsers.clear();
+  updateUserBulkBar();
+  renderAuditDash();
   loadCanonicalTagsPanel();
   loadDistanceConfig();
   loadCoringas();
@@ -83,6 +87,7 @@ async function loadAdminPanel(){
     sel.innerHTML = '';
     lst.innerHTML = r.users.map(u => {
       const isAdminRow = u.role === 'admin';
+      const uid = esc(u.user);
       const prodBadge = isAdminRow
         ? '<span class="badge bok" title="Admins têm acesso a todas as bases por padrão">🌐 todas as bases</span>'
         : (u.prod_access
@@ -91,16 +96,20 @@ async function loadAdminPanel(){
       const promoteBtn = isAdminRow
         ? ''
         : (u.prod_access
-            ? `<button class="btn bs" style="padding:3px 9px;font-size:11px;border-color:#f59e0b;color:#92400e" onclick="setProdAccess('${esc(u.user)}', false)">Voltar p/ teste</button>`
-            : `<button class="btn bp" style="padding:3px 9px;font-size:11px" onclick="setProdAccess('${esc(u.user)}', true)">Promover p/ produção</button>`);
+            ? `<button class="btn bs" style="padding:3px 9px;font-size:11px;border-color:#f59e0b;color:#92400e" onclick="setProdAccess('${uid}', false)">Voltar p/ teste</button>`
+            : `<button class="btn bp" style="padding:3px 9px;font-size:11px" onclick="setProdAccess('${uid}', true)">Promover p/ produção</button>`);
+      const cb = !isAdminRow
+        ? `<input type="checkbox" class="s-user-cb" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex-shrink:0" onchange="onUserCheckChange('${uid}',this.checked)">`
+        : `<span style="width:15px;display:inline-block;flex-shrink:0"></span>`;
       return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--bd);flex-wrap:wrap">
-        <span style="font-weight:600;min-width:110px">${esc(u.user)}</span>
+        ${cb}
+        <span style="font-weight:600;min-width:110px">${uid}</span>
         <span class="badge ${isAdminRow?'bused':'bok'}">${isAdminRow?'👑 admin':'usuário'}</span>
         ${prodBadge}
         <span style="font-size:11px;color:var(--tx3);flex:1;min-width:140px">${u.last_login ? ('último login: '+new Date(u.last_login.replace(' ','T')).toLocaleString('pt-BR')) : 'Nunca acessou'}</span>
         <span style="font-size:11px;color:var(--btx)">${u.changes_30d||0} alt. (30d)</span>
         ${promoteBtn}
-        ${!isAdminRow ? `<button class="btn-revert" style="border-color:var(--rtx);color:var(--rtx);padding:3px 9px;font-size:11px" onclick="confirmRemoveUser('${esc(u.user)}')">Remover</button>` : ''}
+        ${!isAdminRow ? `<button class="btn-revert" style="border-color:var(--rtx);color:var(--rtx);padding:3px 9px;font-size:11px" onclick="confirmRemoveUser('${uid}')">Remover</button>` : ''}
       </div>`;
     }).join('');
     r.users.filter(u => u.role !== 'admin').forEach(u => sel.appendChild(new Option(u.user, u.user)));
@@ -1035,6 +1044,86 @@ function confirmRemoveCanonicalTag(tag){
 }
 
 function toggleDiag(){ document.getElementById('dp').classList.toggle('open'); }
+
+/* ── Phase G: Audit dashboard (always-on, from casos array) ── */
+function renderAuditDash(){
+  const el = document.getElementById('s-audit-dash');
+  if(!el) return;
+  if(typeof casos === 'undefined' || !casos.length){ el.style.display = 'none'; return; }
+  const total     = casos.length;
+  const blocked   = casos.filter(c => !!c.bloqueado).length;
+  const inUse     = casos.filter(c => !c.bloqueado && (c.ufs||[]).some(u => typeof isBlockMarker === 'function' ? !isBlockMarker(u) : true)).length;
+  const available = total - blocked - inUse;
+  const noTag     = casos.filter(c => !c.bloqueado && (!c.tags || !c.tags.length)).length;
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div class="s-ad-head">
+      <span class="s-ad-title">Resumo da base ativa</span>
+      <span class="s-ad-sub">Calculado às ${new Date().toLocaleTimeString('pt-BR')}</span>
+    </div>
+    <div class="s-ad-grid">
+      ${_adCard('Total', total, 'var(--tx)')}
+      ${_adCard('Disponíveis', available, 'var(--gtx)')}
+      ${_adCard('Em uso', inUse, 'var(--rtx)')}
+      ${_adCard('Bloqueados', blocked, 'var(--tx3)')}
+      ${_adCard('Sem tag', noTag, noTag > 0 ? 'var(--atx)' : 'var(--tx3)')}
+    </div>`;
+}
+
+function _adCard(label, value, color){
+  return `<div class="s-ad-card">
+    <div class="s-ad-num" style="color:${color}">${value}</div>
+    <div class="s-ad-label">${esc(label)}</div>
+  </div>`;
+}
+
+/* ── Phase G: Bulk user actions ── */
+function onUserCheckChange(user, checked){
+  if(checked) _checkedUsers.add(user);
+  else        _checkedUsers.delete(user);
+  updateUserBulkBar();
+}
+
+function updateUserBulkBar(){
+  const bar = document.getElementById('s-users-bulk-bar');
+  if(!bar) return;
+  const n = _checkedUsers.size;
+  bar.style.display = n > 0 ? 'flex' : 'none';
+  const lbl = bar.querySelector('.s-ub-count');
+  if(lbl) lbl.textContent = `${n} usuário${n > 1 ? 's' : ''} selecionado${n > 1 ? 's' : ''}`;
+}
+
+function bulkSetProdAccess(allow){
+  if(!_checkedUsers.size) return;
+  const users = [..._checkedUsers];
+  const title = allow ? 'Promover para produção' : 'Voltar para modo teste';
+  showConfirm(title, `Aplicar para ${users.length} usuário(s)?`,
+    users.map(u => ({label:'Usuário', val:u})),
+    async () => {
+      for(const u of users)
+        await api('set_production_access', {target_user:u, allow:allow?'1':'0'}, 'POST').catch(()=>{});
+      showToast(`${users.length} usuário(s) atualizados.`);
+      _checkedUsers.clear();
+      loadAdminPanel();
+    }
+  );
+}
+
+function bulkRemoveUsers(){
+  if(!_checkedUsers.size) return;
+  const users = [..._checkedUsers];
+  showConfirm('Remover usuários em lote',
+    `Remover permanentemente ${users.length} usuário(s)? Esta ação não pode ser desfeita.`,
+    users.map(u => ({label:'Usuário', val:u})),
+    async () => {
+      for(const u of users)
+        await api('remove_user', {target_user:u}, 'POST').catch(()=>{});
+      showToast(`${users.length} usuário(s) removidos.`);
+      _checkedUsers.clear();
+      loadAdminPanel();
+    }
+  );
+}
 
 async function runDiag(panel = 'admin'){
   const dbId = panel === 'admin' ? 'db-admin' : 'db';

@@ -3,6 +3,7 @@
 
 let currentCaso = null;
 let pendingForce = false;
+let _modalActiveTab = 'overview';
 let pendingRemovals = {ufs:[], cidades:[], clientes:[]};
 let pendingUsos = [];
 let currentPhotos = [];
@@ -27,6 +28,10 @@ async function openModal(id){
   document.getElementById('apro').value = '';
   document.getElementById('prosug').style.display = 'none';
 
+  _modalActiveTab = 'overview';
+  switchModalTab('overview');
+  updateModalNav();
+
   document.getElementById('mid').textContent = currentCaso.id;
   renderPainelStatus();
   renderBlockBanner();
@@ -42,6 +47,8 @@ async function openModal(id){
     const r = await api(`photos&id=${encodeURIComponent(id)}`);
     if(!r.photos?.length){ sec.innerHTML = '<div style="padding:.5rem 0;font-size:12px;color:var(--tx3)">Nenhuma foto/vídeo no Drive.</div>'; return; }
     currentPhotos = r.photos;
+    const pCount = document.getElementById('mt-photos-count');
+    if(pCount) pCount.textContent = r.photos.length;
     sec.innerHTML = '<div class="photo-grid" id="photo-grid"></div>';
     const grid = document.getElementById('photo-grid');
     grid.innerHTML = r.photos.map((p, i) => {
@@ -392,6 +399,104 @@ async function removeItem(tipo, valor, idx){
 
 function closeModal(){ document.getElementById('ov').classList.remove('open'); currentCaso = null; }
 function ovClick(e){ if(e.target === document.getElementById('ov')) closeModal(); }
+
+/* ── Phase E: Modal tabs ── */
+function switchModalTab(tab){
+  _modalActiveTab = tab;
+  document.querySelectorAll('#s-modal-tabs .s-mt-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === tab)
+  );
+  document.querySelectorAll('.s-modal-panel').forEach(p =>
+    p.style.display = (p.dataset.panel === tab) ? 'block' : 'none'
+  );
+  if(tab === 'history' && currentCaso) renderModalTimeline(currentCaso.id);
+  if(tab === 'block'   && currentCaso) renderBlockPanel();
+}
+
+/* ── Phase E: ←/→ navigation ── */
+function modalNavStep(dir){
+  if(!currentCaso || typeof filtered === 'undefined') return;
+  const idx = filtered.findIndex(c => c.id === currentCaso.id);
+  if(idx < 0) return;
+  const next = filtered[idx + dir];
+  if(next) openModal(next.id);
+}
+
+function updateModalNav(){
+  if(typeof filtered === 'undefined') return;
+  const idx = currentCaso ? filtered.findIndex(c => c.id === currentCaso.id) : -1;
+  const prev = document.getElementById('s-modal-prev');
+  const next = document.getElementById('s-modal-next');
+  const pos  = document.getElementById('s-modal-pos');
+  if(prev) prev.disabled = idx <= 0;
+  if(next) next.disabled = idx < 0 || idx >= filtered.length - 1;
+  if(pos)  pos.textContent = idx >= 0 ? `${idx + 1}/${filtered.length}` : '';
+}
+
+/* ── Phase E: Timeline (histórico) ── */
+async function renderModalTimeline(casoId){
+  const overview = document.getElementById('s-timeline-overview');
+  const full     = document.getElementById('s-timeline-full');
+  if(!overview || !full) return;
+  overview.innerHTML = '<div style="padding:.5rem 0;font-size:12px;color:var(--tx2)"><span class="spin"></span> Carregando histórico...</div>';
+  full.innerHTML = '';
+  try{
+    const r = await api(`history&id=${encodeURIComponent(casoId)}`);
+    const entries = r.entries || r.log || [];
+    if(!entries.length){
+      overview.innerHTML = '<div style="padding:.5rem 0;font-size:12px;color:var(--tx3)">Sem histórico registrado.</div>';
+      return;
+    }
+    const hCount = document.getElementById('mt-history-count');
+    if(hCount) hCount.textContent = entries.length;
+    overview.innerHTML = entries.slice(0, 8).map(e => renderTlEntry(e)).join('');
+    if(entries.length > 8)
+      full.innerHTML = `<div style="font-size:11px;color:var(--tx3);padding:.5rem 0;border-top:1px solid var(--bd)">${entries.length - 8} entradas anteriores não exibidas nesta visualização.</div>`;
+  } catch(e){
+    overview.innerHTML = '<div style="padding:.5rem 0;font-size:12px;color:var(--tx3)">Histórico indisponível.</div>';
+  }
+}
+
+function renderTlEntry(e){
+  const type = (e.acao || e.tipo || 'add').toLowerCase();
+  const dotCls = (type.includes('rm') || type.includes('remov')) ? 'rm'
+               : (type.includes('blk') || type.includes('block'))  ? 'blk'
+               : 'add';
+  const what = esc(e.descricao || e.label || e.acao || type);
+  const meta  = [e.usuario || e.user, e.data || e.ts].filter(Boolean).map(esc).join(' · ');
+  return `<div class="s-tl-entry">
+    <div class="s-tl-dot ${dotCls}"></div>
+    <div class="s-tl-body">
+      <div class="s-tl-what">${what}</div>
+      ${meta ? `<div class="s-tl-meta">${meta}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+/* ── Phase E: Block panel (tab Bloqueio) ── */
+function renderBlockPanel(){
+  const c  = currentCaso;
+  const el = document.getElementById('s-block-panel');
+  if(!el || !c) return;
+  const isAdmin = typeof userRole !== 'undefined' && userRole === 'admin';
+  if(c.bloqueado){
+    const motivo = esc(c.motivo_bloqueio || '(sem motivo registrado — bloqueio antigo)');
+    el.innerHTML = `<div class="block-banner"><div class="ic">🔒</div><div class="reason"><b>Caso bloqueado</b>${motivo}</div></div>
+      <div style="margin-top:.75rem">
+        ${isAdmin
+          ? `<button class="btn bp" style="background:#fbbf24;color:#1f1f1f" onclick="confirmUnblockCaso()">🔓 Desbloquear caso</button>`
+          : `<span style="font-size:13px;color:var(--tx3)">Apenas administradores podem desbloquear.</span>`}
+      </div>`;
+  } else {
+    el.innerHTML = `<div style="margin-bottom:.75rem;font-size:13px;color:var(--tx2)">Este caso não está bloqueado.</div>
+      <button class="btn bd-r" onclick="confirmBlockCaso()">🔒 Bloquear este caso</button>`;
+  }
+}
+
+/* Init tab click listeners (scripts load at body-end — DOM already ready) */
+document.getElementById('s-modal-tabs')?.querySelectorAll('.s-mt-btn').forEach(btn =>
+  btn.addEventListener('click', () => switchModalTab(btn.dataset.tab))
+);
 function openLB(u){ document.getElementById('lbi').src = u; document.getElementById('lb').classList.add('open'); }
 
 /* loadIBGE: assíncrono e não bloqueia o filtro principal. readOnly é aplicado

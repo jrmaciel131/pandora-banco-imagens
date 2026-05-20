@@ -1,0 +1,9 @@
+Options -Indexes
+
+# As bibliotecas db.php e google.php foram MOVIDAS para fora do document root
+# (private-config/lib/). Os stubs que ficaram em /api/ retornam 410 Gone.
+# A regra abaixo é uma camada extra: bloqueia qualquer .php em /api/ que NÃO seja
+# um endpoint público (handler.php ou cron.php).
+<FilesMatch "^(?!handler\.php$|cron\.php$).+\.php$">
+    Require all denied
+</FilesMatch>
