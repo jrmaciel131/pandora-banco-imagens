@@ -19,7 +19,7 @@ async function initApp(preloadedCasos = null, preloadedProfs = null){
 
 checkSessionOnLoad();
 
-// Fase F — atalhos de teclado globais
+// — atalhos de teclado globais
 document.addEventListener('keydown', e => {
   const tag = document.activeElement?.tagName;
   const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
@@ -47,7 +47,7 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// Fase B — mobile filter drawer
+// — mobile filter drawer
 document.getElementById('btn-mobile-filters')?.addEventListener('click', () =>
   document.getElementById('filters-rail').classList.toggle('s-open')
 );
@@ -55,7 +55,7 @@ document.querySelector('.s-rail-close')?.addEventListener('click', () =>
   document.getElementById('filters-rail').classList.remove('s-open')
 );
 
-// Fase D — sticky stats ao rolar
+// — sticky stats ao rolar
 window.addEventListener('scroll', () => {
   const ss = document.getElementById('s-sticky-stats');
   if(!ss) return;

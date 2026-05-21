@@ -283,6 +283,59 @@ class GoogleAPI {
     }
 
     /**
+     * Lista todos os IDs de caso (prefixo CASO + número) presentes nos NOMES
+     * dos arquivos no Drive — varre a pasta-raiz e subpastas, com paginação.
+     * Usado pela sincronização Drive↔planilha (Solução 1).
+     *
+     * @return string[] IDs na grafia encontrada (ex.: CASO-001), únicos e ordenados por número.
+     */
+    public function listDriveCaseIds(): array {
+        $tok = $this->getToken();
+        $folderIds = $this->getAllFolderIds();
+        $found = [];  // numero => "CASO-XXX" (primeira grafia encontrada)
+        foreach (array_chunk($folderIds, 30) as $chunk) {
+            $parents = implode(' or ', array_map(fn($id)=>"'$id' in parents", $chunk));
+            $pageToken = '';
+            do {
+                $q = urlencode("($parents) and name contains 'CASO' and trashed=false");
+                $url = "https://www.googleapis.com/drive/v3/files?q=$q&fields=nextPageToken,files(name)&pageSize=1000";
+                if ($pageToken !== '') $url .= "&pageToken=".urlencode($pageToken);
+                $resp = hget($url, ["Authorization: Bearer $tok"]);
+                if (!$resp) break;
+                $d = json_decode($resp, true);
+                if (isset($d['error'])) throw new Exception('Drive (sync): '.($d['error']['message']??''));
+                foreach (($d['files'] ?? []) as $f) {
+                    if (preg_match('/^CASO[-_ ]?(\d+)/i', $f['name'] ?? '', $m)) {
+                        $num = (int)$m[1];
+                        if (!isset($found[$num])) $found[$num] = 'CASO-'.$m[1]; // preserva grafia (zeros à esquerda)
+                    }
+                }
+                $pageToken = $d['nextPageToken'] ?? '';
+            } while ($pageToken !== '');
+        }
+        ksort($found, SORT_NUMERIC);
+        return array_values($found);
+    }
+
+    /**
+     * Adiciona uma nova linha de caso na planilha com apenas o ID na coluna B
+     * (demais colunas vazias). Usa values:append do Sheets. Usado pela sync.
+     */
+    public function appendCaso(string $id): void {
+        $tok = $this->getToken();
+        $range = urlencode($this->sheetName.'!A:G');
+        $url = "https://sheets.googleapis.com/v4/spreadsheets/".$this->spreadsheetId."/values/$range:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS";
+        $body = json_encode(['values'=>[['', $id, '', '', '', '', '']]]);
+        $hdrs = ["Authorization: Bearer $tok","Content-Type: application/json"];
+        $resp = null;
+        for ($i=1; $i<=3; $i++) { $resp = hpost($url, $body, $hdrs); if ($resp !== null) break; if ($i<3) sleep($i); }
+        if (!$resp) throw new Exception('Sem resposta do Sheets ao adicionar linha.');
+        $d = json_decode($resp, true);
+        if (isset($d['error'])) throw new Exception('Erro ao adicionar linha: '.($d['error']['message']??json_encode($d['error'])));
+        DB::clearSheetCache();
+    }
+
+    /**
      * Lista as fotos associadas a um caso, com geração de thumbnails locais.
      *
      * Considera arquivos cujo nome se inicia pelo `caso_id` em qualquer
@@ -296,8 +349,16 @@ class GoogleAPI {
         if (!$force) {
             $cached=DB::getThumbCache($caso_id);
             if ($cached!==null) {
-                $valid=array_filter($cached,fn($p)=>empty($p['local_thumb'])||file_exists($this->thumbDir.'/'.$p['local_thumb']));
-                if (count($valid)===count($cached)) return $cached;
+                if (!empty($cached)) {
+                    // Cache COM fotos: valida thumbs locais e reusa pelo TTL cheio.
+                    $valid=array_filter($cached,fn($p)=>empty($p['local_thumb'])||file_exists($this->thumbDir.'/'.$p['local_thumb']));
+                    if (count($valid)===count($cached)) return $cached;
+                } else {
+                    // Cache VAZIO: só reusa se checado nos últimos 5 min. Senão re-busca
+                    // no Drive — resolve fotos adicionadas após um open vazio, sem precisar
+                    // limpar cache manualmente (THUMB_CACHE_TTL é de 30 dias).
+                    if (DB::getThumbCache($caso_id, 300) !== null) return [];
+                }
             }
         }
         $tok=$this->getToken();

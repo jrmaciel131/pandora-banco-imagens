@@ -109,12 +109,15 @@ class DB {
      * Retorna o JSON decodificado das thumbnails do caso quando ainda
      * dentro do TTL de cache; caso contrário retorna null.
      */
-    public static function getThumbCache(string $id): ?array {
+    public static function getThumbCache(string $id, ?int $ttl = null): ?array {
+        // $ttl permite checar a idade do cache com uma janela menor que o TTL
+        // padrão (usado para revalidar resultados VAZIOS sem esperar os 30 dias).
+        $ttl = $ttl ?? (int)THUMB_CACHE_TTL;
         $st = self::get()->prepare(
             "SELECT photos_json FROM ".self::t('thumb_cache')."
              WHERE caso_id=? AND updated_at > DATE_SUB(NOW(), INTERVAL ? SECOND)"
         );
-        $st->execute([$id, (int)THUMB_CACHE_TTL]);
+        $st->execute([$id, $ttl]);
         $r = $st->fetch();
         return $r ? json_decode($r['photos_json'], true) : null;
     }

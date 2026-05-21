@@ -1225,6 +1225,60 @@ switch ($action) {
         } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
         break;
 
+    // Sincronização Drive↔planilha — PREVIEW (admin). Cruza os IDs de caso
+    // encontrados nos NOMES dos arquivos do Drive com as linhas da planilha.
+    // Compara por número (ignora zeros à esquerda) pra não duplicar.
+    case 'sync_preview':
+        requireAdmin($isAdmin);
+        try {
+            $driveIds = $api->listDriveCaseIds();
+            DB::clearSheetCache();
+            $casos    = $api->getCasos(true);
+            $numOf    = fn($id) => (int)preg_replace('/\D/', '', $id);
+            $sheetNums = [];  foreach ($casos as $c)     $sheetNums[$numOf($c['id'])] = $c['id'];
+            $driveNums = [];  foreach ($driveIds as $did) $driveNums[$numOf($did)]    = $did;
+            $driveOnly = [];  foreach ($driveNums as $n => $did) if (!isset($sheetNums[$n])) $driveOnly[] = $did;
+            $sheetOnly = [];  foreach ($sheetNums as $n => $sid) if (!isset($driveNums[$n])) $sheetOnly[] = $sid;
+            sort($driveOnly); sort($sheetOnly);
+            echo json_encode([
+                'ok'          => true,
+                'drive_only'  => $driveOnly,   // no Drive, faltando na planilha → criar linha
+                'sheet_only'  => $sheetOnly,   // na planilha, sem arquivos → pendente de fotos
+                'drive_total' => count($driveNums),
+                'sheet_total' => count($sheetNums),
+            ]);
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+        break;
+
+    // Sincronização Drive↔planilha — APPLY (admin). Cria linhas (só o ID na
+    // coluna B) para os IDs informados que ainda não existem na planilha.
+    case 'sync_apply':
+        requireAdmin($isAdmin);
+        $ids = array_values(array_filter(array_map(
+            fn($s) => preg_replace('/[^A-Z0-9\-]/', '', strtoupper(trim($s))),
+            explode(',', $_POST['ids'] ?? '')
+        )));
+        if (empty($ids)) { echo json_encode(['ok'=>false,'error'=>'Nenhum ID informado.']); break; }
+        try {
+            DB::clearSheetCache();
+            $casos    = $api->getCasos(true);
+            $existing = [];
+            foreach ($casos as $c) $existing[(int)preg_replace('/\D/', '', $c['id'])] = true;
+            $created = []; $skipped = []; $errors = [];
+            foreach ($ids as $id) {
+                $n = (int)preg_replace('/\D/', '', $id);
+                if (!$n)               { $errors[] = "{$id}: ID sem número"; continue; }
+                if (isset($existing[$n])) { $skipped[] = $id; continue; }
+                try {
+                    $api->appendCaso($id);
+                    DB::log($me, $id, 'sync_create_row', [], ['id'=>$id]);
+                    $created[] = $id; $existing[$n] = true;
+                } catch (Throwable $e) { $errors[] = "{$id}: ".$e->getMessage(); }
+            }
+            echo json_encode(['ok'=>true, 'created'=>$created, 'skipped'=>$skipped, 'errors'=>$errors]);
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+        break;
+
     // Reverte um caso para um estado anterior identificado pelo histórico de auditoria (admin).
     case 'revert_caso':
         requireAdmin($isAdmin);

@@ -482,6 +482,84 @@ function switchAuditBase(baseKey){
   renderAuditReport();
 }
 
+/* ===== Sincronização Drive ↔ planilha ===== */
+let _syncDriveOnly = [];
+
+async function runSyncPreview(){
+  const box = document.getElementById('sync-result');
+  const btn = document.getElementById('sync-check-btn');
+  box.style.display = 'block';
+  box.innerHTML = '<div style="padding:1rem;color:var(--tx2)"><span class="spin"></span> Varrendo o Drive e cruzando com a planilha — pode demorar...</div>';
+  if(btn) btn.disabled = true;
+  try{
+    const r = await api('sync_preview');
+    if(btn) btn.disabled = false;
+    if(!r.ok){ box.innerHTML = `<div style="color:var(--rtx)">Erro: ${esc(r.error||'')}</div>`; return; }
+    _syncDriveOnly = r.drive_only || [];
+    renderSyncResult(r);
+  } catch(e){
+    if(btn) btn.disabled = false;
+    box.innerHTML = `<div style="color:var(--rtx)">Erro de conexão: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderSyncResult(r){
+  const box = document.getElementById('sync-result');
+  const driveOnly = r.drive_only || [];
+  const sheetOnly = r.sheet_only || [];
+  const chip = (id, bg, tx) => `<span style="padding:2px 8px;background:${bg};color:${tx};border-radius:10px;font-size:11px;font-family:var(--font-mono)">${esc(id)}</span>`;
+
+  let html = `<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:1rem">
+    <span>📁 Drive: <b>${r.drive_total||0}</b> casos</span>
+    <span>📋 Planilha: <b>${r.sheet_total||0}</b> casos</span>
+  </div>`;
+
+  // Drive sem linha → criar
+  html += `<div style="margin-bottom:1rem">
+    <div style="font-weight:700;margin-bottom:.4rem;color:${driveOnly.length?'var(--atx)':'var(--gtx)'}">
+      ${driveOnly.length ? `⚠ ${driveOnly.length} caso(s) no Drive sem linha na planilha` : '✅ Nenhum caso órfão no Drive'}
+    </div>`;
+  if(driveOnly.length){
+    html += `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:.6rem;max-height:140px;overflow:auto">
+      ${driveOnly.map(id => chip(id, 'var(--abg)', 'var(--atx)')).join('')}</div>
+      <button class="btn bp" style="padding:6px 13px;font-size:12px" onclick="applySyncCreate()">Criar ${driveOnly.length} linha(s) na planilha</button>`;
+  }
+  html += `</div>`;
+
+  // Planilha sem fotos → pendente
+  html += `<div>
+    <div style="font-weight:700;margin-bottom:.4rem;color:${sheetOnly.length?'var(--rtx)':'var(--gtx)'}">
+      ${sheetOnly.length ? `⚠ ${sheetOnly.length} caso(s) na planilha sem nenhum arquivo (pendente de fotos)` : '✅ Toda linha tem arquivos'}
+    </div>`;
+  if(sheetOnly.length){
+    html += `<div style="display:flex;flex-wrap:wrap;gap:4px;max-height:140px;overflow:auto">
+      ${sheetOnly.map(id => chip(id, 'var(--rbg)', 'var(--rtx)')).join('')}</div>`;
+  }
+  html += `</div>`;
+
+  box.innerHTML = html;
+}
+
+async function applySyncCreate(){
+  if(!_syncDriveOnly.length) return;
+  if(!confirm(`Criar ${_syncDriveOnly.length} linha(s) na planilha (só o ID, demais colunas vazias)?`)) return;
+  const box = document.getElementById('sync-result');
+  box.innerHTML = '<div style="padding:1rem;color:var(--tx2)"><span class="spin"></span> Criando linhas na planilha...</div>';
+  try{
+    const r = await api('sync_apply', {ids: _syncDriveOnly.join(',')}, 'POST');
+    if(!r.ok){ box.innerHTML = `<div style="color:var(--rtx)">Erro: ${esc(r.error||'')}</div>`; return; }
+    const created = (r.created||[]).length, skipped = (r.skipped||[]).length, errors = (r.errors||[]).length;
+    let msg = `<div style="color:var(--gtx);font-weight:700;margin-bottom:.5rem">✅ ${created} linha(s) criada(s).</div>`;
+    if(skipped) msg += `<div style="color:var(--tx2);font-size:12px">${skipped} já existia(m).</div>`;
+    if(errors)  msg += `<div style="color:var(--rtx);font-size:12px;margin-top:.4rem">Erros (${errors}):<br>${(r.errors||[]).map(e=>esc(e)).join('<br>')}</div>`;
+    msg += `<div style="margin-top:.75rem"><button class="btn bs" style="padding:6px 13px;font-size:12px" onclick="runSyncPreview()">Verificar de novo</button></div>`;
+    box.innerHTML = msg;
+    if(typeof loadCasos === 'function') loadCasos(true);
+  } catch(e){
+    box.innerHTML = `<div style="color:var(--rtx)">Erro de conexão: ${esc(e.message)}</div>`;
+  }
+}
+
 /* Conta as ocorrências por base em todas as 4 categorias.
    Devolve um objeto { baseKey: count } com a contagem total por base. */
 function auditCountsByBase(report){

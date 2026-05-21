@@ -400,7 +400,7 @@ function setFilterPreset(preset){
   applyFilter();
 }
 
-// Fase C — registrar listeners dos quick tabs
+// — registrar listeners dos quick tabs
 document.querySelectorAll('.s-qt-btn').forEach(b => {
   b.onclick = () => setFilterPreset(b.dataset.preset);
 });
@@ -461,7 +461,7 @@ function setViewMode(v){
   renderGrid();
 }
 
-// Fase D — inicializar density e view (listeners + estado inicial)
+// — inicializar density e view (listeners + estado inicial)
 document.querySelectorAll('.s-density-toggle button').forEach(b => {
   b.onclick = () => setDensity(b.dataset.density);
 });

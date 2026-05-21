@@ -111,7 +111,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 .cerr { color: var(--rtx); }
 
 /* ─────────────────────────────────────────────────────────────
- *  Filtros (Fase A: mantém horizontal — Fase B mexe na estrutura)
+ *  Filtros (mantém horizontal — mexe na estrutura)
  * ───────────────────────────────────────────────────────────── */
 .fc { background: var(--sf); border: 1px solid var(--bd); border-radius: var(--r); padding: 1.1rem 1.4rem; margin-bottom: 1rem; box-shadow: var(--shadow-sm); }
 .ft { display: flex; gap: 8px; margin-bottom: .9rem; flex-wrap: wrap; align-items: center; }
@@ -427,7 +427,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 }
 
 /* ─────────────────────────────────────────────────────────────
- *  Fase B — Rail vertical de filtros
+ *  — Rail vertical de filtros
  * ───────────────────────────────────────────────────────────── */
 .s-layout { display: grid; grid-template-columns: 232px 1fr; min-height: calc(100vh - 56px); }
 .s-rail {
@@ -473,7 +473,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 }
 
 /* ─────────────────────────────────────────────────────────────
- *  Fase C — Chips de filtros ativos
+ *  — Chips de filtros ativos
  * ───────────────────────────────────────────────────────────── */
 .s-active-filters {
   display: flex; align-items: center; gap: 8px;
@@ -501,7 +501,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 }
 
 /* ─────────────────────────────────────────────────────────────
- *  Fase C — Quick filter tabs
+ *  — Quick filter tabs
  * ───────────────────────────────────────────────────────────── */
 .s-quick-tabs {
   display: inline-flex; gap: 4px;
@@ -533,7 +533,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 .s-qt-sep { width: 1px; align-self: stretch; background: var(--bd); margin: 4px 4px; }
 
 /* ─────────────────────────────────────────────────────────────
- *  Fase D — Density toggle
+ *  — Density toggle
  * ───────────────────────────────────────────────────────────── */
 .s-density-toggle { display: inline-flex; background: var(--sf2); padding: 3px; border-radius: 7px; gap: 2px; }
 .s-density-toggle button {
@@ -555,7 +555,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 .s-sel-group .btn:last-child { border-right: 0; }
 
 /* ─────────────────────────────────────────────────────────────
- *  Fase D — View toggle (grid/lista)
+ *  — View toggle (grid/lista)
  * ───────────────────────────────────────────────────────────── */
 .s-view-toggle { display: inline-flex; background: var(--sf2); padding: 3px; border-radius: 7px; gap: 2px; }
 .s-view-toggle button {
@@ -600,7 +600,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 .csel-list { position: absolute; left: 6px; top: 50%; transform: translateY(-50%); }
 
 /* ─────────────────────────────────────────────────────────────
- *  Fase D — Sticky stats
+ *  — Sticky stats
  * ───────────────────────────────────────────────────────────── */
 .s-sticky-stats {
   position: fixed; top: 70px; left: 50%; transform: translateX(-50%);
@@ -619,7 +619,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 .s-ss-filters { font-family: var(--font-mono); font-size: 11px; color: var(--tx3); }
 
 /* ─────────────────────────────────────────────────────────────
- *  Fase D — Skeleton loading
+ *  — Skeleton loading
  * ───────────────────────────────────────────────────────────── */
 .cc-skeleton {
   background: var(--sf); border: 1px solid var(--bd); border-radius: var(--r);
@@ -639,7 +639,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 @keyframes sk-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.5 } }
 
 /* ─────────────────────────────────────────────────────────────
- *  Fase D — Empty state ilustrado
+ *  — Empty state ilustrado
  * ───────────────────────────────────────────────────────────── */
 .s-empty {
   padding: 60px 24px;
@@ -658,7 +658,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 .s-empty-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 
 /* ─────────────────────────────────────────────────────────────
- *  Fase E — Modal tabs
+ *  — Modal tabs
  * ───────────────────────────────────────────────────────────── */
 .s-modal-tabs {
   display: flex; gap: 2px;
@@ -685,7 +685,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 .s-mt-btn.active .s-mt-count { background: var(--accent-soft); color: var(--accent-ink); }
 
 /* ─────────────────────────────────────────────────────────────
- *  Fase E — Modal nav arrows
+ *  — Modal nav arrows
  * ───────────────────────────────────────────────────────────── */
 .s-modal-nav {
   background: transparent; border: 1px solid var(--bds); border-radius: var(--rs);
@@ -702,7 +702,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 }
 
 /* ─────────────────────────────────────────────────────────────
- *  Fase E — Register preview
+ *  — Register preview
  * ───────────────────────────────────────────────────────────── */
 .s-register-preview {
   margin: 0 1.6rem .75rem;
@@ -722,7 +722,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 }
 
 /* ─────────────────────────────────────────────────────────────
- *  Fase E — Timeline (histórico de uso)
+ *  — Timeline (histórico de uso)
  * ───────────────────────────────────────────────────────────── */
 .s-timeline-overview,
 .s-timeline-full { padding: 1rem 1.6rem; }
@@ -745,7 +745,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 .s-block-panel-content { min-height: 80px; }
 
 /* ─────────────────────────────────────────────────────────────
- *  Fase G — Audit dashboard
+ *  — Audit dashboard
  * ───────────────────────────────────────────────────────────── */
 .s-audit-dash {
   background: var(--sf); border: 1px solid var(--bd); border-radius: var(--r);
@@ -771,7 +771,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 .s-ad-label { font-size: 10px; color: var(--tx3); margin-top: 3px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
 
 /* ─────────────────────────────────────────────────────────────
- *  Fase G — Users bulk bar
+ *  — Users bulk bar
  * ───────────────────────────────────────────────────────────── */
 .s-users-bulk-bar {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -785,7 +785,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 }
 
 /* ─────────────────────────────────────────────────────────────
- *  Fase F — Toast com undo
+ *  — Toast com undo
  * ───────────────────────────────────────────────────────────── */
 .toast { display: flex; align-items: center; gap: 10px; overflow: hidden; position: relative; }
 .toast.show { pointer-events: auto; }
@@ -804,7 +804,7 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 }
 
 /* ─────────────────────────────────────────────────────────────
- *  Fase F — Overlay de atalhos de teclado
+ *  — Overlay de atalhos de teclado
  * ───────────────────────────────────────────────────────────── */
 .s-shortcuts {
   position: fixed; inset: 0;

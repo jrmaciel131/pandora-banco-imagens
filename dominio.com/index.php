@@ -349,6 +349,17 @@ function v($f){ $p = __DIR__.'/'.$f; return $f.'?v='.(file_exists($p) ? filemtim
       </div>
 
       <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:.35rem">🔄 Sincronização Drive ↔ planilha</h3>
+        <p style="font-size:12px;color:var(--tx2);margin-bottom:.85rem;line-height:1.5">
+          Cruza os casos encontrados nos <b>nomes dos arquivos</b> do Drive com as linhas da planilha. Casos que estão no Drive mas faltam na planilha podem ter a linha criada automaticamente (só o ID). Casos na planilha sem nenhum arquivo são listados como pendentes de fotos.
+        </p>
+        <div style="display:flex;gap:8px;margin-bottom:.75rem">
+          <button class="btn bp" style="padding:7px 14px;font-size:13px" id="sync-check-btn" onclick="runSyncPreview()">Verificar sincronização</button>
+        </div>
+        <div id="sync-result" style="display:none;font-size:12px"></div>
+      </div>
+
+      <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)">
         <h3 style="font-size:14px;font-weight:600;margin-bottom:.35rem">📏 Auditoria de distâncias</h3>
         <p style="font-size:12px;color:var(--tx2);margin-bottom:.85rem;line-height:1.5">
           Simula a regra de raio mínimo sobre os casos já existentes: varre todas as bases e aponta pares de cidades no mesmo caso que estão a uma distância em linha reta menor ou igual ao raio configurado.
