@@ -95,6 +95,11 @@ input[type="number"]:focus,input[type="text"]:focus{border-color:var(--text);}
 .logo-mode-tag.custom{background:var(--accent);color:var(--accent-fg);}
 .logo-mode-btn{font-size:9px;font-family:'JetBrains Mono',monospace;font-weight:600;padding:3px 9px;border-radius:5px;border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);cursor:pointer;letter-spacing:.04em;text-transform:uppercase;transition:all .12s;pointer-events:all;}
 .logo-mode-btn:hover{background:var(--bg3);}
+/* WebP CL — toggle de alinhamento */
+.webp-cl-align{display:flex;gap:6px;margin-top:8px;}
+.webp-cl-align button{flex:1;padding:8px 12px;border-radius:7px;border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);font-size:12px;font-family:'Inter',sans-serif;font-weight:600;cursor:pointer;transition:all .12s;}
+.webp-cl-align button:hover{background:var(--bg3);}
+.webp-cl-align button.active{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);}
 /* Format selection chips */
 .fmt-chips-grid{display:flex;flex-wrap:wrap;gap:8px;}
 .fmt-chip{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-family:'JetBrains Mono',monospace;font-weight:600;padding:8px 14px;border-radius:8px;border:0.5px solid var(--border2);cursor:pointer;background:var(--bg2);color:var(--text);transition:all .12s;user-select:none;}
@@ -573,9 +578,33 @@ input[type="number"]:focus,input[type="text"]:focus{border-color:var(--text);}
       </div>
     </div>
 
+    <!-- CAMADA CL (opcional) -->
+    <div class="section">
+      <div class="section-label">02 — Camada CL (opcional)</div>
+      <div class="hint" style="margin-bottom:10px;">Sobrepõe um PNG de cliente em cima de cada foto exportada. Tamanho nativo preservado — sem resize, sem corte. Se a foto e o CL tiverem tamanhos diferentes, o canvas fica do tamanho do maior e a sobra vira fundo transparente.</div>
+      <div class="logos-grid">
+        <div class="logo-box" id="webpClBox">
+          <input type="file" accept="image/png,image/webp" id="webpClInput" onchange="loadWebpCL(this)">
+          <div class="logo-tag cl">CL</div>
+          <div class="logo-status" id="webpClStatus">Camada Cliente<br>clique para subir</div>
+          <div class="logo-optional">opcional · aplicada em todas</div>
+          <div class="logo-mode-row" id="webpClModeRow" style="display:none;">
+            <button class="logo-mode-btn" id="webpClRemoveBtn" onclick="clearWebpCL(event)">remover</button>
+          </div>
+        </div>
+      </div>
+      <div class="field-group" id="webpClAlignRow" style="display:none;margin-top:12px;">
+        <div class="field-label">Alinhamento quando os tamanhos diferem</div>
+        <div class="webp-cl-align">
+          <button id="webpAlignTL" class="active" onclick="setWebpAlign('topleft')">Topo-esquerdo</button>
+          <button id="webpAlignCenter" onclick="setWebpAlign('center')">Centralizado</button>
+        </div>
+      </div>
+    </div>
+
     <!-- UPLOAD -->
     <div class="section">
-      <div class="section-label">02 — Fotos (JPG · PNG · múltiplos arquivos)</div>
+      <div class="section-label">03 — Fotos (JPG · PNG · múltiplos arquivos)</div>
       <div class="webp-drop-zone" id="webpDropZone">
         <input type="file" accept="image/jpeg,image/png,image/gif,image/bmp,image/tiff" multiple id="webpInput" onchange="handleWebpFiles(this.files)">
         <div class="drop-icon">
@@ -1778,6 +1807,45 @@ function switchScreen(name){
 /* ===== WEBP CONVERTER ===== */
 let webpFiles = [];
 
+/* ===== Camada CL na aba WebP (upload separado do banco) ===== */
+let webpCL = null;            // Image do overlay CL, ou null
+let webpCLAlign = 'topleft';  // 'topleft' | 'center'
+
+function loadWebpCL(input){
+  const file = input.files && input.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const im = new Image();
+    im.onload = () => {
+      webpCL = im;
+      document.getElementById('webpClStatus').innerHTML =
+        'CL · ' + file.name + '<br>' + im.naturalWidth + '×' + im.naturalHeight + ' px';
+      document.getElementById('webpClModeRow').style.display = 'flex';
+      document.getElementById('webpClAlignRow').style.display = 'block';
+    };
+    im.onerror = () => showErrToast('Camada CL', 'Não foi possível carregar este arquivo como imagem.');
+    im.src = e.target.result;
+  };
+  reader.onerror = () => showErrToast('Camada CL', 'Falha ao ler o arquivo.');
+  reader.readAsDataURL(file);
+}
+
+function clearWebpCL(ev){
+  if(ev) ev.stopPropagation();
+  webpCL = null;
+  document.getElementById('webpClInput').value = '';
+  document.getElementById('webpClStatus').innerHTML = 'Camada Cliente<br>clique para subir';
+  document.getElementById('webpClModeRow').style.display = 'none';
+  document.getElementById('webpClAlignRow').style.display = 'none';
+}
+
+function setWebpAlign(mode){
+  webpCLAlign = mode;
+  document.getElementById('webpAlignTL').classList.toggle('active', mode === 'topleft');
+  document.getElementById('webpAlignCenter').classList.toggle('active', mode === 'center');
+}
+
 function updateQualityLabel(){
   document.getElementById('webpQualityVal').textContent = document.getElementById('webpQuality').value + '%';
 }
@@ -1868,12 +1936,24 @@ async function convertAllToWebp(){
         reader.readAsDataURL(f.file);
       });
 
-      // Draw at EXACT original dimensions — no resize, no crop
+      // Tamanho nativo — sem resize, sem corte. Com CL, o canvas cresce pro
+      // maior dos dois e a sobra vira fundo transparente.
       const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
+      const cw = webpCL ? Math.max(img.naturalWidth,  webpCL.naturalWidth)  : img.naturalWidth;
+      const ch = webpCL ? Math.max(img.naturalHeight, webpCL.naturalHeight) : img.naturalHeight;
+      canvas.width  = cw;
+      canvas.height = ch;
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
+      // Posiciona cada camada conforme o alinhamento escolhido.
+      const place = el => webpCLAlign === 'center'
+        ? [Math.round((cw - el.naturalWidth) / 2), Math.round((ch - el.naturalHeight) / 2)]
+        : [0, 0];
+      const [ix, iy] = place(img);
+      ctx.drawImage(img, ix, iy);
+      if(webpCL){
+        const [lx, ly] = place(webpCL);
+        ctx.drawImage(webpCL, lx, ly);
+      }
 
       const blob = await new Promise(res=>canvas.toBlob(res, 'image/webp', quality));
       const url = URL.createObjectURL(blob);
