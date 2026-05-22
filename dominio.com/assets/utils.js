@@ -2,6 +2,10 @@
 
 const API = 'api/handler.php';
 
+/* Token CSRF da sessão. Preenchido pela resposta de login/check_session e
+   reenviado no cabeçalho X-CSRF-Token em toda requisição POST. */
+let CSRF_TOKEN = '';
+
 const ESTADOS = [
   {s:'AC',n:'Acre'},{s:'AL',n:'Alagoas'},{s:'AP',n:'Amapá'},{s:'AM',n:'Amazonas'},
   {s:'BA',n:'Bahia'},{s:'CE',n:'Ceará'},{s:'DF',n:'Distrito Federal'},{s:'ES',n:'Espírito Santo'},
@@ -20,7 +24,9 @@ async function api(action, data = {}, method = 'GET'){
   const resp = await fetch(`${API}?action=${action}`, {
     method,
     credentials: 'same-origin',
-    headers: method === 'POST' ? {'Content-Type':'application/x-www-form-urlencoded'} : {},
+    headers: method === 'POST'
+      ? {'Content-Type':'application/x-www-form-urlencoded', 'X-CSRF-Token': CSRF_TOKEN}
+      : {},
     body: method === 'POST' ? new URLSearchParams(data).toString() : undefined
   });
   if(resp.status === 401){
@@ -31,7 +37,9 @@ async function api(action, data = {}, method = 'GET'){
     }
     throw new Error(d?.error || 'Não autenticado');
   }
-  return resp.json();
+  const json = await resp.json();
+  if(json && json.csrf) CSRF_TOKEN = json.csrf;
+  return json;
 }
 
 /* showToast(msg) — string simples, 3 s

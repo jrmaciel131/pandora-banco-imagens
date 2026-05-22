@@ -6,10 +6,10 @@
 <title>Banco de Imagens — Exportador</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<!-- JSZip hospedado localmente (lib/jszip.min.js) — não depende de CDN, funciona
+<!-- Bibliotecas hospedadas localmente (lib/) — não dependem de CDN, funcionam
      mesmo com firewall corporativo bloqueando cdnjs/jsdelivr/unpkg. -->
 <script src="lib/jszip.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
+<script src="lib/lame.min.js"></script>
 <style>
 :root{
   /* Paleta v22 — warm-neutral + deep sea blue (independente, mas mesma identidade) */
@@ -2406,7 +2406,7 @@ function renderAudioOutputs(outputs){
         <div class="audio-out-size">${fmtSize(o.outSize)} · original: ${fmtSize(o.origSize)}</div>
         <div class="size-pred">${renderPctChange(o.origSize, o.outSize)}</div>
       </div>
-      <button class="dl-btn" style="min-width:64px;flex-shrink:0;" onclick="dlSingleAudio(${i})">baixar</button>
+      <button class="dl-btn" style="min-width:64px;width:auto;flex-shrink:0;" onclick="dlSingleAudio(${i})">baixar</button>
     </div>`).join('');
   document.getElementById('audioOutputSection').style.display='block';
 }
@@ -2970,6 +2970,7 @@ let _gifWorkerBlobUrl=null;
 async function getGifWorkerUrl(){
   if(_gifWorkerBlobUrl) return _gifWorkerBlobUrl;
   const candidates = [
+    'lib/gif.worker.js',
     'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js',
     'https://unpkg.com/gif.js@0.2.0/dist/gif.worker.js',
     'https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.worker.js'
@@ -2986,6 +2987,27 @@ async function getGifWorkerUrl(){
     } catch(e){ lastErr=e; }
   }
   throw new Error('Nao foi possivel baixar gif.worker.js: '+(lastErr&&lastErr.message||'sem internet'));
+}
+
+/* Carrega o gif.js priorizando a cópia local (lib/gif.js); CDNs são fallback. */
+async function ensureGifLib(){
+  if(typeof GIF !== 'undefined') return;
+  const srcs = [
+    'lib/gif.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js',
+    'https://unpkg.com/gif.js@0.2.0/dist/gif.js'
+  ];
+  for(const src of srcs){
+    try{
+      await new Promise((res,rej)=>{
+        const s=document.createElement('script');
+        s.src=src; s.onload=res; s.onerror=()=>rej(new Error('fail '+src));
+        document.head.appendChild(s);
+      });
+      if(typeof GIF !== 'undefined') return;
+    } catch(e){ /* tenta o próximo */ }
+  }
+  throw new Error('Falha ao carregar a biblioteca gif.js (local e CDN).');
 }
 
 function updateGifFpsLabel(){
@@ -3030,19 +3052,41 @@ function handleGifVideoFile(file){
   if(!file)return;
   _gifFile=file;
   const video=document.getElementById('gifVideoEl');
-  video.src=URL.createObjectURL(file);
   document.getElementById('gifVideoDzTitle').textContent=file.name;
-  video.onloadedmetadata=()=>{
-    _gifDur=video.duration;
-    _gifStart=0;
-    _gifEnd=Math.min(_gifDur,5);
+
+  function finalize(dur){
+    _gifDur = (isFinite(dur) && dur > 0) ? dur : 0;
+    _gifStart = 0;
+    _gifEnd = _gifDur ? Math.min(_gifDur, 5) : 5;
     document.getElementById('gifStartInput').value=_gifStart.toFixed(1);
     document.getElementById('gifEndInput').value=_gifEnd.toFixed(1);
-    document.getElementById('gifEndInput').max=_gifDur;
-    document.getElementById('gifStartInput').max=_gifDur;
+    document.getElementById('gifEndInput').max=_gifDur||0;
+    document.getElementById('gifStartInput').max=_gifDur||0;
     document.getElementById('gifBuilderWrap').style.display='block';
     updateGifTimeline();
+  }
+
+  video.onerror=()=>{
+    showErrToast('Não foi possível ler este vídeo', 'O navegador não conseguiu decodificar o arquivo. Tente um MP4/WebM padrão.');
   };
+  video.onloadedmetadata=()=>{
+    const dur = video.duration;
+    // Alguns vídeos (ex.: WhatsApp) reportam duração Infinity até um seek forçado.
+    if(!isFinite(dur) || dur <= 0){
+      const onSeek = () => {
+        video.removeEventListener('seeked', onSeek);
+        try { video.currentTime = 0; } catch(_){}
+        finalize(isFinite(video.duration) && video.duration > 0 ? video.duration : 0);
+      };
+      video.addEventListener('seeked', onSeek);
+      try { video.currentTime = 1e7; } catch(_){ finalize(0); }
+      return;
+    }
+    finalize(dur);
+  };
+
+  video.src=URL.createObjectURL(file);
+  video.load();
 }
 
 function updateGifTimeline(){
@@ -3205,15 +3249,7 @@ async function exportGif(){
 
     sm.textContent='Codificando GIF...';
 
-    if(typeof GIF==='undefined'){
-      await new Promise((res,rej)=>{
-        const s=document.createElement('script');
-        s.src='https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js';
-        s.onload=res;
-        s.onerror=()=>rej(new Error('Falha ao carregar a biblioteca gif.js (verifique sua conexao).'));
-        document.head.appendChild(s);
-      });
-    }
+    await ensureGifLib();
 
     const imgEls=await Promise.all(frames.map(src=>new Promise((res,rej)=>{
       const img=new Image();
@@ -3269,8 +3305,10 @@ let _vcFmt=null;
 let _vcFileDuration=0;
 
 const vcFormats=[
-  {fmt:'webm', label:'WebM',    mime:'video/webm;codecs=vp9', mimeAlt:['video/webm;codecs=vp8','video/webm'], hint:'WebM VP9 · formato web otimizado · menor tamanho'},
   {fmt:'mp4',  label:'MP4',     mime:'video/mp4',             mimeAlt:[], hint:'MP4 H.264 · compatível com todos os dispositivos'},
+  {fmt:'mov',  label:'MOV',     mime:'video/quicktime',       mimeAlt:[], hint:'MOV QuickTime (H.264) · padrão Apple/edição'},
+  {fmt:'mkv',  label:'MKV',     mime:'video/x-matroska',      mimeAlt:[], hint:'Matroska · container flexível'},
+  {fmt:'webm', label:'WebM',    mime:'video/webm;codecs=vp9', mimeAlt:['video/webm;codecs=vp8','video/webm'], hint:'WebM VP9 · formato web otimizado · menor tamanho'},
   {fmt:'gif',  label:'GIF',     mime:null,                    mimeAlt:[], hint:'GIF animado · sem áudio · ideal para loops curtos'},
   {fmt:'ogg',  label:'OGG',     mime:'video/ogg;codecs=theora',mimeAlt:['video/ogg'], hint:'OGG Theora · codec livre · boa compatibilidade web'},
   {fmt:'ts',   label:'TS',      mime:'video/mp2t',             mimeAlt:[], hint:'MPEG-2 Transport Stream · compatível com broadcast'},
@@ -3399,6 +3437,13 @@ async function convertVideo(){
       return;
     }
 
+    // Conversão real de container/codec (MP4, MOV, MKV, OGG, TS) via ffmpeg.wasm
+    // local. WebM permanece pelo MediaRecorder (mais leve e rápido).
+    if(_vcFmt !== 'webm'){
+      await convertVideoFFmpeg(_vcFmt, btn, pf, sm, targetW, bitrate);
+      return;
+    }
+
     sm.textContent='Carregando video...';
     const video=document.createElement('video');
     video.src=URL.createObjectURL(_vcFile);
@@ -3476,7 +3521,7 @@ async function convertVideo(){
         '<div class="audio-out-size">'+fmtSize(blob.size)+' - original: '+fmtSize(_vcFile.size)+' - '+outW+'x'+outH+'</div>'+
         '<div class="size-pred">'+renderPctChange(_vcFile.size, blob.size)+'</div>'+
       '</div>'+
-      '<button class="dl-btn" style="min-width:64px;flex-shrink:0;" onclick="dlById(\''+dlId+'\')">baixar</button>'+
+      '<button class="dl-btn" style="min-width:64px;width:auto;flex-shrink:0;" onclick="dlById(\''+dlId+'\')">baixar</button>'+
       '</div>';
     sec.style.display='block';
     btn.disabled=false;
@@ -3489,6 +3534,99 @@ async function convertVideo(){
     btn.disabled=false;
   }
 }
+/* ffmpeg.wasm (single-thread, sem COOP/COEP) hospedado em lib/ffmpeg/.
+   Carregado SOB DEMANDA — só baixa o core (~24MB) na primeira conversão. */
+let _ffmpegInstance = null;
+async function getFFmpeg(sm){
+  if(_ffmpegInstance) return _ffmpegInstance;
+  if(typeof FFmpeg === 'undefined'){
+    await new Promise((res,rej)=>{
+      const s=document.createElement('script');
+      s.src='lib/ffmpeg/ffmpeg.min.js';
+      s.onload=res;
+      s.onerror=()=>rej(new Error('Falha ao carregar ffmpeg.min.js (lib/ffmpeg/).'));
+      document.head.appendChild(s);
+    });
+  }
+  const { createFFmpeg } = FFmpeg;
+  const ff = createFFmpeg({
+    log: false,
+    corePath: new URL('lib/ffmpeg/ffmpeg-core.js', location.href).href,
+  });
+  if(sm) sm.textContent='Carregando o conversor (ffmpeg)... pode demorar na 1ª vez (~24MB).';
+  await ff.load();
+  _ffmpegInstance = ff;
+  return ff;
+}
+
+async function convertVideoFFmpeg(fmt, btn, pf, sm, targetW, bitrate){
+  const ff = await getFFmpeg(sm);
+  const fetchFileFn = FFmpeg.fetchFile;
+
+  let lastRatio = 0;
+  ff.setProgress(({ratio}) => {
+    if(ratio >= 0 && ratio <= 1){
+      lastRatio = ratio;
+      pf.style.width = Math.round(5 + ratio*90) + '%';
+      sm.textContent = 'Convertendo (no seu navegador)... ' + Math.round(ratio*100) + '%';
+    }
+  });
+
+  const inExt  = (_vcFile.name.match(/\.([^.]+)$/) || [,'mp4'])[1].toLowerCase();
+  const inFile = 'input.' + inExt;
+  const outFile = 'output.' + fmt;
+  ff.FS('writeFile', inFile, await fetchFileFn(_vcFile));
+
+  sm.textContent = 'Convertendo para ' + fmt.toUpperCase() + ' (no seu navegador)...';
+  const args = ['-i', inFile];
+  if(targetW > 0) args.push('-vf', 'scale=' + targetW + ':-2');
+  if(fmt === 'mp4' || fmt === 'mov' || fmt === 'mkv'){
+    // H.264 + AAC garante compatibilidade ampla (players, edição, Apple).
+    args.push('-c:v','libx264','-preset','veryfast','-b:v',String(bitrate),'-c:a','aac');
+  } else {
+    args.push('-b:v', String(bitrate));
+  }
+  args.push(outFile);
+
+  // Heartbeat: mostra o tempo decorrido caso o % não avance (alguns vídeos não
+  // reportam progresso), pra não dar a impressão de travado.
+  const t0 = Date.now();
+  const hb = setInterval(() => {
+    const s = Math.round((Date.now() - t0) / 1000);
+    if(lastRatio < 0.01) sm.textContent = 'Convertendo (no seu navegador)... ' + s + 's — vídeos grandes podem levar alguns minutos.';
+  }, 1000);
+  try {
+    await ff.run(...args);
+  } finally {
+    clearInterval(hb);
+  }
+
+  const data = ff.FS('readFile', outFile);
+  try { ff.FS('unlink', inFile); ff.FS('unlink', outFile); } catch(_){}
+
+  const mimeMap = {mp4:'video/mp4',mov:'video/quicktime',mkv:'video/x-matroska',ogg:'video/ogg',ts:'video/mp2t'};
+  const blob = new Blob([data.buffer], {type: mimeMap[fmt] || 'application/octet-stream'});
+  pf.style.width = '100%';
+  sm.textContent = 'Conversao concluida - ' + fmtSize(blob.size);
+
+  const outName = _vcFile.name.replace(/\.[^.]+$/,'') + '.' + fmt;
+  const url = URL.createObjectURL(blob);
+  const dlId = registerDownload(outName, blob, url);
+  window._lastVcOutput = { name: outName, blob, url, id: dlId };
+  const sec = document.getElementById('vcOutputSection');
+  sec.innerHTML = '<div class="audio-out-item">'+
+    '<div class="audio-icon"><svg viewBox="0 0 14 14" fill="none"><rect x="1" y="2" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M4.5 5l5 2.5-5 2.5V5z" fill="currentColor" opacity=".8"/></svg></div>'+
+    '<div class="audio-out-info">'+
+      '<div class="audio-out-name">'+outName.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</div>'+
+      '<div class="audio-out-size">'+fmtSize(blob.size)+' - original: '+fmtSize(_vcFile.size)+'</div>'+
+      '<div class="size-pred">'+renderPctChange(_vcFile.size, blob.size)+'</div>'+
+    '</div>'+
+    '<button class="dl-btn" style="min-width:64px;width:auto;flex-shrink:0;" onclick="dlById(\''+dlId+'\')">baixar</button>'+
+    '</div>';
+  sec.style.display = 'block';
+  btn.disabled = false;
+}
+
 async function convertVideoToGifFull(btn,pf,sm,targetW,bitrate){
   try {
     const fps=12;
@@ -3527,15 +3665,7 @@ async function convertVideoToGifFull(btn,pf,sm,targetW,bitrate){
     video.src='';
     sm.textContent='Codificando GIF...';
 
-    if(typeof GIF==='undefined'){
-      await new Promise((res,rej)=>{
-        const s=document.createElement('script');
-        s.src='https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js';
-        s.onload=res;
-        s.onerror=()=>rej(new Error('Falha ao carregar a biblioteca gif.js'));
-        document.head.appendChild(s);
-      });
-    }
+    await ensureGifLib();
     const imgs=await Promise.all(frames.map(src=>new Promise((res,rej)=>{
       const i=new Image(); i.onload=()=>res(i); i.onerror=()=>rej(new Error('Falha ao carregar frame.')); i.src=src;
     })));
@@ -3560,7 +3690,7 @@ async function convertVideoToGifFull(btn,pf,sm,targetW,bitrate){
           '<div class="audio-out-size">'+fmtSize(blob.size)+' - '+outW+'x'+outH+' - '+fps+'fps</div>'+
           '<div class="size-pred">'+renderPctChange(_vcFile.size, blob.size)+'</div>'+
         '</div>'+
-        '<button class="dl-btn" style="min-width:64px;flex-shrink:0;" onclick="dlById(\''+dlId+'\')">baixar</button>'+
+        '<button class="dl-btn" style="min-width:64px;width:auto;flex-shrink:0;" onclick="dlById(\''+dlId+'\')">baixar</button>'+
         '</div>';
       sec.style.display='block';
       btn.disabled=false;

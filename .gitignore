@@ -7,11 +7,16 @@
 # ───────────────────────────────────────────────────────────
 
 # ── Segredos e credenciais (NUNCA versionar) ──────────────
+# secrets.local.php guarda DB_PASS, CRON_KEY e as chaves do Turnstile.
+# Aqui no repositório há apenas um MODELO sanitizado (placeholders).
+private-config/secrets.local.php
 private-config/google-credentials.json
 private-config/passwords.json
 private-config/users_override.json
 private-config/.token_cache.json
 private-config/production_users.json
+private-config/presence.json
+private-config/presence.json.lock
 
 # Atenção: o config.php ENTRA no repositório, MAS já está
 # sanitizado (com placeholders "dado x aqui"). Se você

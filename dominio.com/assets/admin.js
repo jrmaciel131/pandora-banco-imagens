@@ -283,7 +283,7 @@ async function loadHistorico(){
       const dt0 = new Date(g.entries[0].criado_em.replace(' ','T')).toLocaleString('pt-BR');
       const dtL = new Date(g.entries[g.entries.length-1].criado_em.replace(' ','T')).toLocaleString('pt-BR');
       const timeRange = g.entries.length > 1 ? `${dtL} → ${dt0}` : dt0;
-      const canRevertGroup = g.entries.every(e => e.antes && e.depois);
+      const canRevertGroup = g.entries.some(e => e.antes && !isAlreadyReverted(e));
 
       html += `<div class="hist-group">
         <div class="hist-group-header">
@@ -307,11 +307,16 @@ async function loadHistorico(){
         if(e.antes && e.depois){
           const f = a => (a||[]).join(', ') || '—';
           const fc = a => (a||[]).map(cap).join(', ') || '—';
-          diff = `<div><span class="diff-antes">${esc(f(e.antes.ufs))}</span> → <span class="diff-depois">${esc(f(e.depois.ufs))}</span></div>
-                  <div><span class="diff-antes">${esc(fc(e.antes.cidades))}</span> → <span class="diff-depois">${esc(fc(e.depois.cidades))}</span></div>
-                  <div><span class="diff-antes">${esc(f(e.antes.clientes))}</span> → <span class="diff-depois">${esc(f(e.depois.clientes))}</span></div>`;
+          const has = k => (e.antes && k in e.antes) || (e.depois && k in e.depois);
+          const rows = [];
+          if(has('ufs'))      rows.push(`<div><span class="diff-antes">${esc(f(e.antes.ufs))}</span> → <span class="diff-depois">${esc(f(e.depois.ufs))}</span></div>`);
+          if(has('cidades'))  rows.push(`<div><span class="diff-antes">${esc(fc(e.antes.cidades))}</span> → <span class="diff-depois">${esc(fc(e.depois.cidades))}</span></div>`);
+          if(has('clientes')) rows.push(`<div><span class="diff-antes">${esc(f(e.antes.clientes))}</span> → <span class="diff-depois">${esc(f(e.depois.clientes))}</span></div>`);
+          if(has('tags'))     rows.push(`<div>tags: <span class="diff-antes">${esc(f(e.antes.tags))}</span> → <span class="diff-depois">${esc(f(e.depois.tags))}</span></div>`);
+          if(has('motivo_bloqueio')) rows.push(`<div>motivo: <span class="diff-antes">${esc(e.antes.motivo_bloqueio||'—')}</span> → <span class="diff-depois">${esc(e.depois.motivo_bloqueio||'—')}</span></div>`);
+          diff = rows.join('');
         }
-        const canRevert = !!(e.antes && e.depois);
+        const canRevert = !!e.antes;
         const alreadyReverted = (e.acao || '').includes('revert');
         const revertBtnDisabled = !canRevert || alreadyReverted || userRole !== 'admin';
         const revertTitle = userRole !== 'admin' ? 'Apenas administradores podem reverter. Contate um admin.' : (!canRevert ? 'Sem dados para reverter' : alreadyReverted ? 'Esta entrada já é uma reversão' : 'Reverter esta alteração');
@@ -367,12 +372,53 @@ function confirmRevert(title, details, onConfirm){
 /* Bloqueia reverter uma reversão (evita loop redundante). */
 function isAlreadyReverted(e){ return (e.acao || '').includes('revert'); }
 
+/* Monta o alvo da reversão a partir do que a entrada de histórico alterou.
+   Uma entrada pode ter mexido só em uso (UF/cidade/prof), só em tags ou só no
+   motivo/bloqueio — restauramos apenas os grupos presentes em `antes`. */
+function buildRevertTarget(e, caso){
+  const a = e.antes || {};
+  const payload = {caso_id: caso.id, row: caso.row};
+  const details = [{label:'Caso', val:e.caso_id}];
+  const hasUso = ('ufs' in a) || ('cidades' in a) || ('clientes' in a);
+  if(hasUso){
+    const ufs = a.ufs||[], cidades = a.cidades||[], clientes = a.clientes||[];
+    payload.set_uso = '1';
+    payload.ufs = ufs.join('/'); payload.cidades = cidades.join('/'); payload.clientes = clientes.join('/');
+    details.push({label:'UFs → antes', val: ufs.join(', ')||'(vazio)'});
+    details.push({label:'Cidades → antes', val: cidades.map(cap).join(', ')||'(vazio)'});
+    details.push({label:'Profissionais → antes', val: clientes.join(', ')||'(vazio)'});
+  }
+  if('tags' in a){
+    payload.set_tags = '1';
+    payload.tags = (a.tags||[]).join('/');
+    details.push({label:'Tags → antes', val:(a.tags||[]).join(', ')||'(vazio)'});
+  }
+  if('motivo_bloqueio' in a){
+    payload.set_motivo = '1';
+    payload.motivo = a.motivo_bloqueio||'';
+    details.push({label:'Motivo → antes', val:(a.motivo_bloqueio||'(vazio)')});
+  }
+  return {payload, details, hasAny: hasUso || ('tags' in a) || ('motivo_bloqueio' in a)};
+}
+
+function revertSummary(payload){
+  const parts = [];
+  if(payload.set_uso === '1'){
+    parts.push(`UFs: ${(payload.ufs||'').split('/').filter(Boolean).join(', ')||'(vazio)'}`);
+    parts.push(`Cidades: ${(payload.cidades||'').split('/').filter(Boolean).map(cap).join(', ')||'(vazio)'}`);
+    parts.push(`Profissionais: ${(payload.clientes||'').split('/').filter(Boolean).join(', ')||'(vazio)'}`);
+  }
+  if(payload.set_tags === '1') parts.push(`Tags: ${(payload.tags||'').split('/').filter(Boolean).join(', ')||'(vazio)'}`);
+  if(payload.set_motivo === '1') parts.push(`Motivo: ${payload.motivo||'(vazio)'}`);
+  return parts.join('\n');
+}
+
 async function revertEntry(gi, ei){
   const body = document.getElementById('hist-body');
   const groups = body._groups;
   if(!groups) return;
   const e = groups[gi].entries[ei];
-  if(!e || !e.antes || !e.depois) return;
+  if(!e || !e.antes){ showToast('Esta entrada não tem estado anterior para reverter.'); return; }
 
   if(isAlreadyReverted(e)){
     showToast('Esta entrada já é uma reversão — não pode ser revertida novamente.');
@@ -380,28 +426,23 @@ async function revertEntry(gi, ei){
   }
 
   const caso = casos.find(c => c.id === e.caso_id);
-  if(!caso){ showToast('Caso não encontrado na planilha atual.'); return; }
+  if(!caso){ showToast('Caso não encontrado na planilha atual. Pode ter sido removido ou estar em outra base.'); return; }
 
-  const {ufs, cidades, clientes} = e.antes;
-  const details = [
-    {label:'Caso', val:e.caso_id},
-    {label:'UFs → antes', val:ufs.join(', ')||'(vazio)'},
-    {label:'Cidades → antes', val:cidades.map(cap).join(', ')||'(vazio)'},
-    {label:'Profissionais → antes', val:clientes.join(', ')||'(vazio)'},
-  ];
+  const {payload, details, hasAny} = buildRevertTarget(e, caso);
+  if(!hasAny){ showToast('Esta entrada não tem dados restauráveis.'); return; }
 
   confirmRevert('Reverter esta alteração', details, async () => {
     histLoading(true, `Revertendo ${e.caso_id}...`);
     try{
-      const r = await api('revert_caso', {caso_id:caso.id, row:caso.row, ufs:ufs.join('/'), cidades:cidades.join('/'), clientes:clientes.join('/')}, 'POST');
+      const r = await api('revert_caso', payload, 'POST');
       await loadCasos(true);
-      if(r.ok){
-        histSuccess(`${e.caso_id} revertido com sucesso!`,
-          `UFs: ${ufs.join(', ')||'(vazio)'}\nCidades: ${cidades.map(cap).join(', ')||'(vazio)'}\nProfissionais: ${clientes.join(', ')||'(vazio)'}`
-        );
+      if(r.ok && r.verified){
+        histSuccess(`${e.caso_id} revertido e confirmado!`, revertSummary(payload));
+      } else if(r.ok){
+        histLoading(false); loadHistorico();
+        showToast('⚠ Reversão enviada, mas a verificação automática não bateu. Confira o caso manualmente.');
       } else {
-        histLoading(false);
-        loadHistorico();
+        histLoading(false); loadHistorico();
         showToast('Erro ao reverter: '+(r.error||''));
       }
     } catch(err){
@@ -418,7 +459,7 @@ async function revertGroup(gi){
   if(!groups) return;
   const g = groups[gi];
 
-  const revertable = g.entries.filter(e => e.antes && e.depois && !isAlreadyReverted(e));
+  const revertable = g.entries.filter(e => e.antes && !isAlreadyReverted(e));
   if(!revertable.length){
     showToast('Nenhuma entrada revertível neste grupo (todas já são reversões).');
     return;
@@ -432,15 +473,17 @@ async function revertGroup(gi){
 
   confirmRevert('Reverter grupo inteiro', details, async () => {
     histLoading(true, `Revertendo ${revertable.length} entrada(s)...`);
-    let ok = 0;
+    let ok = 0, unverified = 0;
     const errs = [];
     for(const e of revertable){
       const caso = casos.find(c => c.id === e.caso_id);
       if(!caso){ errs.push(`${e.caso_id}: não encontrado`); continue; }
-      const {ufs, cidades, clientes} = e.antes;
+      const {payload, hasAny} = buildRevertTarget(e, caso);
+      if(!hasAny){ errs.push(`${e.caso_id}: sem dados restauráveis`); continue; }
       try{
-        const r = await api('revert_caso', {caso_id:caso.id, row:caso.row, ufs:ufs.join('/'), cidades:cidades.join('/'), clientes:clientes.join('/')}, 'POST');
-        if(r.ok) ok++;
+        const r = await api('revert_caso', payload, 'POST');
+        if(r.ok && r.verified) ok++;
+        else if(r.ok){ ok++; unverified++; }
         else errs.push(`${e.caso_id}: ${r.error||'erro'}`);
       } catch(err){ errs.push(`${e.caso_id}: ${err.message}`); }
     }
@@ -450,7 +493,8 @@ async function revertGroup(gi){
       loadHistorico();
       showToast(`${ok} revertidos, ${errs.length} erro(s): ${errs.slice(0,3).join('; ')}`);
     } else {
-      histSuccess(`Grupo revertido com sucesso!`, `${ok} caso(s) revertidos para o estado anterior.`);
+      const extra = unverified ? `\n(${unverified} sem verificação automática — confira manualmente.)` : '';
+      histSuccess(`Grupo revertido com sucesso!`, `${ok} caso(s) revertidos para o estado anterior.${extra}`);
     }
   });
 }
@@ -553,6 +597,96 @@ async function applySyncCreate(){
     if(skipped) msg += `<div style="color:var(--tx2);font-size:12px">${skipped} já existia(m).</div>`;
     if(errors)  msg += `<div style="color:var(--rtx);font-size:12px;margin-top:.4rem">Erros (${errors}):<br>${(r.errors||[]).map(e=>esc(e)).join('<br>')}</div>`;
     msg += `<div style="margin-top:.75rem"><button class="btn bs" style="padding:6px 13px;font-size:12px" onclick="runSyncPreview()">Verificar de novo</button></div>`;
+    box.innerHTML = msg;
+    if(typeof loadCasos === 'function') loadCasos(true);
+  } catch(e){
+    box.innerHTML = `<div style="color:var(--rtx)">Erro de conexão: ${esc(e.message)}</div>`;
+  }
+}
+
+/* ===== Sincronização via modal (disponível a qualquer usuário logado) ===== */
+let _syncModalDriveOnly = [];
+
+/* Item único do menu: recarrega os casos em segundo plano E abre o
+   verificador Drive↔planilha. */
+function syncAll(){
+  if(typeof loadCasos === 'function') loadCasos(true);
+  openSyncModal();
+}
+
+function openSyncModal(){
+  const m = document.getElementById('sync-modal');
+  if(!m) return;
+  m.style.display = 'flex';
+  runSyncModalPreview();
+}
+
+function closeSyncModal(){
+  const m = document.getElementById('sync-modal');
+  if(m) m.style.display = 'none';
+}
+
+async function runSyncModalPreview(){
+  const box = document.getElementById('sync-modal-body');
+  box.innerHTML = '<div style="padding:1rem;color:var(--tx2)"><span class="spin"></span> Varrendo o Drive e cruzando com a planilha — pode demorar...</div>';
+  try{
+    const r = await api('sync_preview');
+    if(!r.ok){ box.innerHTML = `<div style="color:var(--rtx)">Erro: ${esc(r.error||'')}</div>`; return; }
+    _syncModalDriveOnly = r.drive_only || [];
+    renderSyncModalResult(r);
+  } catch(e){
+    box.innerHTML = `<div style="color:var(--rtx)">Erro de conexão: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderSyncModalResult(r){
+  const box = document.getElementById('sync-modal-body');
+  const driveOnly = r.drive_only || [];
+  const sheetOnly = r.sheet_only || [];
+  const chip = (id, bg, tx) => `<span style="padding:2px 8px;background:${bg};color:${tx};border-radius:10px;font-size:11px;font-family:var(--font-mono)">${esc(id)}</span>`;
+
+  let html = `<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:1rem">
+    <span>📁 Drive: <b>${r.drive_total||0}</b> casos</span>
+    <span>📋 Planilha: <b>${r.sheet_total||0}</b> casos</span>
+  </div>`;
+
+  html += `<div style="margin-bottom:1rem">
+    <div style="font-weight:700;margin-bottom:.4rem;color:${driveOnly.length?'var(--atx)':'var(--gtx)'}">
+      ${driveOnly.length ? `⚠ ${driveOnly.length} caso(s) novo(s) no Drive sem linha na planilha` : '✅ Nenhum caso novo no Drive'}
+    </div>`;
+  if(driveOnly.length){
+    html += `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:.6rem;max-height:140px;overflow:auto">
+      ${driveOnly.map(id => chip(id, 'var(--abg)', 'var(--atx)')).join('')}</div>
+      <button class="btn bp" style="padding:6px 13px;font-size:12px" onclick="applySyncModalCreate()">Criar ${driveOnly.length} linha(s) na planilha</button>`;
+  }
+  html += `</div>`;
+
+  html += `<div>
+    <div style="font-weight:700;margin-bottom:.4rem;color:${sheetOnly.length?'var(--rtx)':'var(--gtx)'}">
+      ${sheetOnly.length ? `⚠ ${sheetOnly.length} caso(s) na planilha sem nenhum arquivo (pendente de fotos)` : '✅ Toda linha tem arquivos'}
+    </div>`;
+  if(sheetOnly.length){
+    html += `<div style="display:flex;flex-wrap:wrap;gap:4px;max-height:140px;overflow:auto">
+      ${sheetOnly.map(id => chip(id, 'var(--rbg)', 'var(--rtx)')).join('')}</div>`;
+  }
+  html += `</div>`;
+
+  box.innerHTML = html;
+}
+
+async function applySyncModalCreate(){
+  if(!_syncModalDriveOnly.length) return;
+  if(!confirm(`Criar ${_syncModalDriveOnly.length} linha(s) na planilha (só o ID na coluna de caso, demais colunas vazias)?`)) return;
+  const box = document.getElementById('sync-modal-body');
+  box.innerHTML = '<div style="padding:1rem;color:var(--tx2)"><span class="spin"></span> Criando linhas na planilha...</div>';
+  try{
+    const r = await api('sync_apply', {ids: _syncModalDriveOnly.join(',')}, 'POST');
+    if(!r.ok){ box.innerHTML = `<div style="color:var(--rtx)">Erro: ${esc(r.error||'')}</div>`; return; }
+    const created = (r.created||[]).length, skipped = (r.skipped||[]).length, errors = (r.errors||[]).length;
+    let msg = `<div style="color:var(--gtx);font-weight:700;margin-bottom:.5rem">✅ ${created} linha(s) criada(s).</div>`;
+    if(skipped) msg += `<div style="color:var(--tx2);font-size:12px">${skipped} já existia(m).</div>`;
+    if(errors)  msg += `<div style="color:var(--rtx);font-size:12px;margin-top:.4rem">Erros (${errors}):<br>${(r.errors||[]).map(e=>esc(e)).join('<br>')}</div>`;
+    msg += `<div style="margin-top:.75rem;display:flex;gap:8px"><button class="btn bs" style="padding:6px 13px;font-size:12px" onclick="runSyncModalPreview()">Verificar de novo</button><button class="btn bp" style="padding:6px 13px;font-size:12px" onclick="closeSyncModal()">Fechar</button></div>`;
     box.innerHTML = msg;
     if(typeof loadCasos === 'function') loadCasos(true);
   } catch(e){

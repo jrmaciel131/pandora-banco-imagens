@@ -9,6 +9,57 @@ let pendingUsos = [];
 let currentPhotos = [];
 let addCities = [];
 let _ibgeLoading = {};
+let _presenceTimer = null;
+
+/* Optimistic locking: ao salvar, se o servidor responde stale=true, o caso
+   mudou desde que foi aberto. Avisa e recarrega o caso para refazer a ação. */
+function isStale(r){
+  if(r && r.stale){
+    showToast('⚠ ' + (r.error || 'Este caso foi alterado por outra pessoa. Recarregando...'));
+    reopenCurrentCaso();
+    return true;
+  }
+  return false;
+}
+
+async function reopenCurrentCaso(){
+  const id = currentCaso && currentCaso.id;
+  await loadCasos(true);
+  if(id) openModal(id);
+}
+
+/* Presença: heartbeat enquanto o caso está aberto, para avisar quando duas
+   pessoas editam o mesmo caso ao mesmo tempo. */
+async function pingPresence(event){
+  if(!currentCaso) return;
+  try{
+    const r = await api('case_presence', {caso_id: currentCaso.id, event}, 'POST');
+    renderPresenceBanner((r && r.others) || []);
+  } catch(e){}
+}
+
+function renderPresenceBanner(others){
+  const el = document.getElementById('presence-banner');
+  if(!el) return;
+  if(others && others.length){
+    el.style.display = 'block';
+    el.innerHTML = '👀 <b>' + others.map(esc).join(', ') + '</b> também ' + (others.length > 1 ? 'estão' : 'está')
+      + ' editando este caso agora. Cuidado para não sobrescrever as alterações um do outro.';
+  } else {
+    el.style.display = 'none';
+    el.innerHTML = '';
+  }
+}
+
+function startPresence(){
+  stopPresence();
+  pingPresence('open');
+  _presenceTimer = setInterval(() => pingPresence('ping'), 20000);
+}
+
+function stopPresence(){
+  if(_presenceTimer){ clearInterval(_presenceTimer); _presenceTimer = null; }
+}
 
 async function openModal(id){
   prioritizeCase(id);
@@ -42,6 +93,8 @@ async function openModal(id){
   const sec = document.getElementById('mps');
   sec.innerHTML = '<div style="padding:.5rem 0;font-size:12px;color:var(--tx2)"><span class="spin"></span> Buscando fotos...</div>';
   document.getElementById('ov').classList.add('open');
+  renderPresenceBanner([]);
+  startPresence();
   currentPhotos = [];
   try{
     const r = await api(`photos&id=${encodeURIComponent(id)}`);
@@ -159,9 +212,10 @@ async function addTagFromInput(){
   }
   inp.disabled = true;
   try{
-    const r = await api('add_tag', {caso_id: currentCaso.id, row: currentCaso.row, tag}, 'POST');
+    const r = await api('add_tag', {caso_id: currentCaso.id, row: currentCaso.row, tag, ver: currentCaso.ver}, 'POST');
+    if(isStale(r)){ inp.disabled = false; return; }
     if(r.ok){
-      updateCasoLocal(currentCaso.id, {tags: r.tags});
+      updateCasoLocal(currentCaso.id, {tags: r.tags, ver: r.ver});
       currentCaso = casos.find(c => c.id === currentCaso.id);
       renderTagEditor(); renderPainelStatus();
       showToast(r.msg || `Tag "${tag}" adicionada`);
@@ -178,9 +232,10 @@ async function removeTagFromCaso(tag){
   if(!currentCaso) return;
   if(!confirm(`Remover a tag "${tag}" deste caso?`)) return;
   try{
-    const r = await api('remove_tag', {caso_id: currentCaso.id, row: currentCaso.row, tag}, 'POST');
+    const r = await api('remove_tag', {caso_id: currentCaso.id, row: currentCaso.row, tag, ver: currentCaso.ver}, 'POST');
+    if(isStale(r)) return;
     if(r.ok){
-      updateCasoLocal(currentCaso.id, {tags: r.tags});
+      updateCasoLocal(currentCaso.id, {tags: r.tags, ver: r.ver});
       currentCaso = casos.find(c => c.id === currentCaso.id);
       renderTagEditor(); renderPainelStatus();
       showToast('Tag removida');
@@ -215,10 +270,11 @@ async function confirmBlockCaso(){
   const m = motivo.trim();
   if(!m){ showToast('Motivo obrigatório.'); return; }
   try{
-    const r = await api('set_block', {caso_id: currentCaso.id, row: currentCaso.row, motivo: m}, 'POST');
+    const r = await api('set_block', {caso_id: currentCaso.id, row: currentCaso.row, motivo: m, ver: currentCaso.ver}, 'POST');
+    if(isStale(r)) return;
     if(r.ok){
       const patch = r.depois || {};
-      updateCasoLocal(currentCaso.id, {ufs:patch.ufs, cidades:patch.cidades, clientes:patch.clientes, tags:patch.tags, motivo_bloqueio:patch.motivo_bloqueio, bloqueado:patch.bloqueado});
+      updateCasoLocal(currentCaso.id, {ufs:patch.ufs, cidades:patch.cidades, clientes:patch.clientes, tags:patch.tags, motivo_bloqueio:patch.motivo_bloqueio, bloqueado:patch.bloqueado, ver:r.ver});
       currentCaso = casos.find(c => c.id === currentCaso.id);
       renderPainelStatus(); renderBlockBanner(); renderModalChips(); renderPainelActions();
       showToast('Caso bloqueado.');
@@ -231,10 +287,11 @@ async function confirmUnblockCaso(){
   if(!currentCaso) return;
   if(!confirm(`Desbloquear ${currentCaso.id}?\n\nO marcador de bloqueio será removido e o caso voltará a ficar disponível.`)) return;
   try{
-    const r = await api('unblock_case', {caso_id: currentCaso.id, row: currentCaso.row}, 'POST');
+    const r = await api('unblock_case', {caso_id: currentCaso.id, row: currentCaso.row, ver: currentCaso.ver}, 'POST');
+    if(isStale(r)) return;
     if(r.ok){
       const patch = r.depois || {};
-      updateCasoLocal(currentCaso.id, {ufs:patch.ufs, cidades:patch.cidades, clientes:patch.clientes, tags:patch.tags, motivo_bloqueio:patch.motivo_bloqueio, bloqueado:patch.bloqueado});
+      updateCasoLocal(currentCaso.id, {ufs:patch.ufs, cidades:patch.cidades, clientes:patch.clientes, tags:patch.tags, motivo_bloqueio:patch.motivo_bloqueio, bloqueado:patch.bloqueado, ver:r.ver});
       currentCaso = casos.find(c => c.id === currentCaso.id);
       renderPainelStatus(); renderBlockBanner(); renderModalChips(); renderPainelActions();
       showToast('Caso desbloqueado.');
@@ -343,18 +400,20 @@ function confirmBatchRemove(){
       document.body.appendChild(overlay);
 
       let errs = [];
-      for(const {idx, valor} of pendingRemovals.ufs){
-        const r = await api('remove_item', {caso_id: currentCaso.id, row: currentCaso.row, tipo:'uf', valor, idx}, 'POST').catch(e => ({ok:false, error:e.message}));
-        if(!r.ok) errs.push(`UF ${valor}: ${r.error}`);
-      }
-      for(const {idx, valor} of pendingRemovals.cidades){
-        const r = await api('remove_item', {caso_id: currentCaso.id, row: currentCaso.row, tipo:'cidade', valor, idx}, 'POST').catch(e => ({ok:false, error:e.message}));
-        if(!r.ok) errs.push(`Cidade ${cap(valor)}: ${r.error}`);
-      }
-      for(const {idx, valor} of pendingRemovals.clientes){
-        const r = await api('remove_item', {caso_id: currentCaso.id, row: currentCaso.row, tipo:'cliente', valor, idx}, 'POST').catch(e => ({ok:false, error:e.message}));
-        if(!r.ok) errs.push(`Prof ${valor}: ${r.error}`);
-      }
+      // Encadeia o `ver` entre as chamadas: cada remoção altera a versão do
+      // caso, então a próxima usa a versão devolvida pela anterior.
+      let curVer = currentCaso.ver;
+      let staleAbort = false;
+      const doRemove = async (tipo, valor, idx, label) => {
+        if(staleAbort) return;
+        const r = await api('remove_item', {caso_id: currentCaso.id, row: currentCaso.row, tipo, valor, idx, ver: curVer}, 'POST').catch(e => ({ok:false, error:e.message}));
+        if(r.stale){ staleAbort = true; errs.push('O caso foi alterado por outra pessoa — remoções interrompidas.'); return; }
+        if(r.ok){ if(r.ver) curVer = r.ver; }
+        else errs.push(`${label}: ${r.error}`);
+      };
+      for(const {idx, valor} of pendingRemovals.ufs)      await doRemove('uf', valor, idx, `UF ${valor}`);
+      for(const {idx, valor} of pendingRemovals.cidades)  await doRemove('cidade', valor, idx, `Cidade ${cap(valor)}`);
+      for(const {idx, valor} of pendingRemovals.clientes) await doRemove('cliente', valor, idx, `Prof ${valor}`);
 
       document.body.removeChild(overlay);
       pendingRemovals = {ufs:[], cidades:[], clientes:[], _keys: new Set()};
@@ -384,10 +443,11 @@ async function removeItem(tipo, valor, idx){
     [{label:'Caso', val:currentCaso.id}, {label:tipoLabel.charAt(0).toUpperCase()+tipoLabel.slice(1), val:labelValor}],
     async () => {
       try{
-        const r = await api('remove_item', {caso_id: currentCaso.id, row: currentCaso.row, tipo: tipoAPI, valor, idx}, 'POST');
+        const r = await api('remove_item', {caso_id: currentCaso.id, row: currentCaso.row, tipo: tipoAPI, valor, idx, ver: currentCaso.ver}, 'POST');
+        if(isStale(r)) return;
         if(r.ok){
           showToast(`${tipoLabel} removido!`);
-          if(r.depois) updateCasoLocal(currentCaso.id, {ufs:r.depois.ufs, cidades:r.depois.cidades, clientes:r.depois.clientes});
+          if(r.depois) updateCasoLocal(currentCaso.id, {ufs:r.depois.ufs, cidades:r.depois.cidades, clientes:r.depois.clientes, ver:r.ver});
           currentCaso = casos.find(c => c.id === currentCaso.id);
           if(currentCaso) renderModalChips();
           bgSyncCaso(currentCaso?.id);
@@ -397,7 +457,12 @@ async function removeItem(tipo, valor, idx){
   );
 }
 
-function closeModal(){ document.getElementById('ov').classList.remove('open'); currentCaso = null; }
+function closeModal(){
+  if(currentCaso){ try{ api('case_presence', {caso_id: currentCaso.id, event:'close'}, 'POST'); }catch(e){} }
+  stopPresence();
+  document.getElementById('ov').classList.remove('open');
+  currentCaso = null;
+}
 function ovClick(e){ if(e.target === document.getElementById('ov')) closeModal(); }
 
 /* ── Phase E: Modal tabs ── */
@@ -690,15 +755,17 @@ async function submitUsoBatch(batch, force = false){
       caso_id: currentCaso.id,
       row: currentCaso.row,
       entries: JSON.stringify(batch),
+      ver: currentCaso.ver,
     };
     if(force || pendingForce) params.force = '1';
     const r = await api('add_uso_batch', params, 'POST');
+    if(isStale(r)){ btn.textContent = orig; btn.disabled = false; return; }
     if(r.ok){
       showToast(`${r.count || batch.length} uso(s) registrado(s)!`);
       pendingForce = false;
       pendingUsos = [];
       const patch = r.depois || null;
-      if(patch) updateCasoLocal(currentCaso.id, {ufs:patch.ufs, cidades:patch.cidades, clientes:patch.clientes});
+      if(patch) updateCasoLocal(currentCaso.id, {ufs:patch.ufs, cidades:patch.cidades, clientes:patch.clientes, ver:r.ver});
       currentCaso = casos.find(c => c.id === currentCaso.id);
       if(currentCaso){ renderModalChips(); document.getElementById('addform').style.display = 'none'; }
       bgSyncCaso(currentCaso?.id);

@@ -80,7 +80,7 @@ function toggleSelAll(){
   if(!selIds.size) selMode = false;
   updateBulkBar();
   renderGrid();
-  document.getElementById('btn-selall').textContent = selIds.size > 0 ? '☐ Desmarcar todos' : '☑ Sel. todos';
+  document.getElementById('btn-selall').textContent = selIds.size > 0 ? 'Desmarcar' : 'Todos';
 }
 
 function toggleSel(){
@@ -88,7 +88,7 @@ function toggleSel(){
   if(!selMode) clearSel();
   else updateBulkBar();
   renderGrid();
-  document.getElementById('btn-sel').textContent = selMode ? '✕ Cancelar' : '☑ Selecionar';
+  document.getElementById('btn-sel').textContent = selMode ? 'Cancelar' : 'Selecionar';
 }
 
 function toggleCardSel(id, e){
@@ -109,8 +109,8 @@ function clearSel(){
   selMode = false;
   updateBulkBar();
   renderGrid();
-  document.getElementById('btn-sel').textContent = '☑ Selecionar';
-  document.getElementById('btn-selall').textContent = '☑ Sel. todos';
+  document.getElementById('btn-sel').textContent = 'Selecionar';
+  document.getElementById('btn-selall').textContent = 'Todos';
 }
 
 function updateBulkBar(){
@@ -132,7 +132,7 @@ async function downloadBulkZip(){
     const resp = await fetch(`${API}?action=download_bulk`, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: {'Content-Type':'application/x-www-form-urlencoded'},
+      headers: {'Content-Type':'application/x-www-form-urlencoded', 'X-CSRF-Token': CSRF_TOKEN},
       body: new URLSearchParams({ids}).toString()
     });
     const ct = resp.headers.get('Content-Type') || '';

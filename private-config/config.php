@@ -25,7 +25,17 @@ if (!defined('WEB_ROOT')) {
  */
 define('PRIVATE_CONFIG_PATH', __DIR__);
 
-define('APP_VERSION', 'v21.1');
+/**
+ * Segredos sensíveis (senha do banco, CRON_KEY, chaves do Turnstile) residem em
+ * secrets.local.php, que NÃO é versionado. Carregado aqui antes dos fallbacks
+ * abaixo; se ausente, as constantes assumem valores vazios. Use o modelo de
+ * secrets.local.php incluído neste repositório como ponto de partida.
+ */
+$_secretsFile = __DIR__ . '/secrets.local.php';
+if (is_file($_secretsFile)) require_once $_secretsFile;
+unset($_secretsFile);
+
+define('APP_VERSION', 'v23.00');
 
 /**
  * Usuários estáticos do sistema. As senhas são hashes bcrypt — gere com:
@@ -84,7 +94,8 @@ define('GOOGLE_CREDENTIALS_PATH', __DIR__ . '/google-credentials.json');
 define('DB_HOST', 'SEU_HOST_MYSQL_AQUI');
 define('DB_NAME', 'SEU_NOME_DE_BANCO_AQUI');
 define('DB_USER', 'SEU_USUARIO_MYSQL_AQUI');
-define('DB_PASS', 'SUA_SENHA_MYSQL_AQUI');
+// DB_PASS é definida em secrets.local.php (fora do Git); fallback vazio.
+if (!defined('DB_PASS')) define('DB_PASS', '');
 define('CACHE_TTL',        300);
 define('THUMB_CACHE_TTL',  2592000);
 define('FOLDER_CACHE_TTL', 3600);
@@ -95,7 +106,13 @@ define('SESSION_LIFETIME',    7200);
 define('SESSION_WARN_BEFORE', 900);
 define('MAX_LOGIN_ATTEMPTS',  5);
 define('LOGIN_BLOCK_MINUTES', 15);
-define('CRON_KEY', 'GERE_UMA_CHAVE_LONGA_E_ALEATORIA_AQUI_USE_OPENSSL_RAND_HEX_32');
+// CRON_KEY é definida em secrets.local.php (fora do Git); fallback vazio.
+if (!defined('CRON_KEY')) define('CRON_KEY', '');
+
+// Cloudflare Turnstile (CAPTCHA do login). Definidas em secrets.local.php.
+// Enquanto vazias, o Turnstile fica desligado e o login funciona normalmente.
+if (!defined('TURNSTILE_SITE_KEY')) define('TURNSTILE_SITE_KEY', '');
+if (!defined('TURNSTILE_SECRET'))   define('TURNSTILE_SECRET', '');
 
 // Raio mínimo (em km) entre uma cidade nova e qualquer cidade já em uso no
 // mesmo caso. Usuários comuns são bloqueados se houver conflito; apenas admins

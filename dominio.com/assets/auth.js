@@ -10,21 +10,37 @@ async function doLogin(){
   const u = document.getElementById('lu').value.trim();
   const p = document.getElementById('lp').value;
   const btn = document.getElementById('lb2'), err = document.getElementById('le');
+
+  const payload = {user:u, pass:p};
+  if(window.TURNSTILE_ENABLED){
+    const tsToken = (window.turnstile && typeof turnstile.getResponse === 'function')
+      ? turnstile.getResponse()
+      : (document.querySelector('[name="cf-turnstile-response"]') || {}).value || '';
+    if(!tsToken){
+      err.textContent = 'Complete a verificação de segurança antes de entrar.';
+      err.style.display = 'block';
+      return;
+    }
+    payload['cf-turnstile-response'] = tsToken;
+  }
+
   btn.innerHTML = '<span class="spin"></span> Entrando...';
   btn.disabled = true;
   err.style.display = 'none';
   try{
-    const r = await api('login', {user:u, pass:p}, 'POST');
+    const r = await api('login', payload, 'POST');
     if(r.ok){
       if(r.last_base) await selectBase(r.last_base, r);
       else showBaseSelector(r);
     } else {
       err.textContent = r.error || 'Usuário ou senha não encontrados.';
       err.style.display = 'block';
+      if(window.turnstile && typeof turnstile.reset === 'function') turnstile.reset();
     }
   } catch(e){
     err.textContent = 'Erro de conexão com o servidor. Tente novamente.';
     err.style.display = 'block';
+    if(window.turnstile && typeof turnstile.reset === 'function') turnstile.reset();
   }
   btn.innerHTML = 'Entrar';
   btn.disabled = false;
@@ -239,6 +255,7 @@ async function checkSessionOnLoad(){
   try{
     const resp = await fetch('api/handler.php?action=check_session', {credentials:'same-origin'});
     const r = await resp.json().catch(() => ({ok:false, authenticated:false}));
+    if(r.csrf) CSRF_TOKEN = r.csrf;
     if(r.ok && r.authenticated){
       if(loader) loader.style.display = 'none';
       if(r.base){

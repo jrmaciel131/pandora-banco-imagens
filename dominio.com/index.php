@@ -3,6 +3,12 @@
    Sem tocar em nada: sempre que um .css ou .js é salvo no servidor, o hash muda
    automaticamente e o browser baixa a versão nova. */
 function v($f){ $p = __DIR__.'/'.$f; return $f.'?v='.(file_exists($p) ? filemtime($p) : '0'); }
+
+// Carrega a config privada apenas para expor a site key pública do Turnstile
+// ao HTML de login. Ausência do arquivo não é fatal (mantém o login funcional).
+$_cfgPath = __DIR__ . '/../private-config/config.php';
+if (is_file($_cfgPath)) require_once $_cfgPath;
+$TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -17,6 +23,9 @@ function v($f){ $p = __DIR__.'/'.$f; return $f.'?v='.(file_exists($p) ? filemtim
 
 <link rel="stylesheet" href="<?php echo v('assets/theme.css'); ?>">
 <link rel="stylesheet" href="<?php echo v('assets/app.css'); ?>">
+<?php if ($TURNSTILE_SITE_KEY !== ''): ?>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<?php endif; ?>
 </head>
 <body>
 
@@ -36,6 +45,9 @@ function v($f){ $p = __DIR__.'/'.$f; return $f.'?v='.(file_exists($p) ? filemtim
         <button type="button" onclick="togglePwd()" id="lpbtn" style="position:absolute;right:1px;top:1px;bottom:1px;width:40px;background:transparent;border:none;cursor:pointer;color:var(--tx3);font-size:16px;display:flex;align-items:center;justify-content:center;border-radius:0 var(--rs) var(--rs) 0" title="Mostrar/ocultar senha">👁</button>
       </div>
     </div>
+    <?php if ($TURNSTILE_SITE_KEY !== ''): ?>
+    <div class="cf-turnstile" data-sitekey="<?php echo htmlspecialchars($TURNSTILE_SITE_KEY, ENT_QUOTES); ?>" data-theme="auto" style="margin-top:.75rem;display:flex;justify-content:center"></div>
+    <?php endif; ?>
     <div class="err" id="le" style="display:none"></div>
     <button class="btn bp" id="lb2" onclick="doLogin()" style="width:100%;margin-top:.75rem;justify-content:center">Entrar</button>
   </div>
@@ -54,7 +66,7 @@ function v($f){ $p = __DIR__.'/'.$f; return $f.'?v='.(file_exists($p) ? filemtim
 <div id="as">
 
   <div class="topbar">
-    <div class="tb-brand">Banco de imagens <span class="vbadge">v22</span> <span id="tb-base-badge" style="display:none;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--accent);color:#fff;margin-left:4px"></span></div>
+    <div class="tb-brand">Banco de imagens <span class="vbadge">v23</span> <span id="tb-base-badge" style="display:none;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--accent);color:#fff;margin-left:4px"></span></div>
     <div class="tb-spacer"></div>
 
     <div class="tb-user">
@@ -69,13 +81,10 @@ function v($f){ $p = __DIR__.'/'.$f; return $f.'?v='.(file_exists($p) ? filemtim
     <div class="tb-more" id="tb-more">
       <button class="tb-more-btn" onclick="toggleMoreMenu()">Mais ▾</button>
       <div class="tb-dropdown" id="tb-dropdown">
-        <div class="tb-drop-item" data-admin onclick="toggleDiag();closeMoreMenu()" style="display:none">🔧 Diagnóstico</div>
-        <div class="tb-drop-item" onclick="syncNow();closeMoreMenu()">↻ Sincronizar dados</div>
+        <div class="tb-drop-item" onclick="syncAll();closeMoreMenu()">🔄 Sincronizar</div>
         <div class="tb-drop-sep" data-admin style="display:none"></div>
+        <div data-admin style="display:none;padding:4px 14px 2px;font-size:10px;color:var(--tx3);font-weight:700;text-transform:uppercase;letter-spacing:.05em">Administração</div>
         <div class="tb-drop-item" data-admin onclick="showView('admin');closeMoreMenu()" style="display:none">⚡ Admin Mode</div>
-        <div class="tb-drop-item" data-admin id="adminmode-toggle" onclick="toggleGodModeVisual();closeMoreMenu()" style="display:none">👁 Ativar métricas visuais</div>
-        <div class="tb-drop-sep" data-admin style="display:none"></div>
-        <div class="tb-drop-item danger" data-admin onclick="confirmClearAllCache();closeMoreMenu()" style="display:none">🗑 Limpar cache</div>
         <div class="tb-drop-sep"></div>
         <div style="padding:4px 14px 2px;font-size:10px;color:var(--tx3);font-weight:700;text-transform:uppercase;letter-spacing:.05em">Base de dados</div>
         <div id="base-menu-items"></div>
@@ -287,6 +296,14 @@ function v($f){ $p = __DIR__.'/'.$f; return $f.'?v='.(file_exists($p) ? filemtim
       </div>
 
       <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:.75rem">🛠 Ferramentas</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn bs" id="adminmode-toggle" style="padding:7px 14px;font-size:13px" onclick="toggleGodModeVisual()">👁 Ativar métricas visuais</button>
+          <button class="btn bd-r" style="padding:7px 14px;font-size:13px" onclick="confirmClearAllCache()">🗑 Limpar cache global</button>
+        </div>
+      </div>
+
+      <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)">
         <h3 style="font-size:14px;font-weight:600;margin-bottom:.75rem">⏱ Teste de velocidade de imagens</h3>
         <p style="font-size:13px;color:var(--tx2);margin-bottom:.75rem">Compare o tempo de carregamento via cache local vs. Google Drive direto.</p>
         <div style="display:flex;gap:8px;margin-bottom:.75rem;flex-wrap:wrap">
@@ -450,6 +467,7 @@ function v($f){ $p = __DIR__.'/'.$f; return $f.'?v='.(file_exists($p) ? filemtim
     </div>
     <div class="painel-status" id="painel-status"></div>
     <div id="block-banner-wrap"></div>
+    <div id="presence-banner" style="display:none;margin:0 0 .5rem;padding:8px 12px;border-radius:8px;background:var(--abg,#fff7ed);color:var(--atx,#9a3412);border:1px solid var(--atx,#9a3412);font-size:12px"></div>
     <div class="s-modal-tabs" id="s-modal-tabs">
       <button class="s-mt-btn active" data-tab="overview">Visão geral</button>
       <button class="s-mt-btn" data-tab="photos">Conteúdos <span class="s-mt-count" id="mt-photos-count">—</span></button>
@@ -654,8 +672,19 @@ function v($f){ $p = __DIR__.'/'.$f; return $f.'?v='.(file_exists($p) ? filemtim
   </div>
 </div>
 
+<div id="sync-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:900;align-items:center;justify-content:center;padding:1rem" onclick="if(event.target===this)closeSyncModal()">
+  <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);width:100%;max-width:560px;max-height:85vh;display:flex;flex-direction:column;box-shadow:var(--shadow-lg)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;border-bottom:1px solid var(--bd)">
+      <h3 style="font-size:15px;font-weight:700;margin:0">🔄 Sincronizar Drive ↔ planilha</h3>
+      <button onclick="closeSyncModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--tx3);line-height:1">×</button>
+    </div>
+    <div id="sync-modal-body" style="padding:1.25rem;overflow:auto;font-size:13px"></div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
+<script>window.TURNSTILE_ENABLED = <?php echo $TURNSTILE_SITE_KEY !== '' ? 'true' : 'false'; ?>;</script>
 <!-- A ordem dos scripts é significativa: utils define globais usados pelos demais. -->
 <script src="<?php echo v('assets/utils.js'); ?>"></script>
 <script src="<?php echo v('assets/theme.js'); ?>"></script>

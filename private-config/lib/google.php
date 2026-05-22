@@ -101,6 +101,18 @@ class GoogleAPI {
     }
 
     /**
+     * Versão curta do conteúdo de um caso, usada para detecção de edição
+     * concorrente (optimistic locking). Computada de forma idêntica na leitura
+     * (getCasos) e após gravações, para que o cliente possa comparar o estado
+     * que carregou com o estado atual ao salvar.
+     */
+    public static function caseVersion(array $ufs, array $cids, array $clis, array $tags, string $motivo): string {
+        return substr(sha1(json_encode([
+            array_values($ufs), array_values($cids), array_values($clis), array_values($tags), $motivo
+        ], JSON_UNESCAPED_UNICODE)), 0, 16);
+    }
+
+    /**
      * Deriva uma tag de versão curta a partir do nome de um arquivo do Drive.
      *
      * A convenção esperada é `CASO-XXX-{flag-de-layout}-{código}-...`
@@ -186,6 +198,7 @@ class GoogleAPI {
                 'tags'             => $tags,
                 'motivo_bloqueio'  => $motivo,
                 'bloqueado'        => $bloqueado,
+                'ver'              => self::caseVersion($ufs, $cidades, $clientes, $tags, $motivo),
             ];
         }
         DB::setSheetCache($key,$casos);
@@ -318,20 +331,34 @@ class GoogleAPI {
     }
 
     /**
+     * Localiza o número da próxima linha vazia da planilha (1-based).
+     *
+     * Lê a faixa A:G e conta as linhas retornadas — o Sheets descarta linhas
+     * finais totalmente vazias, então a contagem corresponde à última linha
+     * com dados; a próxima é count+1.
+     */
+    private function getNextDataRow(): int {
+        $tok   = $this->getToken();
+        $range = urlencode($this->sheetName.'!A:G');
+        $resp  = hget("https://sheets.googleapis.com/v4/spreadsheets/".$this->spreadsheetId."/values/$range", ["Authorization: Bearer $tok"]);
+        if (!$resp) throw new Exception('Sem resposta do Sheets ao localizar a última linha.');
+        $d = json_decode($resp, true);
+        if (isset($d['error'])) throw new Exception('Sheets: '.($d['error']['message']??''));
+        return count($d['values'] ?? []) + 1;
+    }
+
+    /**
      * Adiciona uma nova linha de caso na planilha com apenas o ID na coluna B
-     * (demais colunas vazias). Usa values:append do Sheets. Usado pela sync.
+     * (coluna de ID de caso), demais colunas vazias. Usado pela sincronização.
+     *
+     * Grava diretamente na célula B da próxima linha vazia (values:update) em
+     * vez de values:append: o append desalinhava o ID para a coluna C quando a
+     * coluna A está inteiramente vazia, pois o Sheets detectava o início da
+     * "tabela" na coluna B e deslocava os valores uma coluna à direita.
      */
     public function appendCaso(string $id): void {
-        $tok = $this->getToken();
-        $range = urlencode($this->sheetName.'!A:G');
-        $url = "https://sheets.googleapis.com/v4/spreadsheets/".$this->spreadsheetId."/values/$range:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS";
-        $body = json_encode(['values'=>[['', $id, '', '', '', '', '']]]);
-        $hdrs = ["Authorization: Bearer $tok","Content-Type: application/json"];
-        $resp = null;
-        for ($i=1; $i<=3; $i++) { $resp = hpost($url, $body, $hdrs); if ($resp !== null) break; if ($i<3) sleep($i); }
-        if (!$resp) throw new Exception('Sem resposta do Sheets ao adicionar linha.');
-        $d = json_decode($resp, true);
-        if (isset($d['error'])) throw new Exception('Erro ao adicionar linha: '.($d['error']['message']??json_encode($d['error'])));
+        $row = $this->getNextDataRow();
+        $this->writeRange("B{$row}:B{$row}", [[$id]]);
         DB::clearSheetCache();
     }
 

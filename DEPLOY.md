@@ -7,12 +7,37 @@
 - **Export ZIP**: JSZip agora hospedado localmente em `export/lib/jszip.min.js` (sem dependência de CDN).
 - **v21.2:** novas ferramentas no painel admin (auditoria de distâncias, cidades coringa, raio editável). `config.php` ganhou bloco que lê override de `distance_config.json`. Cache busting bumpado para `?v=25`.
 
+## O que mudou na v23
+
+- **Segredos fora do repositório**: a senha do banco (`DB_PASS`), o `CRON_KEY` e as chaves do Turnstile saíram do `config.php` e passaram a residir em `private-config/secrets.local.php` (não versionado; há apenas um modelo sanitizado no repo). O `config.php` carrega esse arquivo se existir e, na ausência, assume valores vazios. **No deploy:** copie `secrets.local.php` e preencha os valores reais.
+- **CSRF**: toda ação POST autenticada exige o cabeçalho `X-CSRF-Token` (emitido no login). Transparente para o usuário.
+- **Cloudflare Turnstile no login**: opcional, configurável via `secrets.local.php` (ver seção "Turnstile" abaixo). Desligado enquanto as chaves estiverem vazias.
+- **Gerador de hash**: `api/gerar-hash.php` (admin-only) para gerar hashes bcrypt ao editar usuários no `config.php`. Liberado no `api/.htaccess`.
+- **Sincronização Drive↔planilha**: o ID agora é gravado na coluna B. O `cron.php` cria automaticamente as linhas dos casos novos do Drive (agende 1x/dia) e há um botão manual no menu, com modal de novos/pendentes/erros.
+- **Edição simultânea**: optimistic locking (recusa salvar se o caso mudou) + aviso de presença de outro editor.
+- **Cache global**: limpeza global de cache exige admin também no backend.
+- **Export — libs locais**: `gif.js`, `gif.worker.js` e `lame.min.js` em `export/lib/`; conversão real de vídeo (MP4→MOV, MKV) via **ffmpeg.wasm single-thread** em `export/lib/ffmpeg/` (~24MB), carregado sob demanda. Subir a pasta `export/lib/ffmpeg/` no deploy.
+
+### Turnstile (opcional) — protege o login contra bots
+
+Enquanto as chaves estiverem vazias em `secrets.local.php`, o Turnstile fica **desligado** e o login funciona normalmente. Para ativar:
+
+1. Em <https://dash.cloudflare.com> → **Turnstile** → **Add widget**.
+2. Hostname = seu domínio; Mode = **Managed**. Crie e copie a **Site Key** (pública) e a **Secret Key** (secreta).
+3. Cole as duas em `private-config/secrets.local.php`:
+   ```php
+   define('TURNSTILE_SITE_KEY', 'sua-site-key');
+   define('TURNSTILE_SECRET',   'sua-secret-key');
+   ```
+4. Para desligar, basta esvaziar as duas constantes.
+
 ## Estrutura final no servidor (DreamHost)
 
 ```
 /home/SEU_USUARIO/                                  ← raiz da conta
 ├── private-config/                                 ← PRIVADA (sobe via SFTP)
 │   ├── config.php
+│   ├── secrets.local.php                          ← (v23) NÃO versionado: DB_PASS, CRON_KEY, Turnstile
 │   ├── google-credentials.json
 │   ├── passwords.json
 │   ├── users_override.json
@@ -64,6 +89,8 @@ Via SFTP, faça upload de `raizdosite/private-config/` para `/home/SEU_USUARIO/p
 - `private-config/passwords.json`, `users_override.json`, `production_users.json` (senhas e papéis trocados pelo admin)
 - `private-config/.token_cache.json` (token OAuth cacheado)
 - `private-config/cidades_coords.csv` (sobe **apenas uma vez** na v21.1; depois fica fixo)
+- `private-config/secrets.local.php` (v23 — segredos reais; crie a partir do modelo e suba **uma vez** via SFTP; nunca vem pelo Git)
+- `private-config/presence.json` (v23 — runtime: presença de edição concorrente; gerado pela aplicação)
 
 ### 2. Permissões
 
@@ -73,6 +100,7 @@ chmod 700 ~/private-config/sessions
 chmod 700 ~/private-config/lib
 chmod 600 ~/private-config/*.json
 chmod 600 ~/private-config/config.php
+chmod 600 ~/private-config/secrets.local.php
 chmod 600 ~/private-config/lib/*.php
 ```
 

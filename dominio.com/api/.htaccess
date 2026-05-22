@@ -4,6 +4,6 @@ Options -Indexes
 # (private-config/lib/). Os stubs que ficaram em /api/ retornam 410 Gone.
 # A regra abaixo é uma camada extra: bloqueia qualquer .php em /api/ que NÃO seja
 # um endpoint público (handler.php ou cron.php).
-<FilesMatch "^(?!handler\.php$|cron\.php$).+\.php$">
+<FilesMatch "^(?!handler\.php$|cron\.php$|gerar-hash\.php$).+\.php$">
     Require all denied
 </FilesMatch>

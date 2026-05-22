@@ -71,6 +71,35 @@ foreach (BASES as $baseKey => $baseCfg) {
         $log('ERRO planilha ['.$baseKey.']: '.$e->getMessage()); continue;
     }
 
+    // Sincronização Drive→planilha: cria linhas (só o ID na coluna B) para
+    // casos cujos arquivos existem no Drive mas não têm linha na planilha.
+    try {
+        $driveIds = $api->listDriveCaseIds();
+        $numOf    = fn($id) => (int)preg_replace('/\D/', '', $id);
+        $sheetNums = [];
+        foreach ($casos as $c) $sheetNums[$numOf($c['id'])] = true;
+        $novas = 0;
+        foreach ($driveIds as $did) {
+            $n = $numOf($did);
+            if (!$n || isset($sheetNums[$n])) continue;
+            try {
+                $api->appendCaso($did);
+                DB::log('cron', $did, 'sync_create_row', [], ['id'=>$did]);
+                $sheetNums[$n] = true; $novas++;
+            } catch (Throwable $e) {
+                $log("ERRO sync {$did}: ".$e->getMessage());
+            }
+        }
+        if ($novas > 0) {
+            $log("Sync: {$novas} nova(s) linha(s) criada(s)");
+            $casos = $api->getCasos(true);
+        } else {
+            $log('Sync: planilha já em dia com o Drive');
+        }
+    } catch (Throwable $e) {
+        $log('ERRO sync ['.$baseKey.']: '.$e->getMessage());
+    }
+
     $total += count($casos);
 
     foreach ($casos as $i => $caso) {

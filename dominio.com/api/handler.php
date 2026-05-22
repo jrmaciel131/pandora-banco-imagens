@@ -57,6 +57,13 @@ session_set_cookie_params([
 session_name('bi_session');
 session_start();
 
+/*
+ * Token CSRF por sessão. Emitido ao frontend no login e no check_session,
+ * reenviado pelo cliente no cabeçalho X-CSRF-Token em toda requisição POST
+ * autenticada e conferido com hash_equals antes do dispatch das ações.
+ */
+if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(32));
+
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
@@ -370,12 +377,28 @@ if ($action === 'check_session') {
                 'has_prod'     => hasProductionAccess($u),
                 'expires'      => time() + SESSION_LIFETIME,
                 'warn_at'      => time() + SESSION_LIFETIME - SESSION_WARN_BEFORE,
+                'csrf'         => $_SESSION['csrf'],
             ]);
         }
     } else {
         echo json_encode(['ok'=>false,'authenticated'=>false]);
     }
     exit;
+}
+
+/**
+ * Valida um token do Cloudflare Turnstile contra o endpoint siteverify.
+ * Retorna true apenas quando o Cloudflare confirma `success`.
+ */
+function verifyTurnstile(string $token, string $ip): bool {
+    $resp = hpost(
+        'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+        http_build_query(['secret'=>TURNSTILE_SECRET, 'response'=>$token, 'remoteip'=>$ip]),
+        ['Content-Type: application/x-www-form-urlencoded']
+    );
+    if (!$resp) return false;
+    $d = json_decode($resp, true);
+    return !empty($d['success']);
 }
 
 /*
@@ -386,6 +409,16 @@ if ($action === 'check_session') {
 if ($action === 'login') {
     $user = trim($_POST['user'] ?? '');
     $pass = $_POST['pass'] ?? '';
+
+    // Cloudflare Turnstile: só exige verificação quando a secret está configurada.
+    if (TURNSTILE_SECRET !== '') {
+        $tsToken = $_POST['cf-turnstile-response'] ?? '';
+        if ($tsToken === '' || !verifyTurnstile($tsToken, $ip)) {
+            http_response_code(403);
+            echo json_encode(['ok'=>false,'error'=>'Verificação de segurança falhou. Recarregue a página e tente novamente.']);
+            exit;
+        }
+    }
 
     /*
      * Chave de bloqueio por (usuário + dispositivo) em vez de IP único.
@@ -463,6 +496,7 @@ if ($action === 'login') {
             'has_prod'  => $hasProd,
             'expires'   => time()+SESSION_LIFETIME,
             'warn_at'   => time()+SESSION_LIFETIME-SESSION_WARN_BEFORE,
+            'csrf'      => $_SESSION['csrf'],
         ]);
     } else {
         try { DB::recordFail($blockKey); } catch (Throwable $e) {}
@@ -492,6 +526,18 @@ if (empty($_SESSION['user'])) {
 }
 if (isset($_SESSION['login_time']) && (time() - $_SESSION['login_time']) > SESSION_LIFETIME) {
     session_destroy(); http_response_code(401); echo json_encode(['ok'=>false,'error'=>'Sessão expirada.','expired'=>true]); exit;
+}
+
+// Conferência CSRF: toda ação POST autenticada precisa reenviar o token da
+// sessão (cabeçalho X-CSRF-Token, ou campo _csrf como fallback). GET é leitura
+// e fica isento. hash_equals evita timing attack na comparação.
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    $sentToken = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($_POST['_csrf'] ?? '');
+    if (!is_string($sentToken) || !hash_equals($_SESSION['csrf'] ?? '', $sentToken)) {
+        http_response_code(419);
+        echo json_encode(['ok'=>false,'error'=>'Token de segurança inválido ou expirado. Recarregue a página (F5) e tente novamente.']);
+        exit;
+    }
 }
 
 $me      = $_SESSION['user'];
@@ -586,6 +632,30 @@ function acquireCaseLock(string $caso_id): bool {
         @fclose($fp);
         @unlink($lockFile);
     });
+    return true;
+}
+
+/**
+ * Optimistic locking: recusa a gravação se o caso mudou desde que o cliente o
+ * carregou. Só valida quando o cliente envia `ver` (clientes antigos seguem sem
+ * a checagem). Em divergência, emite a resposta de erro e retorna false para o
+ * caller abortar com `break`.
+ */
+/** Compara duas listas por valor e ordem, normalizando a reindexação. */
+function arrEq(array $a, array $b): bool {
+    return array_values($a) === array_values($b);
+}
+
+function checkCaseVersion(array $caso): bool {
+    $sent = $_POST['ver'] ?? '';
+    if ($sent !== '' && isset($caso['ver']) && !hash_equals((string)$caso['ver'], (string)$sent)) {
+        echo json_encode([
+            'ok'    => false,
+            'stale' => true,
+            'error' => 'Este caso foi alterado por outra pessoa enquanto você o editava. Recarregue o caso e refaça a ação.',
+        ]);
+        return false;
+    }
     return true;
 }
 
@@ -979,6 +1049,7 @@ switch ($action) {
             $casos = $api->getCasos(true); $caso = null;
             foreach ($casos as $c) { if ($c['id']===$caso_id) { $caso=$c; break; } }
             if (!$caso) { echo json_encode(['ok'=>false,'error'=>'Caso não encontrado.']); break; }
+            if (!checkCaseVersion($caso)) break;
             if (!empty($caso['bloqueado'])) {
                 $motivo = trim($caso['motivo_bloqueio'] ?? '');
                 echo json_encode(['ok'=>false,'error'=>'Caso BLOQUEADO — não pode receber novos usos.'.($motivo!==''?' Motivo: '.$motivo:'')]);
@@ -1068,10 +1139,12 @@ switch ($action) {
                 'count'=>count($clean), 'entries'=>$clean,
             ]);
 
+            $newVer = GoogleAPI::caseVersion($nufs, $ncids, $nclis, $caso['tags']??[], $caso['motivo_bloqueio']??'');
             echo json_encode([
                 'ok'=>true,
                 'depois'=>['ufs'=>$nufs,'cidades'=>$ncids,'clientes'=>$nclis],
                 'count'=>count($clean),
+                'ver'=>$newVer,
             ]);
         } catch (Throwable $e) {
             echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
@@ -1138,9 +1211,14 @@ switch ($action) {
 
         if (!$caso_id||!$row||$idx<0) { echo json_encode(['ok'=>false,'error'=>'Dados inválidos.']); break; }
         try {
-            $casos = $api->getCasos(); $caso = null;
+            if (!acquireCaseLock($caso_id)) {
+                echo json_encode(['ok'=>false,'error'=>'Este caso está sendo editado por outro usuário. Tente novamente em alguns segundos.']); break;
+            }
+            DB::clearSheetCache();
+            $casos = $api->getCasos(true); $caso = null;
             foreach ($casos as $c) { if ($c['id']===$caso_id) { $caso=$c; break; } }
             if (!$caso) { echo json_encode(['ok'=>false,'error'=>'Caso não encontrado.']); break; }
+            if (!checkCaseVersion($caso)) break;
             if (!isset($caso['ufs'][$idx])) { echo json_encode(['ok'=>false,'error'=>'Índice inválido.']); break; }
 
             $antes = ['ufs'=>$caso['ufs'],'cidades'=>$caso['cidades'],'clientes'=>$caso['clientes']];
@@ -1150,7 +1228,8 @@ switch ($action) {
             $api->updateCaso($row, implode('/',$ufs), implode('/',$cids), implode('/',$clis));
             DB::log($me, $caso_id, 'remove_uso', $antes, ['ufs'=>$ufs,'cidades'=>$cids,'clientes'=>$clis]);
 
-            echo json_encode(['ok'=>true,'depois'=>['ufs'=>$ufs,'cidades'=>$cids,'clientes'=>$clis]]);
+            $newVer = GoogleAPI::caseVersion($ufs, $cids, $clis, $caso['tags']??[], $caso['motivo_bloqueio']??'');
+            echo json_encode(['ok'=>true,'depois'=>['ufs'=>$ufs,'cidades'=>$cids,'clientes'=>$clis],'ver'=>$newVer]);
         } catch (Throwable $e) {
             echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
         }
@@ -1172,9 +1251,14 @@ switch ($action) {
             echo json_encode(['ok'=>false,'error'=>'Dados inválidos.']); break;
         }
         try {
-            $casos = $api->getCasos(); $caso = null;
+            if (!acquireCaseLock($caso_id)) {
+                echo json_encode(['ok'=>false,'error'=>'Este caso está sendo editado por outro usuário. Tente novamente em alguns segundos.']); break;
+            }
+            DB::clearSheetCache();
+            $casos = $api->getCasos(true); $caso = null;
             foreach ($casos as $c) { if ($c['id']===$caso_id) { $caso=$c; break; } }
             if (!$caso) { echo json_encode(['ok'=>false,'error'=>'Caso não encontrado.']); break; }
+            if (!checkCaseVersion($caso)) break;
 
             $antes = ['ufs'=>$caso['ufs'],'cidades'=>$caso['cidades'],'clientes'=>$caso['clientes']];
             $ufs   = $caso['ufs'];
@@ -1197,10 +1281,39 @@ switch ($action) {
             $api->updateCaso($row, implode('/',$ufs), implode('/',$cids), implode('/',$clis));
             DB::log($me, $caso_id, 'remove_'.$tipo, $antes, ['ufs'=>$ufs,'cidades'=>$cids,'clientes'=>$clis]);
 
-            echo json_encode(['ok'=>true,'depois'=>['ufs'=>$ufs,'cidades'=>$cids,'clientes'=>$clis]]);
+            $newVer = GoogleAPI::caseVersion($ufs, $cids, $clis, $caso['tags']??[], $caso['motivo_bloqueio']??'');
+            echo json_encode(['ok'=>true,'depois'=>['ufs'=>$ufs,'cidades'=>$cids,'clientes'=>$clis],'ver'=>$newVer]);
         } catch (Throwable $e) {
             echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
         }
+        break;
+
+    // Presença em edição: registra/atualiza/remove a presença do usuário num
+    // caso e devolve os OUTROS usuários ativos (heartbeat < 45s). Base para o
+    // aviso "fulano também está editando este caso".
+    case 'case_presence':
+        $caso_id = preg_replace('/[^A-Z0-9\-]/','',strtoupper($_POST['caso_id']??''));
+        $event   = $_POST['event'] ?? 'ping';   // open | ping | close
+        if (!$caso_id) { echo json_encode(['ok'=>false,'error'=>'Caso inválido.']); break; }
+        $others = [];
+        withJsonLock(PRIVATE_CONFIG_PATH.'/presence.json', function($data) use ($caso_id, $event, $me, &$others) {
+            if (!is_array($data)) $data = [];
+            $now = time();
+            // Poda entradas antigas (>45s) em todos os casos para não acumular.
+            foreach ($data as $cid => $users) {
+                foreach ($users as $u => $ts) if (!is_int($ts) || ($now - $ts) > 45) unset($data[$cid][$u]);
+                if (empty($data[$cid])) unset($data[$cid]);
+            }
+            if ($event === 'close') {
+                unset($data[$caso_id][$me]);
+                if (isset($data[$caso_id]) && empty($data[$caso_id])) unset($data[$caso_id]);
+            } else {
+                $data[$caso_id][$me] = $now;
+            }
+            foreach (($data[$caso_id] ?? []) as $u => $ts) if ($u !== $me) $others[] = $u;
+            return $data;
+        });
+        echo json_encode(['ok'=>true,'others'=>array_values(array_unique($others))]);
         break;
 
     // ── Limpar cache ──────────────────────────────────────
@@ -1214,6 +1327,8 @@ switch ($action) {
                     if (!empty($p['local_thumb'])) @unlink($thumbDir.'/'.$p['local_thumb']);
                 echo json_encode(['ok'=>true,'msg'=>"Cache do {$caso_id} limpo."]);
             } else {
+                // Limpeza global afeta todos os usuários da base — restrita a admin.
+                requireAdmin($isAdmin);
                 DB::clearThumbCache();
                 DB::clearFolderCache();
                 DB::clearSheetCache();
@@ -1225,11 +1340,11 @@ switch ($action) {
         } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
         break;
 
-    // Sincronização Drive↔planilha — PREVIEW (admin). Cruza os IDs de caso
-    // encontrados nos NOMES dos arquivos do Drive com as linhas da planilha.
-    // Compara por número (ignora zeros à esquerda) pra não duplicar.
+    // Sincronização Drive↔planilha — PREVIEW. Cruza os IDs de caso encontrados
+    // nos NOMES dos arquivos do Drive com as linhas da planilha. Compara por
+    // número (ignora zeros à esquerda) pra não duplicar. Liberado a qualquer
+    // usuário logado (ação de leitura).
     case 'sync_preview':
-        requireAdmin($isAdmin);
         try {
             $driveIds = $api->listDriveCaseIds();
             DB::clearSheetCache();
@@ -1250,10 +1365,10 @@ switch ($action) {
         } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
         break;
 
-    // Sincronização Drive↔planilha — APPLY (admin). Cria linhas (só o ID na
-    // coluna B) para os IDs informados que ainda não existem na planilha.
+    // Sincronização Drive↔planilha — APPLY. Cria linhas (só o ID na coluna B)
+    // para os IDs informados que ainda não existem na planilha. Liberado a
+    // qualquer usuário logado; é aditivo (só cria linhas de IDs já no Drive).
     case 'sync_apply':
-        requireAdmin($isAdmin);
         $ids = array_values(array_filter(array_map(
             fn($s) => preg_replace('/[^A-Z0-9\-]/', '', strtoupper(trim($s))),
             explode(',', $_POST['ids'] ?? '')
@@ -1284,22 +1399,61 @@ switch ($action) {
         requireAdmin($isAdmin);
         $caso_id  = preg_replace('/[^A-Z0-9\-]/','',strtoupper($_POST['caso_id']??''));
         $row      = (int)($_POST['row']??0);
-        $ufs_str  = trim($_POST['ufs']??'');
-        $cids_str = trim($_POST['cidades']??'');
-        $clis_str = trim($_POST['clientes']??'');
+        // Flags indicam quais grupos de campos o estado-alvo contém. Uma entrada
+        // de histórico pode ter mexido só em uso (C:E), só em tags (F) ou só no
+        // motivo/bloqueio (G); restauramos apenas o que foi alterado, preservando
+        // o restante do estado atual.
+        $setUso    = ($_POST['set_uso']    ?? '') === '1';
+        $setTags   = ($_POST['set_tags']   ?? '') === '1';
+        $setMotivo = ($_POST['set_motivo'] ?? '') === '1';
         if (!$caso_id||!$row) { echo json_encode(['ok'=>false,'error'=>'Dados inválidos.']); break; }
+        if (!$setUso && !$setTags && !$setMotivo) { echo json_encode(['ok'=>false,'error'=>'Nada para reverter nesta entrada.']); break; }
         try {
-            $casos = $api->getCasos();
+            if (!acquireCaseLock($caso_id)) {
+                echo json_encode(['ok'=>false,'error'=>'Este caso está sendo editado por outro usuário. Tente novamente em alguns segundos.']); break;
+            }
+            DB::clearSheetCache();
+            $casos = $api->getCasos(true);
             $caso = null;
             foreach ($casos as $c) { if ($c['id']===$caso_id) { $caso=$c; break; } }
-            if (!$caso) { echo json_encode(['ok'=>false,'error'=>'Caso não encontrado.']); break; }
-            $antes = ['ufs'=>$caso['ufs'],'cidades'=>$caso['cidades'],'clientes'=>$caso['clientes']];
-            $api->updateCaso($row, $ufs_str, $cids_str, $clis_str);
-            $nufs  = $ufs_str  ? array_values(array_filter(array_map('trim',explode('/',$ufs_str))))  : [];
-            $ncids = $cids_str ? array_values(array_filter(array_map('trim',explode('/',$cids_str)))) : [];
-            $nclis = $clis_str ? array_values(array_filter(array_map('trim',explode('/',$clis_str)))) : [];
-            DB::log($me, $caso_id, 'revert', $antes, ['ufs'=>$nufs,'cidades'=>$ncids,'clientes'=>$nclis]);
-            echo json_encode(['ok'=>true]);
+            if (!$caso) { echo json_encode(['ok'=>false,'error'=>'Caso não encontrado na planilha atual.']); break; }
+
+            $splitArr = fn($s) => trim((string)$s) === '' ? [] : array_values(array_filter(array_map('trim', explode('/', (string)$s))));
+
+            $antes = ['ufs'=>$caso['ufs'],'cidades'=>$caso['cidades'],'clientes'=>$caso['clientes'],'tags'=>$caso['tags']??[],'motivo_bloqueio'=>$caso['motivo_bloqueio']??''];
+
+            $nufs   = $setUso    ? $splitArr($_POST['ufs']??'')      : $caso['ufs'];
+            $ncids  = $setUso    ? $splitArr($_POST['cidades']??'')  : $caso['cidades'];
+            $nclis  = $setUso    ? $splitArr($_POST['clientes']??'') : $caso['clientes'];
+            $ntags  = $setTags   ? $splitArr($_POST['tags']??'')     : ($caso['tags']??[]);
+            $nmot   = $setMotivo ? trim($_POST['motivo']??'')        : ($caso['motivo_bloqueio']??'');
+
+            // Escrita atômica C:G restaura uso, tags e motivo/bloqueio de uma vez.
+            $api->updateCaso($row, implode('/',$nufs), implode('/',$ncids), implode('/',$nclis), implode('/',$ntags), $nmot);
+
+            // Verificação pós-gravação: relê a planilha e confere se o estado
+            // bate com o alvo, devolvendo o resultado real ao cliente.
+            DB::clearSheetCache();
+            $after = null;
+            foreach ($api->getCasos(true) as $c) { if ($c['id']===$caso_id) { $after=$c; break; } }
+            $depois = $after
+                ? ['ufs'=>$after['ufs'],'cidades'=>$after['cidades'],'clientes'=>$after['clientes'],'tags'=>$after['tags']??[],'motivo_bloqueio'=>$after['motivo_bloqueio']??'','bloqueado'=>$after['bloqueado']??false]
+                : ['ufs'=>$nufs,'cidades'=>$ncids,'clientes'=>$nclis,'tags'=>$ntags,'motivo_bloqueio'=>$nmot];
+
+            $verified = $after
+                && arrEq($after['ufs'], $nufs)
+                && arrEq($after['cidades'], $ncids)
+                && arrEq($after['clientes'], $nclis)
+                && arrEq($after['tags']??[], $ntags)
+                && trim($after['motivo_bloqueio']??'') === trim($nmot);
+
+            DB::log($me, $caso_id, 'revert', $antes, $depois);
+            echo json_encode([
+                'ok'       => true,
+                'verified' => $verified,
+                'depois'   => $depois,
+                'ver'      => $after['ver'] ?? GoogleAPI::caseVersion($nufs,$ncids,$nclis,$ntags,$nmot),
+            ]);
         } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
         break;
 
@@ -1472,6 +1626,7 @@ switch ($action) {
             $casos = $api->getCasos(true); $caso = null;
             foreach ($casos as $c) { if ($c['id']===$caso_id) { $caso=$c; break; } }
             if (!$caso) { echo json_encode(['ok'=>false,'error'=>'Caso não encontrado.']); break; }
+            if (!checkCaseVersion($caso)) break;
             if (!empty($caso['bloqueado'])) {
                 echo json_encode(['ok'=>false,'error'=>'Caso já está bloqueado.']); break;
             }
@@ -1485,9 +1640,11 @@ switch ($action) {
             // Escrita atômica de C:G para evitar estados parciais.
             $api->updateCaso($row, implode('/',$nufs), implode('/',$ncids), implode('/',$nclis), $tags, $motivo);
             DB::log($me, $caso_id, 'block', $antes, ['ufs'=>$nufs,'cidades'=>$ncids,'clientes'=>$nclis,'motivo_bloqueio'=>$motivo,'bloqueado'=>true]);
+            $newVer = GoogleAPI::caseVersion($nufs, $ncids, $nclis, $caso['tags']??[], $motivo);
             echo json_encode([
                 'ok'=>true,
-                'depois'=>['ufs'=>$nufs,'cidades'=>$ncids,'clientes'=>$nclis,'tags'=>$caso['tags']??[],'motivo_bloqueio'=>$motivo,'bloqueado'=>true]
+                'depois'=>['ufs'=>$nufs,'cidades'=>$ncids,'clientes'=>$nclis,'tags'=>$caso['tags']??[],'motivo_bloqueio'=>$motivo,'bloqueado'=>true],
+                'ver'=>$newVer
             ]);
         } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
         break;
@@ -1506,6 +1663,7 @@ switch ($action) {
             $casos = $api->getCasos(true); $caso = null;
             foreach ($casos as $c) { if ($c['id']===$caso_id) { $caso=$c; break; } }
             if (!$caso) { echo json_encode(['ok'=>false,'error'=>'Caso não encontrado.']); break; }
+            if (!checkCaseVersion($caso)) break;
             if (empty($caso['bloqueado'])) {
                 echo json_encode(['ok'=>false,'error'=>'Caso não está bloqueado.']); break;
             }
@@ -1519,9 +1677,11 @@ switch ($action) {
             $tags  = implode('/', $caso['tags'] ?? []);
             $api->updateCaso($row, implode('/',$nufs), implode('/',$ncids), implode('/',$nclis), $tags, '');
             DB::log($me, $caso_id, 'unblock', $antes, ['ufs'=>$nufs,'cidades'=>$ncids,'clientes'=>$nclis,'motivo_bloqueio'=>'','bloqueado'=>false]);
+            $newVer = GoogleAPI::caseVersion($nufs, $ncids, $nclis, $caso['tags']??[], '');
             echo json_encode([
                 'ok'=>true,
-                'depois'=>['ufs'=>$nufs,'cidades'=>$ncids,'clientes'=>$nclis,'tags'=>$caso['tags']??[],'motivo_bloqueio'=>'','bloqueado'=>false]
+                'depois'=>['ufs'=>$nufs,'cidades'=>$ncids,'clientes'=>$nclis,'tags'=>$caso['tags']??[],'motivo_bloqueio'=>'','bloqueado'=>false],
+                'ver'=>$newVer
             ]);
         } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
         break;
@@ -1552,13 +1712,15 @@ switch ($action) {
             $casos = $api->getCasos(true); $caso = null;
             foreach ($casos as $c) { if ($c['id']===$caso_id) { $caso=$c; break; } }
             if (!$caso) { echo json_encode(['ok'=>false,'error'=>'Caso não encontrado.']); break; }
+            if (!checkCaseVersion($caso)) break;
             $cur = $caso['tags'] ?? [];
             if (in_array($tag, $cur, true)) { echo json_encode(['ok'=>true,'tags'=>$cur,'msg'=>'Tag já existe.']); break; }
             if (count($cur) >= 20) { echo json_encode(['ok'=>false,'error'=>'Máximo de 20 tags por caso.']); break; }
             $nv = array_values(array_merge($cur, [$tag]));
             $api->updateCasoTags($row, implode('/', $nv));
             DB::log($me, $caso_id, 'add_tag', ['tags'=>$cur], ['tags'=>$nv]);
-            echo json_encode(['ok'=>true,'tags'=>$nv]);
+            $newVer = GoogleAPI::caseVersion($caso['ufs'], $caso['cidades'], $caso['clientes'], $nv, $caso['motivo_bloqueio']??'');
+            echo json_encode(['ok'=>true,'tags'=>$nv,'ver'=>$newVer]);
         } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
         break;
 
@@ -1618,12 +1780,14 @@ switch ($action) {
             $casos = $api->getCasos(true); $caso = null;
             foreach ($casos as $c) { if ($c['id']===$caso_id) { $caso=$c; break; } }
             if (!$caso) { echo json_encode(['ok'=>false,'error'=>'Caso não encontrado.']); break; }
+            if (!checkCaseVersion($caso)) break;
             $cur = $caso['tags'] ?? [];
             $nv  = array_values(array_filter($cur, fn($t)=>$t !== $tag));
             if (count($nv) === count($cur)) { echo json_encode(['ok'=>true,'tags'=>$cur,'msg'=>'Tag não estava presente.']); break; }
             $api->updateCasoTags($row, implode('/', $nv));
             DB::log($me, $caso_id, 'remove_tag', ['tags'=>$cur], ['tags'=>$nv]);
-            echo json_encode(['ok'=>true,'tags'=>$nv]);
+            $newVer = GoogleAPI::caseVersion($caso['ufs'], $caso['cidades'], $caso['clientes'], $nv, $caso['motivo_bloqueio']??'');
+            echo json_encode(['ok'=>true,'tags'=>$nv,'ver'=>$newVer]);
         } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
         break;
 
