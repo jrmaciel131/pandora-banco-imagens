@@ -2,7 +2,7 @@
 
 let selMode = false, selIds = new Set(), bulkSelIds = new Set();
 let bulkCities = {ba:[], bi:[]};
-let _lfIdx = 0;
+let _lfIdx = 0, _lfLoadToken = 0;
 
 function openLightboxFlo(idx){
   if(!currentPhotos || !currentPhotos.length) return;
@@ -28,9 +28,24 @@ function renderLightboxFlo(){
   if(!p) return;
   const img = document.getElementById('lf-img');
   const info = document.getElementById('lf-info');
-  /* Para vídeos, mostra a thumbnail (lightbox simples não toca o vídeo). */
-  img.src = p.thumb_url || '';
   img.alt = p.name || '';
+  /* Marca a navegação atual para descartar carregamentos de imagens já trocadas. */
+  const token = ++_lfLoadToken;
+  /* Mostra a thumbnail imediatamente; para vídeos não há original exibível. */
+  img.src = p.thumb_url || '';
+  img.classList.remove('lf-loading');
+  if(!p.isVideo && p.id){
+    /* Busca o original do Drive sob demanda e troca quando estiver pronto. */
+    img.classList.add('lf-loading');
+    const full = new Image();
+    full.onload = () => {
+      if(token !== _lfLoadToken) return;
+      img.src = full.src;
+      img.classList.remove('lf-loading');
+    };
+    full.onerror = () => { if(token === _lfLoadToken) img.classList.remove('lf-loading'); };
+    full.src = `${API}?action=view_photo&file_id=${encodeURIComponent(p.id)}`;
+  }
   const tag = p.version_tag ? ` · ${p.version_tag}` : '';
   info.textContent = `${p.name || ''} (${_lfIdx+1}/${currentPhotos.length})${tag}`;
   document.getElementById('lf-prev').disabled = currentPhotos.length <= 1;

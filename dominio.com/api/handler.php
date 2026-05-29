@@ -1932,6 +1932,28 @@ switch ($action) {
         }
         break;
 
+    // ── Exibição inline de uma foto/arquivo do Drive (lightbox) ─
+    case 'view_photo':
+        $fileId = preg_replace('/[^A-Za-z0-9_\-]/','',$_GET['file_id']??'');
+        if (!$fileId) { http_response_code(400); echo json_encode(['ok'=>false,'error'=>'file_id inválido.']); break; }
+        try {
+            $r = $api->downloadDriveFile($fileId);
+            if (!$r['ok']) { http_response_code(502); echo json_encode(['ok'=>false,'error'=>$r['error']??'Falha']); break; }
+            // Substitui os headers JSON padrão por headers de imagem inline.
+            header_remove('Content-Type');
+            header_remove('X-Frame-Options');
+            header('Content-Type: '.$r['mime']);
+            header('Content-Length: '.strlen($r['data']));
+            header('Content-Disposition: inline');
+            header('Cache-Control: private, max-age=600');
+            echo $r['data'];
+            exit;
+        } catch (Throwable $e) {
+            http_response_code(500);
+            echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
+        }
+        break;
+
     // ── Download em lote: ZIP com até 30 casos ─────────────────
     case 'download_bulk':
         if (!class_exists('ZipArchive')) { echo json_encode(['ok'=>false,'error'=>'ZipArchive não disponível neste servidor.']); break; }
