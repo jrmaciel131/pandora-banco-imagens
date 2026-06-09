@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Central de Ferramentas</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f1117; --text: #e0e0e0; --text-dim: #cfd8e3; --text-strong: #ffffff;
+    --header-grad: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    --header-border: #1e3a5f; --header-sub: #eef2f8;
+    --panel: #161b2e; --panel-border: #1e2d48;
+    --accent: #1565c0; --accent-hover: #1976d2;
+    --color-scheme: dark;
+  }
+  body.light {
+    --bg: #f3f5f9; --text: #2a3344; --text-dim: #54627a; --text-strong: #0d1b34;
+    --header-grad: linear-gradient(135deg, #1565c0 0%, #1976d2 55%, #2196f3 100%);
+    --header-border: #c4d4ea; --header-sub: #eaf2fc;
+    --panel: #ffffff; --panel-border: #dde4ee;
+    --accent: #1565c0; --accent-hover: #1976d2;
+    --color-scheme: light;
+  }
+
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: var(--bg); color: var(--text);
+    min-height: 100vh; display: flex; flex-direction: column; transition: background .2s, color .2s; }
+
+  header {
+    background: var(--header-grad); padding: 26px 32px; border-bottom: 1px solid var(--header-border);
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 1.5rem; font-weight: 700; color: #fff; letter-spacing: 0.4px; }
+  header p  { font-size: 0.85rem; color: var(--header-sub); margin-top: 4px; }
+  .theme-toggle { background: rgba(255,255,255,0.14); color: #fff; border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 999px; padding: 8px 16px; font-size: 0.8rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
+  .theme-toggle:hover { background: rgba(255,255,255,0.26); }
+
+  .wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 22px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; max-width: 880px; width: 100%; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+
+  .tool {
+    display: flex; flex-direction: column; text-decoration: none; color: inherit;
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 16px;
+    padding: 30px 26px 26px; position: relative; overflow: hidden;
+    transition: transform .15s, border-color .15s, box-shadow .15s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .tool::before { content:''; position:absolute; top:0; left:0; right:0; height:4px; background: var(--bar); }
+  .tool:hover { transform: translateY(-4px); border-color: var(--accent); box-shadow: 0 10px 28px rgba(0,0,0,0.22); }
+  .tool .icon { font-size: 2.6rem; line-height: 1; margin-bottom: 16px; }
+  .tool h2 { font-size: 1.18rem; font-weight: 700; color: var(--text-strong); margin-bottom: 8px; }
+  .tool p { font-size: 0.88rem; color: var(--text-dim); line-height: 1.5; flex: 1; }
+  .tool .go { margin-top: 20px; display: inline-flex; align-items: center; gap: 8px;
+    font-size: 0.85rem; font-weight: 700; color: #fff; background: var(--accent);
+    padding: 11px 18px; border-radius: 10px; align-self: flex-start; transition: background .15s; }
+  .tool:hover .go { background: var(--accent-hover); }
+
+  /* card "em breve" — desabilitado */
+  .tool.soon { cursor: default; opacity: 0.62; }
+  .tool.soon:hover { transform: none; border-color: var(--panel-border); box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .tool.soon .icon { filter: grayscale(0.5); }
+  .tool.soon .go { background: var(--panel-border); color: var(--text-dim); }
+  .tool.soon:hover .go { background: var(--panel-border); }
+  .badge-soon { position: absolute; top: 16px; right: 16px; font-size: 0.66rem; font-weight: 800;
+    letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-dim);
+    background: var(--bg); border: 1px solid var(--panel-border); border-radius: 999px; padding: 4px 10px; }
+
+  footer { text-align: center; padding: 20px; font-size: 0.78rem; color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Central de Ferramentas</h1>
+    <p>Escolha uma ferramenta para come&ccedil;ar.</p>
+  </div>
+  <button id="theme-btn" class="theme-toggle" onclick="toggleTheme()">&#9728;&#65039; Tema claro</button>
+</header>
+
+<div class="wrap">
+  <div class="grid">
+
+    <a class="tool" href="Dashboard-Automatico.html" style="--bar:#1565c0;">
+      <div class="icon">&#128202;</div>
+      <h2>Dashboard para An&aacute;lise Estrat&eacute;gica</h2>
+      <p>Visualize resultados, investimento e custo por resultado a partir do relat&oacute;rio do Meta. Compare campanhas, conjuntos e per&iacute;odos (di&aacute;rio, semanal e mensal).</p>
+      <span class="go">Abrir dashboard &rarr;</span>
+    </a>
+
+    <a class="tool" href="Calculadora-Imposto.html" style="--bar:#F59E0B;">
+      <div class="icon">&#129518;</div>
+      <h2>Calculadora de Imposto</h2>
+      <p>Calcule o imposto de 12,15% sobre o que investe na plataforma. Converta valores pr&eacute;-pago e p&oacute;s-pago e planeje o or&ccedil;amento para a fatura n&atilde;o estourar.</p>
+      <span class="go">Abrir calculadora &rarr;</span>
+    </a>
+
+    <a class="tool" href="../relatorio" style="--bar:#7E57C2;">
+      <div class="icon">&#128221;</div>
+      <h2>Gerador de Relat&oacute;rio</h2>
+      <p>Gere o relat&oacute;rio mensal visual de resultados a partir da planilha do Meta. Popula gr&aacute;ficos e KPIs automaticamente e exporta em PDF.</p>
+      <span class="go">Abrir gerador &rarr;</span>
+    </a>
+
+    <a class="tool" href="../" style="--bar:#00ACC1;">
+      <div class="icon">&#128444;&#65039;</div>
+      <h2>Banco de Imagens</h2>
+      <p>Gerencie o banco de imagens: organize, busque e reaproveite criativos e fotos do acervo em um s&oacute; lugar.</p>
+      <span class="go">Abrir banco de imagens &rarr;</span>
+    </a>
+
+    <a class="tool" href="../export/" style="--bar:#E91E8C;">
+      <div class="icon">&#128228;</div>
+      <h2>Exportador de Imagens</h2>
+      <p>Exporte e formate imagens e criativos rapidamente, no padr&atilde;o certo para cada uso &mdash; tudo no navegador.</p>
+      <span class="go">Abrir exportador &rarr;</span>
+    </a>
+
+    <div class="tool soon" aria-disabled="true" style="--bar:#5c6bc0;">
+      <span class="badge-soon">Em breve</span>
+      <div class="icon">&#128679;</div>
+      <h2>Nova ferramenta</h2>
+      <p>Mais uma ferramenta est&aacute; a caminho. Em breve dispon&iacute;vel aqui.</p>
+      <span class="go">Em breve</span>
+    </div>
+
+  </div>
+</div>
+
+<footer>Ferramentas internas</footer>
+
+<script>
+function applyTheme(light){
+  document.body.classList.toggle('light', light);
+  document.getElementById('theme-btn').innerHTML = light ? '\u{1F319} Tema escuro' : '☀️ Tema claro';
+  try{ localStorage.setItem('tools-theme', light?'light':'dark'); }catch(e){}
+}
+function toggleTheme(){ applyTheme(!document.body.classList.contains('light')); }
+window.addEventListener('DOMContentLoaded', ()=>{
+  let saved='dark'; try{ saved = localStorage.getItem('tools-theme') || 'dark'; }catch(e){}
+  applyTheme(saved==='light');
+});
+</script>
+</body>
+</html>
