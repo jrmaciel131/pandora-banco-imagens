@@ -1,5 +1,10 @@
 /* Admin: gestão de usuários, diagnóstico, métricas, histórico e reversões. */
 
+/* Build deste arquivo. Atualize a cada deploy do admin.js; aparece no painel
+   "Diagnóstico de versão" do Admin Mode e é comparado com a cópia do servidor
+   para revelar quando o navegador está com uma versão em cache. */
+const ADMIN_BUILD = 'v23.02 (2026-06-09)';
+
 let adminModeVisible = false;
 let thumbSourceMode = 'auto';
 let _checkedUsers = new Set();
@@ -79,6 +84,7 @@ async function loadAdminPanel(){
   loadCanonicalTagsPanel();
   loadDistanceConfig();
   loadCoringas();
+  loadVersionInfo();
   try{
     const r = await api('list_users');
     if(!r.ok) return;
@@ -114,6 +120,52 @@ async function loadAdminPanel(){
     }).join('');
     r.users.filter(u => u.role !== 'admin').forEach(u => sel.appendChild(new Option(u.user, u.user)));
   } catch(e){}
+}
+
+/* Painel "Diagnóstico de versão": confronta o que está no servidor (data, hash,
+   build) com o que o navegador carregou de fato. Build do servidor diferente do
+   carregado = versão em cache; hash diferente do esperado = arquivo antigo. */
+async function loadVersionInfo(){
+  const el = document.getElementById('version-info');
+  if(!el) return;
+  el.innerHTML = '<div style="color:var(--tx2);font-size:12px"><span class="spin"></span> Consultando servidor...</div>';
+  // O que o navegador carregou nesta sessão:
+  const loaded = {
+    'assets/utils.js': (typeof APP_BUILD   !== 'undefined') ? APP_BUILD   : '',
+    'assets/admin.js': (typeof ADMIN_BUILD !== 'undefined') ? ADMIN_BUILD : '',
+  };
+  try{
+    const r = await api('version_info');
+    if(!r.ok){ el.innerHTML = '<span style="color:var(--rtx)">Erro ao consultar versões.</span>'; return; }
+    const rows = r.files.map(f => {
+      if(!f.exists) return `<tr><td style="font-family:var(--font-mono)">${esc(f.file)}</td><td colspan="3" style="color:var(--rtx)">não encontrado no servidor</td></tr>`;
+      let buildCell = f.build ? esc(f.build) : '<span style="color:var(--tx3)">—</span>';
+      const browserBuild = loaded[f.file];
+      if(browserBuild !== undefined){
+        if(f.build && browserBuild === f.build)      buildCell += ' <span style="color:var(--gtx)">✓ navegador igual</span>';
+        else if(f.build && browserBuild !== f.build) buildCell += ` <span style="color:var(--rtx)">✗ navegador em cache: ${esc(browserBuild||'antigo')}</span>`;
+      }
+      return `<tr>
+        <td style="font-family:var(--font-mono);padding:3px 8px 3px 0">${esc(f.file)}</td>
+        <td style="padding:3px 8px;color:var(--tx2)">${esc(f.mtime)}</td>
+        <td style="font-family:var(--font-mono);padding:3px 8px;color:var(--btx)">${esc(f.sha1)}</td>
+        <td style="padding:3px 0">${buildCell}</td>
+      </tr>`;
+    }).join('');
+    el.innerHTML = `
+      <div style="font-size:12px;color:var(--tx2);margin-bottom:.6rem;line-height:1.6">
+        Backend (handler.php): <b>${esc(r.handler_build||'—')}</b><br>
+        Carregado no navegador → utils.js: <b>${esc(loaded['assets/utils.js']||'?')}</b> · admin.js: <b>${esc(loaded['assets/admin.js']||'?')}</b>
+      </div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:520px">
+          <thead><tr style="text-align:left;color:var(--tx3);border-bottom:1px solid var(--bd)">
+            <th style="padding:0 8px 4px 0">arquivo</th><th style="padding:0 8px 4px">modificado</th><th style="padding:0 8px 4px">hash (servidor)</th><th style="padding:0 0 4px">build</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  } catch(e){ el.innerHTML = '<span style="color:var(--rtx)">Erro de conexão.</span>'; }
 }
 
 function setProdAccess(user, allow){
@@ -174,25 +226,69 @@ function validatePassword(pass){
 }
 
 function changePassword(){
-  const user = document.getElementById('pwd-user').value;
-  const pass = document.getElementById('pwd-new').value;
   const err = document.getElementById('pwd-err');
-  err.textContent = '';
-  if(!user){ err.textContent = 'Selecione um usuário.'; return; }
-  const errs = validatePassword(pass);
-  if(errs.length){ err.textContent = 'Senha inválida: falta '+errs.join(', ')+'.'; return; }
-  showConfirm(
-    'Confirmar alteração de senha',
-    `Alterar senha do usuário <b>${esc(user)}</b>?`,
-    [{label:'Usuário', val:user}, {label:'Nova senha', val:'••••••'+pass.slice(-2)}],
-    async () => {
-      try{
-        const r = await api('change_password', {target_user:user, new_password:pass}, 'POST');
-        if(r.ok){ showToast(r.msg); document.getElementById('pwd-new').value = ''; }
-        else err.textContent = r.error || 'Erro.';
-      } catch(e){ err.textContent = 'Erro de conexão.'; }
+  try {
+    const userEl = document.getElementById('pwd-user');
+    const passEl = document.getElementById('pwd-new');
+    if(!userEl || !passEl){
+      alert('Erro: campo de usuário ou de senha não encontrado na página (pwd-user/pwd-new).');
+      return;
     }
-  );
+    const user = userEl.value;
+    const pass = passEl.value;
+    if(err) err.textContent = '';
+    if(!user){ if(err) err.textContent = 'Selecione um usuário.'; return; }
+    const errs = validatePassword(pass);
+    if(errs.length){ if(err) err.textContent = 'Senha inválida: falta '+errs.join(', ')+'.'; return; }
+    showConfirm(
+      'Confirmar alteração de senha',
+      `Alterar senha do usuário <b>${esc(user)}</b>?`,
+      [{label:'Usuário', val:user}, {label:'Nova senha', val:'••••••'+pass.slice(-2)}],
+      async () => {
+        try{
+          const r = await api('change_password', {target_user:user, new_password:pass}, 'POST');
+          if(r.ok){ showToast(r.msg); passEl.value = ''; }
+          else if(err) err.textContent = r.error || 'Erro.';
+        } catch(e){ if(err) err.textContent = 'Erro de conexão: ' + (e && e.message ? e.message : e); }
+      }
+    );
+  } catch(e){
+    // Qualquer falha inesperada antes/ao abrir a confirmação fica visível em um
+    // alerta (e no console) em vez de deixar a tela travada no overlay.
+    const msg = 'Falha ao abrir a confirmação: ' + (e && e.message ? e.message : e);
+    if(err) err.textContent = msg;
+    console.error('changePassword:', e);
+    alert(msg + (e && e.stack ? '\n\n' + e.stack : ''));
+  }
+}
+
+/* Diagnóstico isolado do modal de confirmação. Verifica a presença de cada
+   elemento, tenta abrir o modal e mede a caixa renderizada, reportando tudo em
+   um alerta — útil para depurar em ambientes onde "só aparece o blur". */
+function diagnoseConfirmModal(){
+  const linhas = [];
+  ['confirm-modal','confirm-title','confirm-desc','confirm-changes','confirm-ok-btn'].forEach(id => {
+    linhas.push(id + ': ' + (document.getElementById(id) ? 'OK' : 'AUSENTE'));
+  });
+  linhas.push('showConfirm: ' + (typeof showConfirm === 'function' ? 'OK' : 'AUSENTE'));
+  try{
+    showConfirm('Teste de diagnóstico',
+      'Se você está vendo esta janela, o modal de confirmação funciona.',
+      [{label:'Status', val:'OK'}],
+      () => { showToast('Confirmação funcionou!'); });
+    const box = document.querySelector('#confirm-modal .modal');
+    if(box){
+      const r = box.getBoundingClientRect();
+      const cs = getComputedStyle(box);
+      linhas.push(`caixa: ${Math.round(r.width)}x${Math.round(r.height)} px · visibility=${cs.visibility} · display=${cs.display} · opacity=${cs.opacity}`);
+      linhas.push('overlay aberto: ' + document.getElementById('confirm-modal').classList.contains('open'));
+    } else {
+      linhas.push('caixa .modal: NÃO ENCONTRADA');
+    }
+  } catch(e){
+    linhas.push('ERRO ao abrir: ' + (e && e.message ? e.message : e));
+  }
+  alert('🩺 Diagnóstico do modal de confirmação\n\n' + linhas.join('\n'));
 }
 
 function confirmRemoveUser(user){

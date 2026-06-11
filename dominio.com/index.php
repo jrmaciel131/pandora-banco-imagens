@@ -4,6 +4,17 @@
    automaticamente e o browser baixa a versão nova. */
 function v($f){ $p = __DIR__.'/'.$f; return $f.'?v='.(file_exists($p) ? filemtime($p) : '0'); }
 
+/* Lê o identificador de build embutido em assets/utils.js (a "fonte da verdade"
+   no servidor). É injetado no HTML como window.APP_BUILD_EXPECTED; o utils.js
+   que o navegador carregou compara com o seu próprio APP_BUILD e avisa quando
+   uma versão em cache está sendo exibida. */
+function jsBuild(){
+  $p = __DIR__.'/assets/utils.js';
+  if(!is_file($p)) return '';
+  $head = (string)@file_get_contents($p, false, null, 0, 2000);
+  return preg_match("/APP_BUILD\\s*=\\s*'([^']*)'/", $head, $m) ? $m[1] : '';
+}
+
 // Carrega a config privada apenas para expor a site key pública do Turnstile
 // ao HTML de login. Ausência do arquivo não é fatal (mantém o login funcional).
 $_cfgPath = __DIR__ . '/../private-config/config.php';
@@ -293,6 +304,16 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
           <span id="ds-admin" style="font-size:12px;color:var(--tx2)">Clique para testar</span>
         </div>
         <div class="db" id="db-admin" style="display:none"></div>
+      </div>
+
+      <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:.35rem">🧬 Diagnóstico de versão</h3>
+        <p style="font-size:12px;color:var(--tx2);margin-bottom:.75rem">Confere o que está no servidor (data, hash, build) contra o que o navegador carregou. Build do servidor diferente do carregado = versão em cache; hash diferente do esperado = arquivo antigo no servidor.</p>
+        <div id="version-info"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:.6rem">
+          <button class="btn bs" style="padding:6px 12px;font-size:12px" onclick="loadVersionInfo()">🔄 Atualizar</button>
+          <button class="btn bs" style="padding:6px 12px;font-size:12px" onclick="diagnoseConfirmModal()">🩺 Testar modal</button>
+        </div>
       </div>
 
       <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)">
@@ -684,7 +705,8 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
 
 <div class="toast" id="toast"></div>
 
-<script>window.TURNSTILE_ENABLED = <?php echo $TURNSTILE_SITE_KEY !== '' ? 'true' : 'false'; ?>;</script>
+<script>window.TURNSTILE_ENABLED = <?php echo $TURNSTILE_SITE_KEY !== '' ? 'true' : 'false'; ?>;
+window.APP_BUILD_EXPECTED = <?php echo json_encode(jsBuild()); ?>;</script>
 <!-- A ordem dos scripts é significativa: utils define globais usados pelos demais. -->
 <script src="<?php echo v('assets/utils.js'); ?>"></script>
 <script src="<?php echo v('assets/theme.js'); ?>"></script>

@@ -72,7 +72,7 @@ class GoogleAPI {
         if (!openssl_sign("$h.$p",$sig,$c['private_key'],'SHA256')) throw new Exception('Falha JWT.');
         $jwt="$h.$p.".b64u($sig);
         $resp=hpost('https://oauth2.googleapis.com/token',http_build_query(['grant_type'=>'urn:ietf:params:oauth:grant-type:jwt-bearer','assertion'=>$jwt]),['Content-Type: application/x-www-form-urlencoded']);
-        if (!$resp) throw new Exception('Sem resposta OAuth.');
+        if (!$resp) throw new Exception('Sem resposta OAuth.'.hLastError());
         $d=json_decode($resp,true);
         if (!isset($d['access_token'])) throw new Exception('Token falhou: '.($d['error_description']??json_encode($d)));
 
@@ -163,7 +163,7 @@ class GoogleAPI {
         // Faixa A:G — coluna F concentra as tags; coluna G, o motivo do bloqueio.
         $range=urlencode($this->sheetName.'!A:G');
         $resp=hget("https://sheets.googleapis.com/v4/spreadsheets/".$this->spreadsheetId."/values/$range",["Authorization: Bearer $tok"]);
-        if (!$resp) throw new Exception('Sem resposta Sheets.');
+        if (!$resp) throw new Exception('Sem resposta Sheets.'.hLastError());
         $d=json_decode($resp,true);
         if (isset($d['error'])) {
             $code=$d['error']['code']??0;
@@ -253,7 +253,7 @@ class GoogleAPI {
             if ($resp !== null) break;
             if ($i < 3) sleep($i);
         }
-        if (!$resp) throw new Exception('Sem resposta da API do Google Sheets após 3 tentativas. Verifique allow_url_fopen e a conectividade do servidor.');
+        if (!$resp) throw new Exception('Sem resposta da API do Google Sheets após 3 tentativas. Verifique allow_url_fopen e a conectividade do servidor.'.hLastError());
         $d = json_decode($resp, true);
         if (isset($d['error'])) throw new Exception('Erro ao gravar na planilha: '.($d['error']['message']??json_encode($d['error'])));
     }
@@ -282,7 +282,7 @@ class GoogleAPI {
         $allIds=[$this->driveFolderId];
         $q=urlencode("'".$this->driveFolderId."' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false");
         $resp=hget("https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name)&pageSize=100",["Authorization: Bearer $tok"]);
-        if (!$resp) throw new Exception('Sem resposta listando subpastas.');
+        if (!$resp) throw new Exception('Sem resposta listando subpastas.'.hLastError());
         $d=json_decode($resp,true);
         if (isset($d['error'])) throw new Exception('Drive subpastas: '.($d['error']['message']??''));
         foreach (($d['files']??[]) as $sub) {
@@ -341,7 +341,7 @@ class GoogleAPI {
         $tok   = $this->getToken();
         $range = urlencode($this->sheetName.'!A:G');
         $resp  = hget("https://sheets.googleapis.com/v4/spreadsheets/".$this->spreadsheetId."/values/$range", ["Authorization: Bearer $tok"]);
-        if (!$resp) throw new Exception('Sem resposta do Sheets ao localizar a última linha.');
+        if (!$resp) throw new Exception('Sem resposta do Sheets ao localizar a última linha.'.hLastError());
         $d = json_decode($resp, true);
         if (isset($d['error'])) throw new Exception('Sheets: '.($d['error']['message']??''));
         return count($d['values'] ?? []) + 1;
@@ -378,8 +378,16 @@ class GoogleAPI {
             if ($cached!==null) {
                 if (!empty($cached)) {
                     // Cache COM fotos: valida thumbs locais e reusa pelo TTL cheio.
+                    // Um registro íntegro porém sem NENHUMA thumb utilizável (os
+                    // downloads falharam quando foi gravado) não pode valer pelos
+                    // 30 dias do TTL: é revalidado a cada 5 min, como o cache
+                    // vazio, para que as thumbs se regenerem sozinhas.
                     $valid=array_filter($cached,fn($p)=>empty($p['local_thumb'])||file_exists($this->thumbDir.'/'.$p['local_thumb']));
-                    if (count($valid)===count($cached)) return $cached;
+                    if (count($valid)===count($cached)) {
+                        $usable=array_filter($cached,fn($p)=>!empty($p['local_thumb'])&&file_exists($this->thumbDir.'/'.$p['local_thumb']));
+                        if ($usable) return $cached;
+                        if (DB::getThumbCache($caso_id, 300) !== null) return $cached;
+                    }
                 } else {
                     // Cache VAZIO: só reusa se checado nos últimos 5 min. Senão re-busca
                     // no Drive — resolve fotos adicionadas após um open vazio, sem precisar
@@ -395,8 +403,12 @@ class GoogleAPI {
             $parents=implode(' or ',array_map(fn($id)=>"'$id' in parents",$chunk));
             $q=urlencode("($parents) and name contains '$caso_id' and trashed=false");
             $resp=hget("https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,mimeType,thumbnailLink,webViewLink)&pageSize=100",["Authorization: Bearer $tok"]);
-            if (!$resp) continue;
+            // Falha de transporte ou erro da API abortam a busca em vez de
+            // seguir adiante: um resultado parcial/vazio seria gravado no
+            // cache como "caso sem fotos" e mascararia o problema real.
+            if (!$resp) throw new Exception('Sem resposta na busca do Drive ('.$caso_id.').'.hLastError());
             $d=json_decode($resp,true);
+            if (isset($d['error'])) throw new Exception('Drive ('.$caso_id.'): '.($d['error']['message']??'erro desconhecido').' [HTTP '.($d['error']['code']??'?').']');
             if (isset($d['files'])) $allFiles=array_merge($allFiles,$d['files']);
         }
 
@@ -412,7 +424,8 @@ class GoogleAPI {
 
         $thumbResults = $this->downloadThumbsBatch(
             array_filter($files, fn($f) => !empty($f['thumbnailLink'])),
-            $tok
+            $tok,
+            $thumbErrors
         );
 
         $photos=[];
@@ -436,6 +449,14 @@ class GoogleAPI {
 
             $localThumb = $thumbResults[$f['id']] ?? null;
 
+            // Sem thumb local, registra o motivo: ele fica persistido no cache
+            // e é exibido nas métricas visuais do modo admin.
+            $thumbError = null;
+            if ($localThumb === null) {
+                $thumbError = $thumbErrors[$f['id']]
+                    ?? (empty($f['thumbnailLink']) ? 'Drive não fornece thumbnail para este arquivo' : 'falha no download da thumbnail');
+            }
+
             $photos[]=[
                 'id'           =>$f['id'],
                 'name'         =>$name,
@@ -445,6 +466,7 @@ class GoogleAPI {
                 'version'      =>$version,
                 'version_tag'  =>$version_tag,
                 'local_thumb'  =>$localThumb,
+                'thumb_error'  =>$thumbError,
                 'webViewLink'  =>$f['webViewLink']??null,
                 'variant_group'=>$base,
             ];
@@ -501,11 +523,13 @@ class GoogleAPI {
      * já trafega os dados em paralelo via TCP enquanto os handles estão
      * abertos.
      *
-     * @param array  $files Lista de arquivos do Drive com `thumbnailLink`.
-     * @param string $tok   Access token a ser usado no cabeçalho Authorization.
+     * @param array      $files  Lista de arquivos do Drive com `thumbnailLink`.
+     * @param string     $tok    Access token a ser usado no cabeçalho Authorization.
+     * @param array|null $errors Recebe, por fileId, o motivo de cada download que falhou.
      * @return array<string, string|null> Mapa fileId → filename local (ou null).
      */
-    public function downloadThumbsBatch(array $files, string $tok): array {
+    public function downloadThumbsBatch(array $files, string $tok, ?array &$errors = null): array {
+        $errors = [];
         if (!is_dir($this->thumbDir)) @mkdir($this->thumbDir, 0755, true);
         $results = [];
         $streams = [];
@@ -539,17 +563,25 @@ class GoogleAPI {
         foreach ($streams as $fid => $s) {
             $h = @fopen($s['src'], 'r', false, $s['ctx']);
             if ($h) $handles[$fid] = ['handle'=>$h,'path'=>$s['path'],'filename'=>$s['filename']];
-            else $results[$fid] = null;
+            else { $results[$fid] = null; $errors[$fid] = 'falha ao abrir o stream da thumbnail no Drive'; }
         }
 
         foreach ($handles as $fid => $h) {
             $data = @stream_get_contents($h['handle']);
             @fclose($h['handle']);
             if ($data && strlen($data) > 100) {
-                @file_put_contents($h['path'], $data);
-                $results[$fid] = $h['filename'];
+                // Gravação verificada: disco cheio ou diretório sem permissão
+                // não podem passar como download bem-sucedido, senão o cache
+                // registra um arquivo que não existe.
+                if (@file_put_contents($h['path'], $data) !== false) {
+                    $results[$fid] = $h['filename'];
+                } else {
+                    $results[$fid] = null;
+                    $errors[$fid] = 'download OK mas falhou a gravação em disco (disco cheio ou sem permissão?)';
+                }
             } else {
                 $results[$fid] = null;
+                $errors[$fid] = 'resposta vazia/curta do Drive ('.strlen((string)$data).' bytes)';
             }
         }
 
@@ -560,7 +592,7 @@ class GoogleAPI {
         $tok=$this->getToken();
         $q=urlencode("'".$this->driveFolderId."' in parents and trashed=false");
         $resp=hget("https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name)&pageSize=$max",["Authorization: Bearer $tok"]);
-        if (!$resp) throw new Exception('Sem resposta listando Drive.');
+        if (!$resp) throw new Exception('Sem resposta listando Drive.'.hLastError());
         $d=json_decode($resp,true);
         if (isset($d['error'])) throw new Exception('Drive: '.($d['error']['message']??''));
         return $d['files']??[];
@@ -577,7 +609,7 @@ class GoogleAPI {
         $tok = $this->getToken();
         $metaUrl = "https://www.googleapis.com/drive/v3/files/".urlencode($fileId)."?fields=id,name,mimeType,size";
         $meta = hget($metaUrl, ["Authorization: Bearer $tok"]);
-        if (!$meta) return ['ok'=>false,'error'=>'Sem resposta dos metadados.'];
+        if (!$meta) return ['ok'=>false,'error'=>'Sem resposta dos metadados.'.hLastError()];
         $m = json_decode($meta, true);
         if (isset($m['error'])) return ['ok'=>false,'error'=>'Drive: '.($m['error']['message']??'desconhecido')];
         if (empty($m['name'])) return ['ok'=>false,'error'=>'Arquivo não encontrado.'];
@@ -617,11 +649,24 @@ class GoogleAPI {
  */
 function b64u(string $d):string{return rtrim(strtr(base64_encode($d),'+/','-_'),'=');}
 
+/* Detalhe do último erro de transporte HTTP (timeout, DNS, TLS, conexão
+   recusada). As funções h* retornam null em falha; o motivo real fica
+   acessível via hLastError() para compor mensagens de erro que apontem a
+   causa em vez de um "sem resposta" genérico. */
+function hSetLastError(): void {
+    $e = error_get_last();
+    $GLOBALS['H_LAST_HTTP_ERROR'] = trim((string)($e['message'] ?? 'erro de transporte desconhecido'));
+}
+function hLastError(): string {
+    $m = $GLOBALS['H_LAST_HTTP_ERROR'] ?? '';
+    return $m !== '' ? ' ['.$m.']' : '';
+}
+
 /** Helper de requisição HTTP GET via stream wrappers; retorna null em falha. */
-function hget(string $url,array $h=[]):?string{$ctx=stream_context_create(['http'=>['method'=>'GET','header'=>implode("\r\n",$h),'timeout'=>15,'ignore_errors'=>true]]);$r=@file_get_contents($url,false,$ctx);return $r===false?null:$r;}
+function hget(string $url,array $h=[]):?string{$ctx=stream_context_create(['http'=>['method'=>'GET','header'=>implode("\r\n",$h),'timeout'=>15,'ignore_errors'=>true]]);error_clear_last();$r=@file_get_contents($url,false,$ctx);if($r===false)hSetLastError();return $r===false?null:$r;}
 
 /** Helper de requisição HTTP POST via stream wrappers; retorna null em falha. */
-function hpost(string $url,string $body,array $h=[]):?string{$ctx=stream_context_create(['http'=>['method'=>'POST','header'=>implode("\r\n",$h),'content'=>$body,'timeout'=>15,'ignore_errors'=>true]]);$r=@file_get_contents($url,false,$ctx);return $r===false?null:$r;}
+function hpost(string $url,string $body,array $h=[]):?string{$ctx=stream_context_create(['http'=>['method'=>'POST','header'=>implode("\r\n",$h),'content'=>$body,'timeout'=>15,'ignore_errors'=>true]]);error_clear_last();$r=@file_get_contents($url,false,$ctx);if($r===false)hSetLastError();return $r===false?null:$r;}
 
 /** Helper de requisição HTTP PUT via stream wrappers; retorna null em falha. */
-function hput(string $url,string $body,array $h=[]):?string{$ctx=stream_context_create(['http'=>['method'=>'PUT','header'=>implode("\r\n",$h),'content'=>$body,'timeout'=>20,'ignore_errors'=>true]]);$r=@file_get_contents($url,false,$ctx);return $r===false?null:$r;}
+function hput(string $url,string $body,array $h=[]):?string{$ctx=stream_context_create(['http'=>['method'=>'PUT','header'=>implode("\r\n",$h),'content'=>$body,'timeout'=>20,'ignore_errors'=>true]]);error_clear_last();$r=@file_get_contents($url,false,$ctx);if($r===false)hSetLastError();return $r===false?null:$r;}

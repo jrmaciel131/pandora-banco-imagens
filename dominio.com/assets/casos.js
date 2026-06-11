@@ -6,6 +6,7 @@ const THUMB_RETRY = 'retry';
 const BLOCK_MARKERS = ['NA','LINDA'];
 
 let thumbCache = {};
+let thumbErrors = {};
 let pageLoadStart = 0;
 let _baseGeneration = 0;
 let _pageGeneration = 0;
@@ -34,7 +35,7 @@ async function loadCasos(silent = false){
   }
   try{
     const r = await api('casos');
-    if(!r.ok) throw new Error(r.error || 'Erro');
+    if(!r.ok) throw new Error(apiErrText(r));
     casos = r.casos || [];
     allProfs = r.profissionais || [];
     const tagSet = new Set();
@@ -92,6 +93,7 @@ async function forceRefresh(){
     casos.forEach(c => (c.tags||[]).forEach(t => tagSet.add(t)));
     allTags = [...tagSet].sort();
     thumbCache = {};
+    thumbErrors = {};
     _baseGeneration++;
     applyFilter();
     checkNewFiles();
@@ -601,6 +603,38 @@ function showThumbMeta(id, ms, src){
   meta.innerHTML = `<span style="font-size:9px;color:${color};font-weight:600">${icon} ${ms}ms</span>`;
 }
 
+/* Registra a falha de carregamento da thumbnail e, no modo admin, exibe o
+   motivo diretamente no card — com o diagnóstico do servidor no tooltip e no
+   console (procure por "[thumb]") para facilitar copiar/colar ao investigar. */
+function showThumbError(id, msg, diag){
+  thumbErrors[id] = {msg, diag};
+  console.warn('[thumb]', id, msg, diag || '');
+  if(!adminModeVisible) return;
+  const card = document.getElementById('card-'+id);
+  if(!card) return;
+  let meta = card.querySelector('.thumb-meta');
+  if(!meta){ meta = document.createElement('div'); meta.className = 'thumb-meta'; card.querySelector('.cb')?.appendChild(meta); }
+  let detail = msg;
+  if(diag){
+    const linhas = [];
+    if(diag.registro) linhas.push('registro no MySQL: ' + diag.registro);
+    if(diag.registro === 'presente'){
+      linhas.push(`idade: ${diag.idade_seg}s / TTL: ${diag.ttl_config}s${diag.expirado ? ' — EXPIRADO' : ''}`);
+      linhas.push(`fotos no registro: ${diag.fotos_no_registro} · arquivos em disco: ${diag.arquivos_ok}` +
+        (diag.sem_thumb_no_registro ? ` · sem thumb no registro: ${diag.sem_thumb_no_registro}` : ''));
+      if(diag.arquivos_faltando?.length) linhas.push('faltando: ' + diag.arquivos_faltando.join(', '));
+      if(diag.motivos_download?.length) linhas.push('motivos: ' + diag.motivos_download.join(' | '));
+    }
+    if(diag.disco_livre_mb !== undefined) linhas.push('disco livre: ' + diag.disco_livre_mb + ' MB');
+    if(diag.ttl_config !== undefined && diag.ttl_config <= 0) linhas.push('⚠ TTL_CONFIG INVÁLIDO: ' + diag.ttl_config);
+    if(diag.prefixo !== undefined) linhas.push('prefixo: ' + (diag.prefixo || '(vazio)'));
+    if(diag.dir_ok === false) linhas.push('⚠ thumb_dir sem escrita: ' + diag.thumb_dir);
+    if(diag.erro) linhas.push('erro: ' + diag.erro);
+    detail = msg + '\n' + linhas.join('\n');
+  }
+  meta.innerHTML = `<span style="font-size:9px;color:var(--rtx);font-weight:600" title="${esc(detail)}">⚠ ${esc(msg)}</span>`;
+}
+
 function updatePageTimer(){
   if(!pageLoadStart) return;
   const ms = Math.round(performance.now() - pageLoadStart);
@@ -742,6 +776,12 @@ async function lazyLoadThumbs(slice){
     if(adminModeVisible) showThumbMeta(c.id, thumbCache[c.id].ms || 0, thumbCache[c.id].src || 'cache');
   });
 
+  // Reexibe motivos de falha já conhecidos após um re-render da grade.
+  if(adminModeVisible) slice.forEach(c => {
+    const te = thumbErrors[c.id];
+    if(te && thumbCache[c.id] === null) showThumbError(c.id, te.msg, te.diag);
+  });
+
   const toLoad = slice.filter(c => thumbCache[c.id] === undefined || thumbCache[c.id] === THUMB_RETRY);
   if(!toLoad.length){ updatePageTimer(); return; }
   toLoad.forEach(c => thumbCache[c.id] = 'loading');
@@ -763,6 +803,7 @@ async function lazyLoadThumbs(slice){
       if(!r.ok || !r.photos?.length){
         thumbCache[c.id] = null;
         if(el) el.innerHTML = '<div class="ct-error"><div class="sad">😔</div><span>sem foto</span></div>';
+        showThumbError(c.id, r.ok ? (r.error || 'resposta sem fotos') : apiErrText(r), r.diag);
         return;
       }
       const allVideo = r.photos.every(p => p.isVideo);
@@ -775,6 +816,10 @@ async function lazyLoadThumbs(slice){
         } else {
           thumbCache[c.id] = null;
           if(el) el.innerHTML = '<div class="ct-error"><div class="sad">😔</div><span>sem foto</span></div>';
+          const downloadErrs = [...new Set(r.photos.map(p => p.thumb_error).filter(Boolean))];
+          const motivo = `${r.photos.length} foto(s) no registro, nenhuma com thumb local`
+            + (downloadErrs.length ? ` — ${downloadErrs[0]}` : '');
+          showThumbError(c.id, motivo, r.diag);
         }
         return;
       }
@@ -787,12 +832,14 @@ async function lazyLoadThumbs(slice){
       }
       const src = r.source || (best.thumb_url?.startsWith('/thumbs/') ? 'cache' : 'drive');
       thumbCache[c.id] = {url:best.thumb_url, isVideo:allVideo, versions: versions && versions.length > 1 ? versions : null, src, ms, preloaded: false};
+      delete thumbErrors[c.id];
       if(el){ renderThumbEl(el, c.id, thumbCache[c.id]); if(adminModeVisible) showThumbMeta(c.id, ms, src); }
       _highPriorityIds.delete(c.id);
     } catch(e){
       thumbCache[c.id] = THUMB_RETRY;
       const el = document.getElementById('ct-'+c.id);
       if(el) el.innerHTML = '<div class="ct-error"><div class="sad">😔</div><span>retry</span></div>';
+      showThumbError(c.id, 'falha de rede/servidor: ' + (e && e.message ? e.message : e));
     } finally { sem.release(); }
   }));
   if(!stale()) updatePageTimer();

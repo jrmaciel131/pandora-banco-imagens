@@ -12,9 +12,42 @@
  * onde o Content-Type é substituído antes do echo.
  */
 if (!defined('WEB_ROOT')) define('WEB_ROOT', dirname(__DIR__));
+
+/*
+ * Crashes nunca podem virar uma página HTML 500 muda: exceções não capturadas
+ * e erros fatais são convertidos em JSON com tipo, arquivo e linha, para que
+ * o frontend e o modo diagnóstico exibam a causa real em vez de um erro
+ * genérico de conexão.
+ */
+set_exception_handler(function (Throwable $e) {
+    if (!headers_sent()) { http_response_code(500); header('Content-Type: application/json; charset=utf-8'); }
+    echo json_encode([
+        'ok'           => false,
+        'error'        => $e->getMessage(),
+        'error_tipo'   => get_class($e),
+        'error_origem' => basename($e->getFile()).':'.$e->getLine(),
+    ]);
+});
+register_shutdown_function(function () {
+    $e = error_get_last();
+    if ($e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        if (!headers_sent()) { http_response_code(500); header('Content-Type: application/json; charset=utf-8'); }
+        echo json_encode([
+            'ok'           => false,
+            'error'        => $e['message'],
+            'error_tipo'   => 'FatalError',
+            'error_origem' => basename($e['file']).':'.$e['line'],
+        ]);
+    }
+});
+
 require_once __DIR__ . '/../../private-config/config.php';
 require_once __DIR__ . '/../../private-config/lib/db.php';
 require_once __DIR__ . '/../../private-config/lib/google.php';
+
+/* Build do backend. Atualize a cada deploy do handler.php; é exibido no painel
+   "Diagnóstico de versão" do Admin Mode para confirmar que o PHP novo subiu. */
+if (!defined('HANDLER_BUILD')) define('HANDLER_BUILD', 'v23.04 (2026-06-11)');
 
 /*
  * Bootstrap idempotente do schema para todas as bases configuradas.
@@ -80,18 +113,25 @@ $ip     = substr($_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? 
  * usuário inexistente.
  */
 function getUserData(string $user): ?array {
+    $base = null;
     $usersPath = PRIVATE_CONFIG_PATH.'/users_override.json';
     if (file_exists($usersPath)) {
         $usersOvr = json_decode(file_get_contents($usersPath), true) ?? [];
-        if (isset($usersOvr[$user])) return $usersOvr[$user];
+        if (isset($usersOvr[$user])) $base = $usersOvr[$user];
     }
-    if (!isset(USERS[$user])) return null;
-    $u = USERS[$user];
-    $base = is_array($u) ? $u : ['hash' => $u, 'role' => 'user'];
+    if ($base === null) {
+        if (!isset(USERS[$user])) return null;
+        $u = USERS[$user];
+        $base = is_array($u) ? $u : ['hash' => $u, 'role' => 'user'];
+    }
+    // A sobrescrita de senha (troca pelo painel) aplica-se a qualquer usuário,
+    // estático ou dinâmico, e tem precedência sobre o hash de origem. Resolver
+    // o override aqui — em vez de retornar cedo para usuários dinâmicos —
+    // garante que a senha nova entre em vigor no login.
     $overridePath = PRIVATE_CONFIG_PATH.'/passwords.json';
     if (file_exists($overridePath)) {
         $overrides = json_decode(file_get_contents($overridePath), true) ?? [];
-        if (isset($overrides[$user])) $base['hash'] = $overrides[$user];
+        if (isset($overrides[$user]) && is_array($base)) $base['hash'] = $overrides[$user];
     }
     return $base;
 }
@@ -669,6 +709,54 @@ function enrichPhotos(array $photos): array {
     return $photos;
 }
 
+/**
+ * Diagnóstico do cache de thumbnails de um caso (admin). Lê o registro bruto
+ * da tabela — ignorando o TTL — e confere os arquivos físicos em disco, para
+ * apontar em qual camada o cache está falhando: linha ausente no MySQL,
+ * registro expirado (ou com idade negativa, indicando relógio dessincronizado)
+ * ou arquivos sumidos do diretório de thumbs.
+ */
+function thumbCacheDiag(string $id): array {
+    global $thumbDir;
+    $d = [
+        'ttl_config' => (int)THUMB_CACHE_TTL,
+        'prefixo'    => DB::getPrefix(),
+        'thumb_dir'  => $thumbDir,
+        'dir_ok'     => is_dir($thumbDir) && is_writable($thumbDir),
+    ];
+    $livre = @disk_free_space(is_dir($thumbDir) ? $thumbDir : __DIR__);
+    if ($livre !== false) $d['disco_livre_mb'] = (int)round($livre / 1048576);
+    try {
+        $st = DB::get()->prepare(
+            "SELECT photos_json, updated_at, TIMESTAMPDIFF(SECOND, updated_at, NOW()) AS idade
+             FROM ".DB::getPrefix()."thumb_cache WHERE caso_id=?"
+        );
+        $st->execute([$id]);
+        $row = $st->fetch();
+        if (!$row) { $d['registro'] = 'ausente'; return $d; }
+        $d['registro']   = 'presente';
+        $d['updated_at'] = $row['updated_at'];
+        $d['idade_seg']  = (int)$row['idade'];
+        $d['expirado']   = $d['idade_seg'] > (int)THUMB_CACHE_TTL || $d['idade_seg'] < 0;
+        $fotos = json_decode($row['photos_json'], true);
+        $d['fotos_no_registro'] = is_array($fotos) ? count($fotos) : null;
+        $ok = 0; $semThumb = 0; $faltando = []; $motivos = [];
+        foreach ((array)$fotos as $p) {
+            if (!empty($p['thumb_error'])) $motivos[$p['thumb_error']] = true;
+            if (empty($p['local_thumb'])) { $semThumb++; continue; }
+            if (file_exists($thumbDir.'/'.$p['local_thumb'])) $ok++;
+            else $faltando[] = $p['local_thumb'];
+        }
+        $d['arquivos_ok'] = $ok;
+        $d['sem_thumb_no_registro'] = $semThumb;
+        if ($faltando) $d['arquivos_faltando'] = array_slice($faltando, 0, 5);
+        if ($motivos)  $d['motivos_download'] = array_slice(array_keys($motivos), 0, 3);
+    } catch (Throwable $e) {
+        $d['erro'] = $e->getMessage();
+    }
+    return $d;
+}
+
 /** Aborta com HTTP 403 quando a ação requer privilégio de administrador. */
 function requireAdmin(bool $isAdmin): void {
     if (!$isAdmin) {
@@ -693,7 +781,7 @@ switch ($action) {
             'thumb_dir'       => (is_dir($thumbDir) && is_writable($thumbDir)) ? '✓ '.$thumbDir : '❌ '.$thumbDir.' — sem permissão',
         ];
         try { DB::get(); $r['mysql'] = ['ok'=>true,'msg'=>'✓ Conexão OK']; }
-        catch (Throwable $e) { $r['mysql'] = ['ok'=>false,'msg'=>'❌ '.$e->getMessage()]; }
+        catch (Throwable $e) { $r['mysql'] = ['ok'=>false,'msg'=>'❌ ['.get_class($e).'] '.$e->getMessage()]; }
 
         // Confirma a existência e o funcionamento da tabela de auditoria.
         if ($r['mysql']['ok']) {
@@ -701,7 +789,7 @@ switch ($action) {
                 $cnt = DB::get()->query("SELECT COUNT(*) FROM ".DB::getPrefix()."audit_log")->fetchColumn();
                 $r['audit_log'] = ['ok'=>true,'msg'=>"✓ Tabela OK — {$cnt} registros"];
             } catch (Throwable $e) {
-                $r['audit_log'] = ['ok'=>false,'msg'=>'❌ Tabela audit_log: '.$e->getMessage()];
+                $r['audit_log'] = ['ok'=>false,'msg'=>'❌ Tabela audit_log ['.get_class($e).']: '.$e->getMessage()];
             }
         }
 
@@ -720,22 +808,22 @@ switch ($action) {
             'sheet_name'      => $baseCfg['sheet_name'],
         ];
         try { $api->getAccessTokenPublic(); $r['google_auth'] = ['ok'=>true,'msg'=>'✓ Token OK']; }
-        catch (Throwable $e) { $r['google_auth'] = ['ok'=>false,'msg'=>'❌ '.$e->getMessage()]; }
+        catch (Throwable $e) { $r['google_auth'] = ['ok'=>false,'msg'=>'❌ ['.get_class($e).'] '.$e->getMessage()]; }
 
         if ($r['google_auth']['ok'] ?? false) {
             try { $casos=$api->getCasos(); $r['sheets']=['ok'=>true,'msg'=>'✓ '.count($casos).' casos']; }
-            catch (Throwable $e) { $r['sheets']=['ok'=>false,'msg'=>'❌ '.$e->getMessage()]; }
+            catch (Throwable $e) { $r['sheets']=['ok'=>false,'msg'=>'❌ ['.get_class($e).'] '.$e->getMessage()]; }
             try {
                 $ids   = $api->getAllFolderIds();
                 $files = $api->listDriveFolder(5);
                 $r['drive'] = ['ok'=>true,'msg'=>'✓ '.count($ids).' pasta(s). Primeiros: '.implode(', ',array_column($files,'name'))];
-            } catch (Throwable $e) { $r['drive']=['ok'=>false,'msg'=>'❌ '.$e->getMessage()]; }
+            } catch (Throwable $e) { $r['drive']=['ok'=>false,'msg'=>'❌ ['.get_class($e).'] '.$e->getMessage()]; }
         } else {
             $r['sheets'] = $r['drive'] = ['ok'=>false,'msg'=>'Não testado'];
         }
 
         try {
-            $tc = DB::get()->query("SELECT COUNT(*) FROM thumb_cache")->fetchColumn();
+            $tc = DB::get()->query("SELECT COUNT(*) FROM ".DB::getPrefix()."thumb_cache")->fetchColumn();
             $tf = is_dir($thumbDir) ? count(glob($thumbDir.'/*.{jpg,webp}', GLOB_BRACE)) : 0;
             $r['cache_stats'] = ['ok'=>true,'msg'=>"Casos em cache: {$tc} | Arquivos /thumbs/: {$tf}"];
         } catch (Throwable $e) { $r['cache_stats'] = ['ok'=>false,'msg'=>'—']; }
@@ -750,7 +838,7 @@ switch ($action) {
             $last = DB::get()->query("SELECT * FROM ".DB::getPrefix()."audit_log ORDER BY id DESC LIMIT 1")->fetch();
             echo json_encode(['ok'=>true,'msg'=>'Log de teste gravado.','last'=>$last]);
         } catch (Throwable $e) {
-            echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
+            echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]);
         }
         break;
 
@@ -762,7 +850,7 @@ switch ($action) {
             foreach ($casos as $c) foreach ($c['clientes'] as $p) if ($p) $profs[$p] = true;
             $profList = array_keys($profs); sort($profList);
             echo json_encode(['ok'=>true,'casos'=>$casos,'total'=>count($casos),'profissionais'=>$profList]);
-        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); }
         break;
 
     // Listagem de fotos para um caso, com override opcional da fonte (cache vs. Drive).
@@ -776,14 +864,26 @@ switch ($action) {
         try {
             if ($source === 'cache') {
                 $cached = DB::getThumbCache($id);
-                if (!$cached) { echo json_encode(['ok'=>false,'error'=>'Não há cache para este caso.','photos'=>[]]); break; }
-                echo json_encode(['ok'=>true,'photos'=>enrichPhotos($cached),'source'=>'cache']);
+                if (!$cached) {
+                    $resp = ['ok'=>false,'error'=>'Não há cache para este caso.','photos'=>[]];
+                    if ($isAdmin) $resp['diag'] = thumbCacheDiag($id);
+                    echo json_encode($resp); break;
+                }
+                $resp = ['ok'=>true,'photos'=>enrichPhotos($cached),'source'=>'cache'];
+                if ($isAdmin) $resp['diag'] = thumbCacheDiag($id);
+                echo json_encode($resp);
             } else {
                 $photos = enrichPhotos($api->getDrivePhotos($id, $force));
                 $src = ($force && $source==='drive') ? 'drive' : (DB::getThumbCache($id)!==null ? 'cache' : 'drive');
-                echo json_encode(['ok'=>true,'photos'=>$photos,'source'=>$src]);
+                $resp = ['ok'=>true,'photos'=>$photos,'source'=>$src];
+                if ($isAdmin) $resp['diag'] = thumbCacheDiag($id);
+                echo json_encode($resp);
             }
-        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'photos'=>[]]); }
+        } catch (Throwable $e) {
+            $resp = ['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine(),'photos'=>[]];
+            if ($isAdmin) { try { $resp['diag'] = thumbCacheDiag($id); } catch (Throwable $e2) {} }
+            echo json_encode($resp);
+        }
         break;
 
     // Troca a base ativa da sessão e já devolve os casos da nova base na mesma resposta.
@@ -869,13 +969,13 @@ switch ($action) {
                 }
             }
             echo json_encode(['ok'=>true,'cache'=>$result]);
-        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); }
         break;
 
     // ── Novos arquivos ────────────────────────────────────
     case 'new_files':
         try { $f=$api->getDriveNewFiles(7); echo json_encode(['ok'=>true,'files'=>$f,'count'=>count($f)]); }
-        catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'count'=>0]); }
+        catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine(),'count'=>0]); }
         break;
 
     // ── Histórico ─────────────────────────────────────────
@@ -894,7 +994,7 @@ switch ($action) {
                 unset($e['antes_json'], $e['depois_json']);
             }
             echo json_encode(['ok'=>true,'log'=>$log,'count'=>count($log)]);
-        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'log'=>[]]); }
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine(),'log'=>[]]); }
         break;
 
     // ── Add uso ───────────────────────────────────────────
@@ -943,7 +1043,7 @@ switch ($action) {
             try {
                 $conflitos = findDistanceConflicts($nova_uf, $nova_cid, $caso);
             } catch (Throwable $e) {
-                echo json_encode(['ok'=>false,'error'=>$e->getMessage().' Não foi possível validar a distância — tente novamente mais tarde ou contate o administrador.']); break;
+                echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine().' Não foi possível validar a distância — tente novamente mais tarde ou contate o administrador.']); break;
             }
             if (!empty($conflitos)) {
                 $lista = array_map(fn($c) => "{$c['cidade']}/{$c['uf']} ({$c['distancia_km']}km, limite {$c['raio_km']}km)", $conflitos);
@@ -1000,7 +1100,7 @@ switch ($action) {
 
             echo json_encode(['ok'=>true,'depois'=>['ufs'=>$nufs,'cidades'=>$ncids,'clientes'=>$nclis]]);
         } catch (Throwable $e) {
-            echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
+            echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]);
         }
         break;
 
@@ -1109,7 +1209,7 @@ switch ($action) {
                     $simulated['cidades'][] = $e['cidade'];
                 }
             } catch (Throwable $e) {
-                echo json_encode(['ok'=>false,'error'=>$e->getMessage().' Não foi possível validar a distância — tente novamente mais tarde.']); break;
+                echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine().' Não foi possível validar a distância — tente novamente mais tarde.']); break;
             }
             if (!empty($distErrs)) {
                 echo json_encode(['ok'=>false,'error'=>'Bloqueado por distância — apenas admins podem prosseguir:','errors'=>$distErrs]);
@@ -1147,7 +1247,7 @@ switch ($action) {
                 'ver'=>$newVer,
             ]);
         } catch (Throwable $e) {
-            echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
+            echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]);
         }
         break;
 
@@ -1185,7 +1285,7 @@ switch ($action) {
                 try {
                     $conf = findDistanceConflicts($nova_uf, $nova_cid, $caso);
                 } catch (Throwable $e) {
-                    echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); break 2;
+                    echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); break 2;
                 }
                 if (!empty($conf)) {
                     $lista = array_map(fn($x) => "{$x['cidade']}/{$x['uf']} ({$x['distancia_km']}km, limite {$x['raio_km']}km)", $conf);
@@ -1199,7 +1299,7 @@ switch ($action) {
             }
             echo json_encode(['ok'=>true, 'errors'=>$errs, 'warns'=>$warns]);
         } catch (Throwable $e) {
-            echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
+            echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]);
         }
         break;
 
@@ -1231,7 +1331,7 @@ switch ($action) {
             $newVer = GoogleAPI::caseVersion($ufs, $cids, $clis, $caso['tags']??[], $caso['motivo_bloqueio']??'');
             echo json_encode(['ok'=>true,'depois'=>['ufs'=>$ufs,'cidades'=>$cids,'clientes'=>$clis],'ver'=>$newVer]);
         } catch (Throwable $e) {
-            echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
+            echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]);
         }
         break;
 
@@ -1284,7 +1384,7 @@ switch ($action) {
             $newVer = GoogleAPI::caseVersion($ufs, $cids, $clis, $caso['tags']??[], $caso['motivo_bloqueio']??'');
             echo json_encode(['ok'=>true,'depois'=>['ufs'=>$ufs,'cidades'=>$cids,'clientes'=>$clis],'ver'=>$newVer]);
         } catch (Throwable $e) {
-            echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
+            echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]);
         }
         break;
 
@@ -1337,7 +1437,7 @@ switch ($action) {
                     foreach (glob($thumbDir.'/*.{jpg,webp}', GLOB_BRACE) as $f) { @unlink($f); $deleted++; }
                 echo json_encode(['ok'=>true,'msg'=>"Cache limpo. {$deleted} thumbs removidas."]);
             }
-        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); }
         break;
 
     // Sincronização Drive↔planilha — PREVIEW. Cruza os IDs de caso encontrados
@@ -1362,7 +1462,7 @@ switch ($action) {
                 'drive_total' => count($driveNums),
                 'sheet_total' => count($sheetNums),
             ]);
-        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); }
         break;
 
     // Sincronização Drive↔planilha — APPLY. Cria linhas (só o ID na coluna B)
@@ -1391,7 +1491,7 @@ switch ($action) {
                 } catch (Throwable $e) { $errors[] = "{$id}: ".$e->getMessage(); }
             }
             echo json_encode(['ok'=>true, 'created'=>$created, 'skipped'=>$skipped, 'errors'=>$errors]);
-        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); }
         break;
 
     // Reverte um caso para um estado anterior identificado pelo histórico de auditoria (admin).
@@ -1454,7 +1554,7 @@ switch ($action) {
                 'depois'   => $depois,
                 'ver'      => $after['ver'] ?? GoogleAPI::caseVersion($nufs,$ncids,$nclis,$ntags,$nmot),
             ]);
-        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); }
         break;
 
     // Mede o tempo de resposta de uma busca via Drive vs. cache local (admin).
@@ -1482,7 +1582,7 @@ switch ($action) {
                 'photo_count' => count($photos),
                 'recommendation' => $has_local && $t_cache < $t_drive ? 'cache' : 'drive',
             ]);
-        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); }
         break;
 
     // Lista todos os usuários conhecidos com metadados de uso (admin).
@@ -1547,18 +1647,87 @@ switch ($action) {
         $target = trim($_POST['target_user']??'');
         $newpass = $_POST['new_password']??'';
         if (!$target) { echo json_encode(['ok'=>false,'error'=>'Usuário não especificado.']); break; }
-        // Salvaguarda: um admin não pode alterar a senha de outro admin.
         $targetData = getUserData($target);
-        if ($targetData && ($targetData['role']??'user') === 'admin' && $target !== $me) {
+        if (!$targetData) { echo json_encode(['ok'=>false,'error'=>'Usuário não encontrado.']); break; }
+        // Salvaguarda: um admin não pode alterar a senha de outro admin.
+        if (($targetData['role']??'user') === 'admin' && $target !== $me) {
             echo json_encode(['ok'=>false,'error'=>'Não é possível alterar a senha de outro administrador.']); break;
         }
         if (strlen($newpass) < 6) { echo json_encode(['ok'=>false,'error'=>'Senha muito curta.']); break; }
-        withJsonLock(PRIVATE_CONFIG_PATH.'/passwords.json', function($overrides) use ($target, $newpass) {
-            $overrides[$target] = password_hash($newpass, PASSWORD_DEFAULT);
-            return $overrides;
-        });
+        $newHash = password_hash($newpass, PASSWORD_DEFAULT);
+        // Grava o novo hash no arquivo onde o usuário está definido, de modo a
+        // substituir por completo a senha anterior e manter uma única senha
+        // vigente por usuário. Usuários dinâmicos vivem em users_override.json;
+        // usuários de config.php usam passwords.json como camada de sobrescrita.
+        $usersOvrPath  = PRIVATE_CONFIG_PATH.'/users_override.json';
+        $passwordsPath = PRIVATE_CONFIG_PATH.'/passwords.json';
+        $isDynamic = false;
+        if (file_exists($usersOvrPath)) {
+            $ovr = json_decode(file_get_contents($usersOvrPath), true) ?? [];
+            $isDynamic = isset($ovr[$target]);
+        }
+        if ($isDynamic) {
+            withJsonLock($usersOvrPath, function($users) use ($target, $newHash) {
+                if (isset($users[$target]) && is_array($users[$target])) $users[$target]['hash'] = $newHash;
+                return $users;
+            });
+            // Remove qualquer hash obsoleto em passwords.json (não se aplica a
+            // usuários dinâmicos) para não deixar duas senhas registradas.
+            withJsonLock($passwordsPath, function($overrides) use ($target) {
+                if (!isset($overrides[$target])) return null;
+                unset($overrides[$target]);
+                return $overrides;
+            });
+        } else {
+            withJsonLock($passwordsPath, function($overrides) use ($target, $newHash) {
+                $overrides[$target] = $newHash;
+                return $overrides;
+            });
+        }
         DB::log($me, 'sistema', 'change_password', ['user'=>$target], ['changed'=>true]);
         echo json_encode(['ok'=>true,'msg'=>"Senha de '{$target}' alterada."]);
+        break;
+
+    /*
+     * Diagnóstico de versão (admin). Devolve, para cada arquivo de front-end e
+     * da API no servidor, a data de modificação, o tamanho, um hash curto do
+     * conteúdo e — para os JS — o identificador de build embutido. O painel do
+     * Admin Mode compara isso com o que o navegador carregou para revelar
+     * arquivos desatualizados ou versões presas em cache.
+     */
+    case 'version_info':
+        requireAdmin($isAdmin);
+        $pub = WEB_ROOT;
+        $files = [
+            'index.php',
+            'assets/utils.js', 'assets/admin.js', 'assets/app.js', 'assets/auth.js',
+            'assets/panel.js', 'assets/casos.js', 'assets/bulk.js', 'assets/theme.js',
+            'assets/app.css', 'assets/theme.css',
+            'api/handler.php',
+        ];
+        $describe = function(string $label, string $abs): array {
+            if (!is_file($abs)) return ['file' => $label, 'exists' => false];
+            $content = (string)@file_get_contents($abs);
+            $build = '';
+            if (preg_match('/(?:APP_BUILD|ADMIN_BUILD)\s*=\s*\'([^\']*)\'/', $content, $bm)) $build = $bm[1];
+            return [
+                'file'   => $label,
+                'exists' => true,
+                'mtime'  => date('Y-m-d H:i:s', filemtime($abs)),
+                'size'   => filesize($abs),
+                'sha1'   => substr(sha1($content), 0, 10),
+                'build'  => $build,
+            ];
+        };
+        $out = [];
+        foreach ($files as $rel) $out[] = $describe($rel, $pub . '/' . $rel);
+        // As bibliotecas privadas (fora do webroot) são deployadas por outro
+        // caminho e podem ficar dessincronizadas do restante — também entram
+        // na conferência de versão.
+        foreach (['lib/google.php', 'lib/db.php', 'config.php'] as $rel) {
+            $out[] = $describe('private-config/' . $rel, PRIVATE_CONFIG_PATH . '/' . $rel);
+        }
+        echo json_encode(['ok'=>true, 'handler_build'=>HANDLER_BUILD, 'files'=>$out]);
         break;
 
     // Cria um usuário dinâmico em users_override.json (admin).
@@ -1646,7 +1815,7 @@ switch ($action) {
                 'depois'=>['ufs'=>$nufs,'cidades'=>$ncids,'clientes'=>$nclis,'tags'=>$caso['tags']??[],'motivo_bloqueio'=>$motivo,'bloqueado'=>true],
                 'ver'=>$newVer
             ]);
-        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); }
         break;
 
     // ── Desbloquear caso (admin only) ─────────────────────────
@@ -1683,7 +1852,7 @@ switch ($action) {
                 'depois'=>['ufs'=>$nufs,'cidades'=>$ncids,'clientes'=>$nclis,'tags'=>$caso['tags']??[],'motivo_bloqueio'=>'','bloqueado'=>false],
                 'ver'=>$newVer
             ]);
-        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); }
         break;
 
     // Adiciona uma tag ao caso. Aceita letras (incluindo acentuadas), números,
@@ -1721,7 +1890,7 @@ switch ($action) {
             DB::log($me, $caso_id, 'add_tag', ['tags'=>$cur], ['tags'=>$nv]);
             $newVer = GoogleAPI::caseVersion($caso['ufs'], $caso['cidades'], $caso['clientes'], $nv, $caso['motivo_bloqueio']??'');
             echo json_encode(['ok'=>true,'tags'=>$nv,'ver'=>$newVer]);
-        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); }
         break;
 
     // Aplica UMA tag a VÁRIOS casos numa única leitura da planilha. Otimização do
@@ -1761,7 +1930,7 @@ switch ($action) {
                 } catch (Throwable $e) { $errors[] = "{$id}: ".$e->getMessage(); }
             }
             echo json_encode(['ok'=>true, 'applied'=>$applied, 'skipped'=>$skipped, 'errors'=>$errors]);
-        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); }
         break;
 
     // Remove uma tag do caso (idempotente: tag inexistente devolve a lista atual).
@@ -1788,7 +1957,7 @@ switch ($action) {
             DB::log($me, $caso_id, 'remove_tag', ['tags'=>$cur], ['tags'=>$nv]);
             $newVer = GoogleAPI::caseVersion($caso['ufs'], $caso['cidades'], $caso['clientes'], $nv, $caso['motivo_bloqueio']??'');
             echo json_encode(['ok'=>true,'tags'=>$nv,'ver'=>$newVer]);
-        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); }
         break;
 
     // Tags únicas em todos os casos (consumido pelo filtro da interface).
@@ -1799,7 +1968,7 @@ switch ($action) {
             foreach ($casos as $c) foreach (($c['tags']??[]) as $t) if ($t !== '') $set[$t] = true;
             $list = array_keys($set); sort($list);
             echo json_encode(['ok'=>true,'tags'=>$list]);
-        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'tags'=>[]]); }
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine(),'tags'=>[]]); }
         break;
 
     // Lista canônica de tags (vocabulário controlado). Bootstrap-migração:
@@ -1829,7 +1998,7 @@ switch ($action) {
             $tags = loadCanonicalTags();
             sort($tags);
             echo json_encode(['ok'=>true, 'tags'=>$tags]);
-        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'tags'=>[]]); }
+        } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine(),'tags'=>[]]); }
         break;
 
     // Adiciona uma tag à lista canônica (admin).
@@ -1928,7 +2097,7 @@ switch ($action) {
             exit;
         } catch (Throwable $e) {
             http_response_code(500);
-            echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
+            echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]);
         }
         break;
 
@@ -1950,7 +2119,7 @@ switch ($action) {
             exit;
         } catch (Throwable $e) {
             http_response_code(500);
-            echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
+            echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]);
         }
         break;
 
@@ -1993,7 +2162,7 @@ switch ($action) {
             $zip->close();
         } catch (Throwable $e) {
             @$zip->close(); @unlink($tmpZip);
-            echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); break;
+            echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); break;
         }
         if ($totalFiles === 0) {
             @unlink($tmpZip);

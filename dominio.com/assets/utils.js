@@ -6,6 +6,30 @@ const API = 'api/handler.php';
    reenviado no cabeçalho X-CSRF-Token em toda requisição POST. */
 let CSRF_TOKEN = '';
 
+/* Identificador de build. Sirva-se dele para confirmar, depois de um deploy,
+   que a versão nova realmente carregou no navegador. ATUALIZE este valor a
+   cada alteração publicada. O index.php lê este mesmo texto do arquivo no
+   servidor e o injeta em window.APP_BUILD_EXPECTED; se o que o navegador
+   carregou divergir do que está no servidor, exibimos um aviso de cache. */
+const APP_BUILD = 'v23.04 (2026-06-11)';
+
+(function reportBuild(){
+  try {
+    console.log('%cBanco de Imagens — build ' + APP_BUILD,
+      'color:#7c5cff;font-weight:700;font-size:12px');
+    const badge = document.querySelector('.vbadge');
+    if (badge) { badge.textContent = APP_BUILD.split(' ')[0]; badge.title = 'build ' + APP_BUILD; }
+    const expected = window.APP_BUILD_EXPECTED;
+    if (expected && expected !== APP_BUILD && document.body) {
+      console.warn('Versão em cache — navegador:', APP_BUILD, '| servidor:', expected);
+      const bar = document.createElement('div');
+      bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#b45309;color:#fff;font:600 13px/1.4 system-ui,sans-serif;padding:9px 14px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.35)';
+      bar.innerHTML = '⚠️ Você está vendo uma versão em <b>cache</b>. Aperte <b>Ctrl+Shift+R</b> para carregar a atualização. <span style="opacity:.85">(navegador: ' + APP_BUILD + ' · servidor: ' + expected + ')</span>';
+      document.body.appendChild(bar);
+    }
+  } catch (e) {}
+})();
+
 const ESTADOS = [
   {s:'AC',n:'Acre'},{s:'AL',n:'Alagoas'},{s:'AP',n:'Amapá'},{s:'AM',n:'Amazonas'},
   {s:'BA',n:'Bahia'},{s:'CE',n:'Ceará'},{s:'DF',n:'Distrito Federal'},{s:'ES',n:'Espírito Santo'},
@@ -37,9 +61,23 @@ async function api(action, data = {}, method = 'GET'){
     }
     throw new Error(d?.error || 'Não autenticado');
   }
-  const json = await resp.json();
+  /* Resposta que não é JSON significa que o PHP morreu antes de responder
+     (crash, HTML de erro do servidor). O status HTTP vai na mensagem para
+     dar um ponto de partida em vez de um erro genérico de parse. */
+  let json;
+  try { json = await resp.json(); }
+  catch(e){ throw new Error(`Resposta não-JSON do servidor (HTTP ${resp.status}) — possível crash no PHP. Abra o Diagnóstico do Admin.`); }
   if(json && json.csrf) CSRF_TOKEN = json.csrf;
   return json;
+}
+
+/* Texto de erro de uma resposta da API: mensagem + tipo e origem (arquivo:linha)
+   quando o backend os informa — todo ponto que exibe erro deve usar isto. */
+function apiErrText(r){
+  if(!r) return 'sem resposta';
+  let t = r.error || 'erro não informado';
+  if(r.error_tipo) t += ` [${r.error_tipo}${r.error_origem ? ' em ' + r.error_origem : ''}]`;
+  return t;
 }
 
 /* showToast(msg) — string simples, 3 s
@@ -80,16 +118,42 @@ function _toastUndo(){
 }
 
 function showConfirm(title, desc, changes, onOk){
-  document.getElementById('confirm-title').textContent = title;
-  document.getElementById('confirm-desc').innerHTML = desc;
-  document.getElementById('confirm-changes').innerHTML = changes.map(c =>
+  const modal     = document.getElementById('confirm-modal');
+  const titleEl   = document.getElementById('confirm-title');
+  const descEl    = document.getElementById('confirm-desc');
+  const changesEl = document.getElementById('confirm-changes');
+  const okBtn     = document.getElementById('confirm-ok-btn');
+  // Se algum elemento do modal não existir no HTML, falha de forma explícita
+  // (com o nome do que faltou) em vez de deixar a tela travada só no overlay.
+  const missing = [];
+  if(!modal)     missing.push('#confirm-modal');
+  if(!titleEl)   missing.push('#confirm-title');
+  if(!descEl)    missing.push('#confirm-desc');
+  if(!changesEl) missing.push('#confirm-changes');
+  if(!okBtn)     missing.push('#confirm-ok-btn');
+  if(missing.length) throw new Error('Modal de confirmação incompleto no HTML — faltando: ' + missing.join(', '));
+
+  titleEl.textContent = title;
+  descEl.innerHTML = desc;
+  changesEl.innerHTML = changes.map(c =>
     `<div class="confirm-row"><div class="confirm-label">${esc(c.label)}</div><div class="confirm-val">${esc(c.val)}</div></div>`
   ).join('');
-  document.getElementById('confirm-ok-btn').onclick = () => {
-    document.getElementById('confirm-modal').classList.remove('open');
-    onOk();
+  okBtn.disabled = false;
+  okBtn.textContent = 'Confirmar';
+  // Mantém o modal aberto com feedback de carregamento enquanto a ação roda;
+  // desabilita o botão para impedir clique duplo e só fecha ao concluir.
+  okBtn.onclick = async () => {
+    okBtn.disabled = true;
+    okBtn.innerHTML = '<span class="spin"></span> Processando...';
+    try {
+      await onOk();
+    } finally {
+      modal.classList.remove('open');
+      okBtn.disabled = false;
+      okBtn.textContent = 'Confirmar';
+    }
   };
-  document.getElementById('confirm-modal').classList.add('open');
+  modal.classList.add('open');
 }
 
 function renderDD(id, list, q, onSelect){
