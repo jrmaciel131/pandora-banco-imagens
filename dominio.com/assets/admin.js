@@ -3,7 +3,7 @@
 /* Build deste arquivo. Atualize a cada deploy do admin.js; aparece no painel
    "Diagnóstico de versão" do Admin Mode e é comparado com a cópia do servidor
    para revelar quando o navegador está com uma versão em cache. */
-const ADMIN_BUILD = 'v23.02 (2026-06-09)';
+const ADMIN_BUILD = 'v23.05 (2026-06-12)';
 
 let adminModeVisible = false;
 let thumbSourceMode = 'auto';
@@ -350,9 +350,9 @@ async function loadHistorico(){
       log = log.filter(e => {
         const antes = e.antes, depois = e.depois;
         const searchIn = [
-          ...(antes?.ufs||[]), (depois?.ufs||[]),
-          ...(antes?.cidades||[]), (depois?.cidades||[]),
-          ...(antes?.clientes||[]), (depois?.clientes||[]),
+          ...(antes?.ufs||[]), ...(depois?.ufs||[]),
+          ...(antes?.cidades||[]), ...(depois?.cidades||[]),
+          ...(antes?.clientes||[]), ...(depois?.clientes||[]),
           e.caso_id, e.usuario
         ].join(' ').toLowerCase();
         return searchIn.includes(sqn);
@@ -436,6 +436,33 @@ async function loadHistorico(){
   } catch(e){
     body.innerHTML = `<div style="padding:2rem;text-align:center;color:var(--rtx)">Erro: ${esc(e.message)}</div>`;
   }
+}
+
+/* Exporta o histórico atualmente carregado (já com os filtros aplicados) para
+   um arquivo .csv — abre direto no Excel/Sheets. Usa os grupos que loadHistorico
+   guardou em hist-body._groups. */
+function exportHistoricoGeral(){
+  const body = document.getElementById('hist-body');
+  const groups = body && body._groups;
+  if(!groups || !groups.length){ showToast('Nada para exportar — carregue o histórico primeiro.'); return; }
+  const fmt = o => o ? JSON.stringify(o).replace(/[\r\n]+/g,' ') : '';
+  const rows = [['Data/Hora','Usuário','Caso','Ação','Antes','Depois']];
+  groups.forEach(g => g.entries.forEach(e => {
+    const dt = e.criado_em ? new Date(String(e.criado_em).replace(' ','T')).toLocaleString('pt-BR') : '';
+    rows.push([dt, e.usuario||'', e.caso_id||'', (e.acao||'').replace(/_/g,' '), fmt(e.antes), fmt(e.depois)]);
+  }));
+  // CSV com ; (padrão pt-BR no Excel) e BOM pra acentos abrirem corretos.
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(';')).join('\r\n');
+  const blob = new Blob(['﻿'+csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `historico_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Histórico exportado (.csv).');
 }
 
 function histLoading(show, msg = ''){
@@ -1171,9 +1198,7 @@ async function onCoringaUF(){
   ci.readOnly = true;
   ci.placeholder = 'Carregando cidades...';
   try{
-    const r = await fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios?orderBy=nome`);
-    const d = await r.json();
-    coringaCities = d.map(x => x.nome.toUpperCase());
+    coringaCities = await fetchCities(uf);
   } catch(e){
     coringaCities = [];
   }

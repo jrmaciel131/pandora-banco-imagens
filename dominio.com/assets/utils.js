@@ -11,7 +11,7 @@ let CSRF_TOKEN = '';
    cada alteração publicada. O index.php lê este mesmo texto do arquivo no
    servidor e o injeta em window.APP_BUILD_EXPECTED; se o que o navegador
    carregou divergir do que está no servidor, exibimos um aviso de cache. */
-const APP_BUILD = 'v23.04 (2026-06-11)';
+const APP_BUILD = 'v23.05 (2026-06-12)';
 
 (function reportBuild(){
   try {
@@ -42,7 +42,13 @@ const ESTADOS = [
 
 const norm = s => (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
 const cap  = s => s ? s.charAt(0).toUpperCase()+s.slice(1).toLowerCase() : '';
-const esc  = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+/* Escapa para HTML. Inclui aspas duplas (&quot;) para que valores vindos da
+   planilha (motivo de bloqueio, nomes, cidades) não consigam "escapar" de um
+   atributo title="..."/style="..." e injetar outro atributo (XSS). A aspa
+   simples NÃO é escapada de propósito: os handlers inline (onclick="fn('...')")
+   já fazem o escape manual de ' para o contexto de string JS; escapá-la aqui
+   quebraria esses handlers. */
+const esc  = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
 async function api(action, data = {}, method = 'GET'){
   const resp = await fetch(`${API}?action=${action}`, {
@@ -78,6 +84,21 @@ function apiErrText(r){
   let t = r.error || 'erro não informado';
   if(r.error_tipo) t += ` [${r.error_tipo}${r.error_origem ? ' em ' + r.error_origem : ''}]`;
   return t;
+}
+
+/* Lista de cidades (em MAIÚSCULAS) de uma UF. Fonte primária: o próprio backend,
+   que lê o CSV oficial já presente no servidor — funciona mesmo sem internet ou
+   atrás de firewall corporativo. Só recorre ao IBGE como último recurso. */
+async function fetchCities(uf){
+  try{
+    const r = await api(`list_cities&uf=${encodeURIComponent(uf)}`);
+    if(r && r.ok && Array.isArray(r.cities) && r.cities.length) return r.cities;
+  } catch(e){}
+  try{
+    const r = await fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${encodeURIComponent(uf)}/municipios?orderBy=nome`);
+    const d = await r.json();
+    return d.map(x => x.nome.toUpperCase());
+  } catch(e){ return []; }
 }
 
 /* showToast(msg) — string simples, 3 s

@@ -47,7 +47,7 @@ require_once __DIR__ . '/../../private-config/lib/google.php';
 
 /* Build do backend. Atualize a cada deploy do handler.php; é exibido no painel
    "Diagnóstico de versão" do Admin Mode para confirmar que o PHP novo subiu. */
-if (!defined('HANDLER_BUILD')) define('HANDLER_BUILD', 'v23.04 (2026-06-11)');
+if (!defined('HANDLER_BUILD')) define('HANDLER_BUILD', 'v23.05 (2026-06-12)');
 
 /*
  * Bootstrap idempotente do schema para todas as bases configuradas.
@@ -505,6 +505,10 @@ if ($action === 'login') {
         session_regenerate_id(true);
         $_SESSION['user']       = $user;
         $_SESSION['login_time'] = time();
+        // Registra o login bem-sucedido para o painel de usuários ("último login").
+        // No login ainda não há base ativa, então grava na tabela da base padrão
+        // (prefixo vazio); o painel lê desse mesmo lugar, de forma consistente.
+        try { DB::setPrefix(''); DB::log($user, 'sistema', 'login_success', null, null); } catch (Throwable $e) {}
         $visKeys = visibleBaseKeys($user);
         $hasProd = hasProductionAccess($user);
         $isAdminUser = isAdmin($user);
@@ -987,7 +991,10 @@ switch ($action) {
         // a alocar memória demais. Para qualquer uso prático isso é suficiente.
         $limit   = min(100000, max(10, (int)($_GET['limit']??200)));
         try {
-            $log = DB::getLog($limit, $caso_id, $usuario);
+            // Eventos de login (login_success) não são "alterações de caso";
+            // ficam de fora do histórico de mudanças (são exibidos no painel de
+            // usuários como "último login").
+            $log = DB::getLog($limit, $caso_id, $usuario, ['login_success']);
             foreach ($log as &$e) {
                 if (!empty($e['antes_json']))  $e['antes']  = json_decode($e['antes_json'],  true);
                 if (!empty($e['depois_json'])) $e['depois'] = json_decode($e['depois_json'], true);
@@ -995,6 +1002,24 @@ switch ($action) {
             }
             echo json_encode(['ok'=>true,'log'=>$log,'count'=>count($log)]);
         } catch (Throwable $e) { echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine(),'log'=>[]]); }
+        break;
+
+    // ── Lista de cidades por UF (substitui a chamada direta ao IBGE) ──────
+    // Lê o CSV de coordenadas já existente no servidor. Vantagem: funciona sem
+    // internet/atrás de firewall e fica alinhado com a validação de distância
+    // (que também depende desse CSV). Liberado a qualquer usuário logado.
+    case 'list_cities':
+        $uf = strtoupper(trim($_GET['uf'] ?? ''));
+        if (!preg_match('/^[A-Z]{2}$/', $uf)) { echo json_encode(['ok'=>false,'error'=>'UF inválida.','cities'=>[]]); break; }
+        $coords = loadCidadesCoords();
+        if (isset($coords['_error'])) { echo json_encode(['ok'=>false,'error'=>$coords['_error'],'cities'=>[]]); break; }
+        $cities = [];
+        foreach ($coords['_uf_name'] as $key => $entry) {
+            if (strpos($key, $uf.'|') === 0) $cities[] = mb_strtoupper($entry['name'], 'UTF-8');
+        }
+        $cities = array_values(array_unique($cities));
+        sort($cities);
+        echo json_encode(['ok'=>true,'uf'=>$uf,'cities'=>$cities,'count'=>count($cities)]);
         break;
 
     // ── Add uso ───────────────────────────────────────────
@@ -1602,7 +1627,11 @@ switch ($action) {
         foreach ($allUsers as $u => $d) {
             $data = is_array($d) ? $d : ['hash'=>$d,'role'=>'user'];
             try {
-                $llSt = DB::get()->prepare("SELECT MAX(criado_em) as last FROM ".DB::getPrefix()."audit_log WHERE usuario=? AND acao='login_success'");
+                // login_success é gravado sempre na tabela da base padrão (prefixo
+                // vazio = "audit_log"), pois no login ainda não há base ativa.
+                // Por isso esta consulta usa a tabela sem prefixo, independente da
+                // base que o admin esteja visualizando.
+                $llSt = DB::get()->prepare("SELECT MAX(criado_em) as last FROM audit_log WHERE usuario=? AND acao='login_success'");
                 $llSt->execute([$u]);
                 $ll = $llSt->fetch()['last'] ?? null;
                 $chSt = DB::get()->prepare("SELECT COUNT(*) FROM ".DB::getPrefix()."audit_log WHERE usuario=? AND criado_em > DATE_SUB(NOW(), INTERVAL 30 DAY) AND acao NOT IN ('login_success')");
@@ -2134,16 +2163,27 @@ switch ($action) {
         $ids = array_values(array_unique(array_map('strtoupper', $ids)));
         if (!$ids) { echo json_encode(['ok'=>false,'error'=>'Nenhum ID válido informado.']); break; }
         if (count($ids) > 30) { echo json_encode(['ok'=>false,'error'=>'Máximo 30 casos por download.']); break; }
+        // Empacotar arquivos completos (vídeos inclusive) pode ser pesado. Damos
+        // mais tempo/memória e gravamos cada arquivo num temporário em disco antes
+        // de adicioná-lo: ZipArchive::addFile lê do disco só no close(), em vez de
+        // manter todos os bytes na RAM ao mesmo tempo (como faria addFromString).
+        @set_time_limit(300);
+        if ((int)ini_get('memory_limit') !== -1) @ini_set('memory_limit', '512M');
+        $MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024; // teto de segurança: 2 GB
         $tmpZip = tempnam(sys_get_temp_dir(), 'bi_zip_');
         $zip = new ZipArchive();
         if ($zip->open($tmpZip, ZipArchive::OVERWRITE) !== true) {
             @unlink($tmpZip);
             echo json_encode(['ok'=>false,'error'=>'Falha ao criar ZIP.']); break;
         }
-        $errors = [];
+        $errors     = [];
         $totalFiles = 0;
+        $totalBytes = 0;
+        $tmpFiles   = [];
+        $limitHit   = false;
         try {
             foreach ($ids as $cid) {
+                if ($limitHit) break;
                 try {
                     $photos = $api->getDrivePhotos($cid, false);
                 } catch (Throwable $e) {
@@ -2154,21 +2194,37 @@ switch ($action) {
                 foreach ($photos as $p) {
                     $r = $api->downloadDriveFile($p['id']);
                     if (!$r['ok']) { $errors[] = "$cid/{$p['name']}: ".($r['error']??'falha'); continue; }
+                    $bytes = strlen($r['data']);
+                    if ($totalBytes + $bytes > $MAX_TOTAL_BYTES) {
+                        $errors[] = 'Limite de 2 GB por download atingido — selecione menos casos por vez.';
+                        $limitHit = true; break;
+                    }
+                    $tmp = tempnam(sys_get_temp_dir(), 'bi_f_');
+                    if ($tmp === false || @file_put_contents($tmp, $r['data']) === false) {
+                        $errors[] = "$cid/{$r['name']}: falha ao gravar arquivo temporário";
+                        if ($tmp !== false) @unlink($tmp);
+                        continue;
+                    }
+                    $totalBytes += $bytes;
+                    unset($r['data']); // libera a cópia em memória o quanto antes
                     $entry = $cid.'/'.preg_replace('/[\\\\\/:*?"<>|]/','_', $r['name']);
-                    $zip->addFromString($entry, $r['data']);
+                    $zip->addFile($tmp, $entry);
+                    $tmpFiles[] = $tmp;
                     $totalFiles++;
                 }
             }
-            $zip->close();
+            $zip->close(); // só aqui o ZipArchive lê os temporários do disco
         } catch (Throwable $e) {
             @$zip->close(); @unlink($tmpZip);
+            foreach ($tmpFiles as $tf) @unlink($tf);
             echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); break;
         }
         if ($totalFiles === 0) {
             @unlink($tmpZip);
+            foreach ($tmpFiles as $tf) @unlink($tf);
             echo json_encode(['ok'=>false,'error'=>'Nenhum arquivo encontrado para os IDs informados.', 'details'=>$errors]); break;
         }
-        // Faz streaming do ZIP montado para o cliente e o remove em seguida.
+        // Faz streaming do ZIP montado para o cliente e remove tudo em seguida.
         $size = filesize($tmpZip);
         $fname = 'casos_'.date('Ymd_His').'_'.count($ids).'.zip';
         header_remove('Content-Type');
@@ -2179,6 +2235,7 @@ switch ($action) {
         header('Cache-Control: private, no-cache');
         readfile($tmpZip);
         @unlink($tmpZip);
+        foreach ($tmpFiles as $tf) @unlink($tf);
         DB::log($me, 'sistema', 'download_bulk', null, ['ids'=>$ids,'files'=>$totalFiles,'errors'=>count($errors)]);
         exit;
 

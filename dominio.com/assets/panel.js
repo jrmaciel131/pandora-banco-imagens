@@ -506,7 +506,7 @@ async function renderModalTimeline(casoId){
   overview.innerHTML = '<div style="padding:.5rem 0;font-size:12px;color:var(--tx2)"><span class="spin"></span> Carregando histórico...</div>';
   full.innerHTML = '';
   try{
-    const r = await api(`history&id=${encodeURIComponent(casoId)}`);
+    const r = await api(`historico&caso_id=${encodeURIComponent(casoId)}&limit=50`);
     const entries = r.entries || r.log || [];
     if(!entries.length){
       overview.innerHTML = '<div style="padding:.5rem 0;font-size:12px;color:var(--tx3)">Sem histórico registrado.</div>';
@@ -527,13 +527,36 @@ function renderTlEntry(e){
   const dotCls = (type.includes('rm') || type.includes('remov')) ? 'rm'
                : (type.includes('blk') || type.includes('block'))  ? 'blk'
                : 'add';
-  const what = esc(e.descricao || e.label || e.acao || type);
-  const meta  = [e.usuario || e.user, e.data || e.ts].filter(Boolean).map(esc).join(' · ');
+  const what = esc(e.descricao || e.label || (e.acao || type).replace(/_/g,' '));
+  /* O endpoint historico devolve criado_em (e antes/depois já decodificados).
+     Mostramos data formatada e um diff curto quando houver. */
+  const rawDate = e.criado_em || e.data || e.ts;
+  let dateStr = '';
+  if(rawDate){
+    const d = new Date(String(rawDate).replace(' ', 'T'));
+    dateStr = isNaN(d) ? String(rawDate) : d.toLocaleString('pt-BR');
+  }
+  const meta  = [e.usuario || e.user, dateStr].filter(Boolean).map(esc).join(' · ');
+  let diff = '';
+  if(e.antes && e.depois){
+    const f = a => (Array.isArray(a) ? a : []).join(', ') || '—';
+    const rows = [];
+    if('ufs' in e.antes || 'ufs' in e.depois)
+      rows.push(`UF: ${esc(f(e.antes.ufs))} → ${esc(f(e.depois.ufs))}`);
+    if('cidades' in e.antes || 'cidades' in e.depois)
+      rows.push(`Cidade: ${esc((e.antes.cidades||[]).map(cap).join(', ')||'—')} → ${esc((e.depois.cidades||[]).map(cap).join(', ')||'—')}`);
+    if('clientes' in e.antes || 'clientes' in e.depois)
+      rows.push(`Prof.: ${esc(f(e.antes.clientes))} → ${esc(f(e.depois.clientes))}`);
+    if('tags' in e.antes || 'tags' in e.depois)
+      rows.push(`Tags: ${esc(f(e.antes.tags))} → ${esc(f(e.depois.tags))}`);
+    diff = rows.length ? `<div class="s-tl-diff" style="font-size:11px;color:var(--tx3);margin-top:2px">${rows.join('<br>')}</div>` : '';
+  }
   return `<div class="s-tl-entry">
     <div class="s-tl-dot ${dotCls}"></div>
     <div class="s-tl-body">
       <div class="s-tl-what">${what}</div>
       ${meta ? `<div class="s-tl-meta">${meta}</div>` : ''}
+      ${diff}
     </div>
   </div>`;
 }
@@ -573,9 +596,7 @@ async function loadIBGE(uf, t){
   const ciEl = modalInputId ? document.getElementById(modalInputId) : null;
   if(ciEl){ ciEl.readOnly = true; ciEl.placeholder = 'Carregando cidades...'; }
   try{
-    const r = await fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios?orderBy=nome`);
-    const d = await r.json();
-    const c = d.map(x => x.nome.toUpperCase());
+    const c = await fetchCities(uf);
     if(t === 'filter')   ibgeCities = c;
     else if(t === 'add') addCities = c;
     else                 bulkCities[t] = c;

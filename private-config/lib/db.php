@@ -223,10 +223,13 @@ class DB {
      * contornar a quoting do PDO em alguns drivers MySQL — o cast para int
      * impede injeção; os demais filtros seguem o caminho parametrizado.
      */
-    public static function getLog(int $limit = 200, string $caso_id = '', string $usuario = ''): array {
+    public static function getLog(int $limit = 200, string $caso_id = '', string $usuario = '', array $excludeAcoes = []): array {
         $where = []; $params = [];
         if ($caso_id) { $where[] = 'caso_id=?'; $params[] = $caso_id; }
         if ($usuario) { $where[] = 'usuario=?'; $params[] = $usuario; }
+        // Permite ocultar certas ações (ex.: 'login_success') do histórico de
+        // alterações, sem precisar de uma query dedicada.
+        foreach ($excludeAcoes as $ex) { $where[] = 'acao<>?'; $params[] = $ex; }
 
         $sql = 'SELECT * FROM '.self::t('audit_log')
              . ($where ? ' WHERE ' . implode(' AND ', $where) : '')

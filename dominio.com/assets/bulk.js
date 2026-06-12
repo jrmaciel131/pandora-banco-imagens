@@ -136,13 +136,30 @@ function updateBulkBar(){
   } else bar.classList.remove('show');
 }
 
-/* Download em lote: backend monta o ZIP com PHP ZipArchive e stream — sem lib JS. */
+/* Download em lote: backend monta o ZIP com PHP ZipArchive e stream — sem lib JS.
+   Como é uma única resposta (sem progresso real), mostramos um overlay com
+   cronômetro pra deixar claro que está trabalhando — vídeos podem demorar. */
 async function downloadBulkZip(){
   if(!selIds.size){ showToast('Selecione pelo menos 1 caso.'); return; }
   if(selIds.size > 30){ showToast(`Máximo 30 casos por download. Selecionados: ${selIds.size}.`); return; }
   const ids = [...selIds].join(',');
   const count = selIds.size;
-  showToast(`Gerando ZIP de ${count} caso(s)... pode demorar 30s+`);
+
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:950;display:flex;align-items:center;justify-content:center;padding:1rem';
+  ov.innerHTML = `<div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:2rem 2.5rem;text-align:center;min-width:260px;box-shadow:var(--shadow-lg)">
+    <span class="spin" style="width:30px;height:30px;border-width:3px"></span>
+    <div style="margin-top:.85rem;font-size:14px;font-weight:600">Gerando ZIP de ${count} caso(s)…</div>
+    <div style="margin-top:.35rem;font-size:12px;color:var(--tx2)" id="zip-timer">Preparando… vídeos podem demorar</div>
+  </div>`;
+  document.body.appendChild(ov);
+  let secs = 0;
+  const timer = setInterval(() => {
+    secs++;
+    const t = document.getElementById('zip-timer');
+    if(t) t.textContent = `${secs}s — baixando e compactando (limite: 2 GB / 30 casos)`;
+  }, 1000);
+
   try{
     const resp = await fetch(`${API}?action=download_bulk`, {
       method: 'POST',
@@ -168,6 +185,7 @@ async function downloadBulkZip(){
     setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1500);
     showToast(`✅ ZIP com ${count} caso(s) baixado.`);
   } catch(e){ showToast('Erro de conexão: '+e.message); }
+  finally { clearInterval(timer); ov.remove(); }
 }
 
 function openBulkApply(){

@@ -282,6 +282,7 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
         <input type="text" id="hfcaso" placeholder="Caso (ex: 100)..." style="padding:6px 10px;border:0.5px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none;width:140px" oninput="loadHistorico()">
         <input type="text" id="hfsearch" placeholder="Buscar UF, cidade, profissional..." style="padding:6px 10px;border:0.5px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none;width:210px" oninput="loadHistorico()">
         <button class="btn bs" style="padding:6px 12px;font-size:12px" onclick="loadHistorico()">↻</button>
+        <button class="btn bs" style="padding:6px 12px;font-size:12px" onclick="exportHistoricoGeral()" title="Exporta o histórico exibido (com os filtros atuais) para .csv">⬇ Exportar (.csv)</button>
         <button class="btn bs" style="padding:6px 12px;font-size:12px" onclick="showView('main')">← Voltar</button>
       </div>
       <div id="hist-body" style="background:var(--sf);border:0.5px solid var(--bd);border-radius:var(--r);overflow:hidden">
