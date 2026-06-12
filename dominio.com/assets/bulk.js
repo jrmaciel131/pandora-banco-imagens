@@ -23,6 +23,20 @@ function lightboxFloNav(dir){
   renderLightboxFlo();
 }
 
+/* URL da rendição grande (~1600px). Quando o servidor já materializou o
+   arquivo, preview_url aponta pro estático; senão a action view_preview gera
+   e guarda em cache na primeira visita. Bem mais leve que o original — o
+   download em qualidade total continua nos botões Drive/Baixar. */
+function previewSrc(p){
+  return p.preview_url || `${API}?action=view_preview&file_id=${encodeURIComponent(p.id)}`;
+}
+
+function prefetchPreview(idx){
+  const p = currentPhotos[idx];
+  if(!p || !p.id) return;
+  new Image().src = previewSrc(p);
+}
+
 function renderLightboxFlo(){
   const p = currentPhotos[_lfIdx];
   if(!p) return;
@@ -31,11 +45,11 @@ function renderLightboxFlo(){
   img.alt = p.name || '';
   /* Marca a navegação atual para descartar carregamentos de imagens já trocadas. */
   const token = ++_lfLoadToken;
-  /* Mostra a thumbnail imediatamente; para vídeos não há original exibível. */
+  /* Mostra a thumbnail imediatamente e troca pela rendição grande quando
+     pronta. Para vídeos a rendição é o frame de capa gerado pelo Drive. */
   img.src = p.thumb_url || '';
   img.classList.remove('lf-loading');
-  if(!p.isVideo && p.id){
-    /* Busca o original do Drive sob demanda e troca quando estiver pronto. */
+  if(p.id){
     img.classList.add('lf-loading');
     const full = new Image();
     full.onload = () => {
@@ -44,12 +58,54 @@ function renderLightboxFlo(){
       img.classList.remove('lf-loading');
     };
     full.onerror = () => { if(token === _lfLoadToken) img.classList.remove('lf-loading'); };
-    full.src = `${API}?action=view_photo&file_id=${encodeURIComponent(p.id)}`;
+    full.src = previewSrc(p);
   }
   const tag = p.version_tag ? ` · ${p.version_tag}` : '';
   info.textContent = `${p.name || ''} (${_lfIdx+1}/${currentPhotos.length})${tag}`;
   document.getElementById('lf-prev').disabled = currentPhotos.length <= 1;
   document.getElementById('lf-next').disabled = currentPhotos.length <= 1;
+  /* Pré-carrega os vizinhos para navegação instantânea com ←/→. */
+  if(currentPhotos.length > 1){
+    prefetchPreview((_lfIdx + 1) % currentPhotos.length);
+    prefetchPreview((_lfIdx - 1 + currentPhotos.length) % currentPhotos.length);
+  }
+}
+
+/* Abre o visualizador em tela cheia direto do card da grade (botão olho),
+   sem passar pelo painel do caso. A thumb da grade entra como placeholder
+   enquanto a lista de fotos do caso é buscada. */
+async function openCaseViewer(id, e){
+  if(e) e.stopPropagation();
+  const lf = document.getElementById('lightbox-flo');
+  const img = document.getElementById('lf-img');
+  const info = document.getElementById('lf-info');
+  currentPhotos = [];
+  _lfIdx = 0;
+  const token = ++_lfLoadToken;
+  const tc = typeof thumbCache !== 'undefined' ? thumbCache[id] : null;
+  img.src = (tc && tc.url) || '';
+  img.alt = id;
+  img.classList.add('lf-loading');
+  info.textContent = `${id} — carregando...`;
+  document.getElementById('lf-prev').disabled = true;
+  document.getElementById('lf-next').disabled = true;
+  lf.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  try{
+    const r = await api(`photos&id=${encodeURIComponent(id)}`);
+    if(token !== _lfLoadToken || !lf.classList.contains('open')) return;
+    if(!r.photos?.length){
+      img.classList.remove('lf-loading');
+      info.textContent = `${id} — nenhuma foto/vídeo no Drive`;
+      return;
+    }
+    currentPhotos = r.photos;
+    renderLightboxFlo();
+  } catch(err){
+    if(token !== _lfLoadToken) return;
+    img.classList.remove('lf-loading');
+    info.textContent = `${id} — erro ao buscar fotos`;
+  }
 }
 
 function lightboxFloCloud(){

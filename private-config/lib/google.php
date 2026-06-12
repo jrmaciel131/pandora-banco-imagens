@@ -631,6 +631,30 @@ class GoogleAPI {
         ];
     }
 
+    /**
+     * Baixa a rendição grande (preview) de um arquivo via thumbnailLink do
+     * Drive. A rendição é um JPEG gerado pelo Google na resolução pedida —
+     * ordens de grandeza menor que o original, ideal para o visualizador em
+     * tela cheia. O original continua disponível em downloadDriveFile().
+     *
+     * @return array{ok:bool, data?:string, mime?:string, error?:string}
+     */
+    public function downloadDrivePreview(string $fileId, int $size = 1600): array {
+        $tok = $this->getToken();
+        $metaUrl = "https://www.googleapis.com/drive/v3/files/".urlencode($fileId)."?fields=thumbnailLink";
+        $meta = hget($metaUrl, ["Authorization: Bearer $tok"]);
+        if (!$meta) return ['ok'=>false,'error'=>'Sem resposta dos metadados.'.hLastError()];
+        $m = json_decode($meta, true);
+        if (isset($m['error'])) return ['ok'=>false,'error'=>'Drive: '.($m['error']['message']??'desconhecido')];
+        $url = $m['thumbnailLink'] ?? null;
+        if (!$url) return ['ok'=>false,'error'=>'Drive não fornece preview para este arquivo.'];
+        $src = preg_replace('/=s\d+$/', '=s'.$size, $url);
+        $data = hget($src, ["Authorization: Bearer $tok"]);
+        if (!$data || strlen($data) < 100) $data = hget($src, []);
+        if (!$data || strlen($data) < 100) return ['ok'=>false,'error'=>'Falha ao baixar o preview.'];
+        return ['ok'=>true, 'data'=>$data, 'mime'=>'image/jpeg'];
+    }
+
     public function getDriveNewFiles(int $days=7): array {
         $tok=$this->getToken();
         $folderIds=$this->getAllFolderIds();

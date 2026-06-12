@@ -167,6 +167,11 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 .csel { position: absolute; top: 8px; left: 8px; width: 20px; height: 20px; border-radius: var(--rxs); border: 2px solid #fff; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; z-index: 2; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
 .cc.sel .csel { background: var(--accent); border-color: var(--accent); }
 
+/* Botão olho: abre o visualizador em tela cheia direto do card (hover) */
+.ceye { position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(0,0,0,.55); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 4; padding: 0; opacity: 0; pointer-events: none; transition: opacity .12s, background .12s; backdrop-filter: blur(4px); box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.cc:hover .ceye { opacity: 1; pointer-events: auto; }
+.ceye:hover { background: var(--accent); }
+
 .ct { width: 100%; aspect-ratio: 4/5; background: var(--sf2); display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; }
 .ct img { width: 100%; height: 100%; object-fit: contain; background: #0a0a08; }
 .ct-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 100%; }

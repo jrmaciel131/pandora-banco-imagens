@@ -708,8 +708,20 @@ function thumbUrl(?string $f): ?string {
     if (!$f) return null;
     return file_exists($thumbDir.'/'.$f) ? $thumbBaseUrl.'/'.$f : null;
 }
+/* Rendição grande (~1600px) já materializada em disco pela action
+   view_preview. Quando existe, o frontend a carrega como arquivo estático,
+   sem passar pelo PHP. */
+function previewUrl(?string $fileId): ?string {
+    global $thumbDir, $thumbBaseUrl;
+    if (!$fileId) return null;
+    $f = $fileId.'_p.jpg';
+    return file_exists($thumbDir.'/'.$f) ? $thumbBaseUrl.'/'.$f : null;
+}
 function enrichPhotos(array $photos): array {
-    foreach ($photos as &$p) $p['thumb_url'] = thumbUrl($p['local_thumb'] ?? null);
+    foreach ($photos as &$p) {
+        $p['thumb_url']   = thumbUrl($p['local_thumb'] ?? null);
+        $p['preview_url'] = previewUrl($p['id'] ?? null);
+    }
     return $photos;
 }
 
@@ -2145,6 +2157,41 @@ switch ($action) {
             header('Content-Disposition: inline');
             header('Cache-Control: private, max-age=600');
             echo $r['data'];
+            exit;
+        } catch (Throwable $e) {
+            http_response_code(500);
+            echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]);
+        }
+        break;
+
+    // ── Rendição grande (~1600px) para o visualizador ──────────
+    // Muito menor que o original servido por view_photo; fica em cache no
+    // mesmo diretório das thumbs ({fileId}_p.jpg) e nas próximas listagens o
+    // enrichPhotos devolve preview_url apontando direto pro arquivo estático.
+    case 'view_preview':
+        $fileId = preg_replace('/[^A-Za-z0-9_\-]/','',$_GET['file_id']??'');
+        if (!$fileId) { http_response_code(400); echo json_encode(['ok'=>false,'error'=>'file_id inválido.']); break; }
+        try {
+            $path = $thumbDir.'/'.$fileId.'_p.jpg';
+            $mime = 'image/jpeg';
+            if (file_exists($path) && filesize($path) > 100) {
+                $data = file_get_contents($path);
+            } else {
+                $r = $api->downloadDrivePreview($fileId);
+                // Arquivos sem rendição no Drive caem para o original.
+                if (!$r['ok']) $r = $api->downloadDriveFile($fileId);
+                if (!$r['ok']) { http_response_code(502); echo json_encode(['ok'=>false,'error'=>$r['error']??'Falha']); break; }
+                $data = $r['data'];
+                $mime = $r['mime'] ?? 'image/jpeg';
+                if ($mime === 'image/jpeg') @file_put_contents($path, $data);
+            }
+            header_remove('Content-Type');
+            header_remove('X-Frame-Options');
+            header('Content-Type: '.$mime);
+            header('Content-Length: '.strlen($data));
+            header('Content-Disposition: inline');
+            header('Cache-Control: private, max-age=86400');
+            echo $data;
             exit;
         } catch (Throwable $e) {
             http_response_code(500);

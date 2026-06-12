@@ -547,6 +547,7 @@ function renderGrid(){
 
     return `<div class="cc${isSel?' sel':''}${isBlocked?' blocked':''}" id="card-${c.id}" style="position:relative" onclick="${selMode ? `toggleCardSel('${c.id}',event)` : `openModal('${c.id}')`}" title="${isBlocked && c.motivo_bloqueio ? 'Motivo: '+esc(c.motivo_bloqueio) : ''}">
       ${selMode ? `<div class="csel">${isSel?'✓':''}</div>` : ''}
+      <button class="ceye" onclick="openCaseViewer('${c.id}',event)" title="Ver em tela cheia"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 19 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
       <div class="ct" id="ct-${c.id}">${innerHtml}</div>
       <div class="cb">
         <div class="ci">${c.id}</div>
