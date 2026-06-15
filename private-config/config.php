@@ -114,6 +114,15 @@ if (!defined('CRON_KEY')) define('CRON_KEY', '');
 if (!defined('TURNSTILE_SITE_KEY')) define('TURNSTILE_SITE_KEY', '');
 if (!defined('TURNSTILE_SECRET'))   define('TURNSTILE_SECRET', '');
 
+// Meta Marketing API (Graph API) — usada pela V3 do /relatorio. O token do
+// Usuário do Sistema (permissão ads_read) e a lista de contas dos clientes são
+// sensíveis e ficam em secrets.local.php (fora do Git). Aqui só os fallbacks:
+// enquanto o token estiver vazio, a V3 responde "API não configurada".
+// Passo a passo em dominio.com/relatorio/DEPLOY-V3.md.
+if (!defined('META_ACCESS_TOKEN')) define('META_ACCESS_TOKEN', '');
+if (!defined('META_API_VERSION'))  define('META_API_VERSION', 'v21.0');
+if (!defined('META_ACCOUNTS'))     define('META_ACCOUNTS', []);
+
 // Raio mínimo (em km) entre uma cidade nova e qualquer cidade já em uso no
 // mesmo caso. Usuários comuns são bloqueados se houver conflito; apenas admins
 // podem confirmar para prosseguir.

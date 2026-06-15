@@ -43,6 +43,13 @@ private-config/tags.json
 private-config/distance_config.json
 private-config/distance_overrides.json
 
+# ── Relatório V3 (/relatorio): saídas e lixo de teste — NÃO versionar ─────
+# uploads/ guarda PDFs e imagens reais de clientes; _phptest e old são
+# rascunhos. Nada disso deve ir para o Git (nem no privado nem no público).
+dominio.com/relatorio/uploads/
+dominio.com/relatorio/_phptest/
+dominio.com/relatorio/old/
+
 # ── Arquivos do Windows / Mac / Linux ─────────────────────
 desktop.ini
 Thumbs.db

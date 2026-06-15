@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Relatórios de Resultados — Escolha a versão</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<style>
+  #app-version{ position:fixed; right:12px; bottom:10px; z-index:50; font-family:'Montserrat',system-ui,sans-serif;
+    font-size:11px; letter-spacing:.02em; color:rgba(255,255,255,.55); display:flex; align-items:center; gap:6px; }
+  #app-version::before{ content:""; width:7px; height:7px; border-radius:50%; background:#32cdcd; }
+</style>
+</head>
+<body>
+<div id="app-version" title="Versão dos arquivos. Se não mudar após subir, é cache — atualize com Ctrl+F5.">Versão 2026.06.03-4</div>
+
+<div id="start-screen">
+  <div class="ss-bg"></div>
+  <div class="ss-overlay"></div>
+  <div class="ss-card">
+    <div class="ss-brand">RELATÓRIOS DE RESULTADOS</div>
+    <h1>Escolha a versão</h1>
+    <p>Cada versão é um layout diferente do mesmo relatório de Meta Ads. Depois de escolher, você sobe o Excel normalmente.</p>
+    <div class="ss-grid">
+      <button class="ss-fmt" type="button" onclick="location.href='Relatorio Dinamico.html'">
+        <span class="ss-fmt-n">V1</span>
+        <span class="ss-fmt-t">Relatório Dinâmico</span>
+        <span class="ss-fmt-d">Layout original (paisagem) — visão geral, campanhas, conjuntos e detalhamento</span>
+      </button>
+      <button class="ss-fmt" type="button" onclick="location.href='RelatorioV2.html'">
+        <span class="ss-fmt-n">V2</span>
+        <span class="ss-fmt-t">Layout Canva (A4)</span>
+        <span class="ss-fmt-d">Documento retrato fiel ao Canva — capa, campanha, conjunto e uma página por anúncio</span>
+      </button>
+      <button class="ss-fmt" type="button" onclick="location.href='RelatorioV3.html'">
+        <span class="ss-fmt-n">V3</span>
+        <span class="ss-fmt-t">Puxar da Meta (API)</span>
+        <span class="ss-fmt-d">Sem Excel — escolha o cliente e o mês e os números vêm direto da conta de anúncios (requer login do Pandora)</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

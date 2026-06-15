@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Relatório Mensal — V3 (API da Meta)</title>
+<meta name="viewport" content="width=1240">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="css/styles.css">
+<!-- V3: a entrada é a tela de seleção (cliente+mês) da meta-api-v3.js, não o upload da V2 -->
+<style>#start-screen{display:none!important}</style>
+
+<!-- libs servidas localmente (servidor pode ter CSP que bloqueia CDN externo) -->
+<script src="vendor/chart.umd.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="js/deck-stage.js"></script>
+<script src="js/image-slot.js"></script>
+
+<style>
+  /* ─── tokens da V2 escopados em .v2deck (não vazam pro chrome) ─── */
+  .v2deck{
+    --paper:#ffffff; --bar:#aeaeae; --bar-dark:#9f9f9f;
+    --vink:#3c3c3c; --vink-2:#5a5a5a; --vink-3:#7e7e7e; --vink-mute:#b5b5b5;
+    --vrule:#d8d8d8; --vrule-soft:#ececec; --bubble:#e9e9e9;
+    --placeholder:#5e5e5e; --placeholder-light:#e3e3e3;
+    --purple:#5c3bbf; --teal:#32cdcd; --accent:#1ba7a7;
+    --vfont:'Open Sans', system-ui, sans-serif;
+    --vfont-head:'Open Sans', system-ui, sans-serif;
+    background:#22201d;
+  }
+  .v2deck section{
+    background:var(--paper); color:var(--vink);
+    position:relative; overflow:hidden; box-sizing:border-box;
+    font-family:var(--vfont); font-weight:400;
+  }
+  .v2deck section *{ box-sizing:border-box; }
+
+  /* barras cinza topo/rodapé */
+  .v2deck .bar-top, .v2deck .bar-bot{ position:absolute; left:0; right:0; height:24px; background:var(--bar); z-index:1; }
+  .v2deck .bar-top{ top:0; } .v2deck .bar-bot{ bottom:0; }
+
+  /* header (pgs 2-7) — mais encorpado e coeso com o layout */
+  .v2deck .head{ position:absolute; top:60px; left:88px; right:88px; display:flex; align-items:center; gap:32px; padding-bottom:26px; border-bottom:3px solid var(--vrule); }
+  .v2deck .head .avatar{ width:128px; height:128px; border-radius:50%; overflow:hidden; background:#eee; flex:none; box-shadow:0 0 0 5px #fff, 0 0 0 6px var(--accent); }
+  .v2deck .head .avatar img{ width:100%; height:100%; object-fit:cover; }
+  .v2deck .head .id{ display:flex; flex-direction:column; gap:7px; min-width:0; }
+  .v2deck .head .id .ctx{ font-size:15px; font-weight:700; letter-spacing:.24em; color:var(--accent); text-transform:uppercase; }
+  .v2deck .head .id .name{ font-size:44px; font-weight:700; color:var(--vink); line-height:1.02; }
+  .v2deck .head .id .date{ font-size:17px; font-weight:600; letter-spacing:.14em; color:var(--vink-3); text-transform:uppercase; }
+  .v2deck .head .head-chip{ margin-left:auto; align-self:center; font-size:18px; font-weight:700; letter-spacing:.16em; text-transform:uppercase; color:#fff; background:var(--accent); padding:13px 28px; border-radius:7px; white-space:nowrap; }
+
+  /* marca Vo/ */
+  .v2deck .vo-mark{ position:absolute; right:60px; bottom:40px; height:68px; z-index:3; }
+  .v2deck .vo-mark img{ height:100%; width:auto; display:block; }
+  .v2deck .vo-mark svg{ width:100%; height:100%; display:block; }
+
+  /* capa */
+  .v2deck .cover-portrait{ position:absolute; top:210px; left:50%; transform:translateX(-50%); width:480px; height:480px; border-radius:50%; background:#ececec center/cover no-repeat; overflow:hidden; }
+  .v2deck .cover-name{ position:absolute; top:740px; left:0; right:0; text-align:center; font-size:38px; font-weight:400; color:var(--vink-2); letter-spacing:.01em; }
+  .v2deck .cover-name-rule{ position:absolute; top:818px; left:50%; transform:translateX(-50%); width:90px; height:5px; background:var(--accent); }
+  .v2deck .cover-agency{ position:absolute; bottom:440px; left:100px; font-size:16px; letter-spacing:.32em; font-weight:600; color:var(--vink-2); text-transform:uppercase; }
+  .v2deck .cover-title{ position:absolute; bottom:196px; left:100px; font-size:104px; font-weight:300; color:var(--vink); line-height:1.0; letter-spacing:.14em; }
+  .v2deck .cover-title .row{ display:block; }
+  .v2deck .cover-rule{ position:absolute; bottom:160px; left:100px; width:170px; height:5px; background:var(--accent); }
+  .v2deck .cover-date{ position:absolute; bottom:108px; left:100px; font-size:16px; letter-spacing:.32em; font-weight:600; color:var(--vink-2); text-transform:uppercase; }
+  .v2deck .cover-date span + span{ margin-left:14px; }
+
+  /* agenda */
+  .v2deck .ag-head-eyebrow{ position:absolute; top:276px; left:88px; font-size:32px; font-weight:700; color:var(--vink); }
+  .v2deck .ag-head-eyebrow em{ font-style:normal; font-weight:400; color:var(--vink-3); font-size:19px; margin-left:10px; vertical-align:middle; }
+  .v2deck .ag-head-title{ position:absolute; top:340px; left:88px; font-family:var(--vfont-head); font-size:34px; font-weight:600; color:var(--vink); }
+  .v2deck .ag-head-title svg{ margin-left:14px; width:32px; height:32px; vertical-align:middle; }
+  .v2deck .ag-stage{ position:absolute; top:430px; left:88px; right:88px; display:flex; flex-direction:column; gap:30px; }
+  .v2deck .ag-top{ display:grid; grid-template-columns:240px 1fr; gap:44px; align-items:stretch; }
+  .v2deck .ag-mini{ background:var(--placeholder); color:#d2d2d2; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:22px; gap:16px; border:6px solid #fff; box-shadow:0 0 0 1px var(--vrule); min-height:300px; }
+  .v2deck .ag-mini .lbl{ font-size:13px; font-weight:700; letter-spacing:.2em; text-transform:uppercase; text-align:center; line-height:1.45; }
+  .v2deck .ag-mini .icon{ width:84px; height:84px; opacity:.5; }
+  .v2deck .ag-mini img{ width:100%; height:100%; object-fit:cover; }
+  .v2deck .ag-overview{ display:flex; flex-direction:column; gap:9px; min-width:0; }
+  .v2deck .ag-chart-wrap{ position:relative; }
+  .v2deck .ag-chart-wrap .chart-host{ height:198px; }
+  .v2deck .ag-demo{ position:relative; display:flex; flex-direction:column; gap:9px; }
+  .v2deck .ag-demo .chart-host{ height:248px; }
+  .v2deck .ag-plat{ position:relative; display:grid; grid-template-columns:1.6fr 1px 1fr; gap:40px; align-items:stretch; }
+  .v2deck .ag-plat-chart{ position:relative; display:flex; flex-direction:column; gap:9px; min-width:0; }
+  .v2deck .ag-plat-chart .chart-host{ height:206px; }
+  .v2deck .ag-plat-div{ background:var(--vrule); width:1px; }
+  .v2deck .ag-plat-vals{ position:relative; display:flex; flex-direction:column; gap:14px; min-width:0; }
+  .v2deck .ag-plat-vals .row{ display:flex; align-items:center; gap:16px; }
+  .v2deck .ag-plat-vals .row .icon{ width:28px; height:28px; flex:none; filter:grayscale(1); opacity:.55; }
+  .v2deck .ag-plat-vals .row .val{ font-family:var(--vfont-head); font-size:19px; font-weight:700; color:var(--vink); line-height:1; }
+  .v2deck .ag-plat-vals .row .pname{ font-size:13px; color:var(--vink-3); }
+  /* skeleton dos números (pág. 2 é só legenda/exemplo, sem dados reais) */
+  .v2deck .ag-skel{ display:inline-block; border-radius:5px; background:#dcdcdc; background-image:linear-gradient(100deg,#e4e4e4 28%,#d2d2d2 50%,#e4e4e4 72%); }
+  .v2deck .kpi-val .ag-skel-kpi{ width:96px; height:24px; border-radius:6px; }
+  .v2deck .ag-plat-vals .ag-skel-val{ width:80px; height:16px; }
+  .v2deck .bubble.ag-bubble-1{ position:absolute; right:8px; top:46%; transform:translateY(-50%); max-width:300px; }
+  .v2deck .bubble.ag-bubble-2{ position:absolute; right:24px; top:44px; max-width:296px; }
+  .v2deck .bubble.ag-bubble-3{ position:absolute; right:24px; bottom:12px; max-width:272px; }
+  .v2deck .bubble.ag-bubble-4{ position:absolute; left:50%; transform:translateX(-50%); bottom:-92px; width:max-content; max-width:300px; text-align:center; }
+  .v2deck .bubble.ag-bubble-5{ position:absolute; left:50%; transform:translateX(-50%); bottom:-92px; width:max-content; max-width:280px; text-align:center; }
+  .v2deck .ag-plat .plat-ph{ height:206px; }
+  .v2deck .ag-foot{ position:absolute; bottom:90px; left:88px; right:88px; font-size:13px; color:var(--vink-2); font-weight:300; text-align:center; font-style:italic; }
+
+  /* KPI cards */
+  .v2deck .kpi-row{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; padding-top:4px; }
+  .v2deck .kpi-card{ border:1px solid var(--vrule); border-top:3px solid var(--accent); padding:14px 16px; display:flex; flex-direction:column; gap:6px; background:#fff; min-width:0; }
+  .v2deck .kpi-card .kpi-lbl{ font-size:13px; font-weight:600; color:var(--vink-3); line-height:1.2; }
+  .v2deck .kpi-card .kpi-val{ font-size:30px; font-weight:800; color:var(--vink); white-space:nowrap; line-height:1; margin-top:auto; }
+
+  .v2deck .sec-lbl{ font-size:16px; font-weight:700; color:var(--vink); margin:6px 0 8px; background:transparent; border:0; padding:0; width:auto; display:block; box-shadow:none; letter-spacing:.005em; }
+
+  /* chart hosts */
+  .v2deck .chart-host{ background:#fff; position:relative; border-bottom:1px solid var(--vrule-soft); }
+  .v2deck .chart-host canvas{ width:100% !important; height:100% !important; }
+  .v2deck .chart-h1{ height:150px; }
+  .v2deck .chart-h2{ height:240px; }
+  .v2deck .chart-h3{ height:258px; }
+  .v2deck .chart-h4{ height:348px; }
+  .v2deck .sec-sub{ font-size:12px; font-weight:600; color:var(--vink-3); }
+
+  /* balões */
+  .v2deck .bubble{ background:var(--bubble); border-radius:18px; padding:14px 22px; font-size:14px; font-weight:300; color:var(--vink-2); line-height:1.45; display:inline-block; max-width:340px; position:absolute; }
+  .v2deck .bubble::after{ content:""; position:absolute; width:18px; height:18px; background:var(--bubble); transform:rotate(45deg); }
+  .v2deck .bubble.tl::after{ left:-6px; top:18px; }
+  .v2deck .bubble.tr::after{ right:-6px; top:18px; }
+  .v2deck .bubble.bl::after{ left:24px; bottom:-6px; }
+  .v2deck .bubble.tc::after{ left:50%; margin-left:-9px; top:-6px; }
+
+  /* páginas campanha/conjunto/anúncio */
+  .v2deck .det-title{ position:absolute; top:282px; left:88px; right:88px; font-family:var(--vfont-head); font-size:48px; font-weight:700; color:var(--vink); text-transform:uppercase; letter-spacing:.01em; line-height:1.05; max-height:84px; overflow:hidden; overflow-wrap:anywhere; word-break:break-word; }
+  .v2deck .det-sub{ position:absolute; top:368px; left:88px; right:88px; font-size:16px; font-weight:400; color:var(--vink-2); line-height:1.45; max-width:1000px; max-height:48px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+  .v2deck .det-sub b{ font-weight:700; color:var(--vink); }
+  .v2deck .det-top{ position:absolute; top:436px; left:88px; right:88px; display:grid; grid-template-columns:260px 1fr; gap:36px; }
+  .v2deck .det-card-thumb{ background:var(--placeholder-light); border:1px solid var(--vrule); aspect-ratio:260/420; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px 18px; gap:36px; color:var(--vink); }
+  .v2deck .det-card-thumb .megaphone{ width:110px; height:110px; }
+  .v2deck .det-card-thumb .cap{ font-size:18px; font-weight:700; text-align:center; line-height:1.35; color:var(--vink); }
+  .v2deck .det-overview{ display:flex; flex-direction:column; gap:14px; min-width:0; }
+  .v2deck .det-demo{ position:absolute; left:88px; right:88px; top:880px; }
+  .v2deck .det-legend{ display:flex; justify-content:center; text-align:center; gap:72px; margin-top:12px; font-size:14px; color:var(--vink-2); font-weight:400; line-height:1.5; }
+  .v2deck .det-legend b{ font-size:16px; }
+  .v2deck .det-plat{ position:absolute; left:88px; right:88px; top:1262px; display:grid; grid-template-columns:1.5fr 1px 1fr; gap:48px; }
+  /* gráfico de plataforma preenche a coluna inteira (mesma altura da lista de gasto por plataforma) */
+  .v2deck .det-plat > div:first-child{ display:flex; flex-direction:column; min-height:0; }
+  .v2deck .det-plat > div:first-child > .sec-lbl{ flex:none; }
+  .v2deck .det-plat > div:first-child .chart-host{ flex:1; min-height:0; height:auto; }
+  .v2deck .det-plat > div:first-child .plat-ph{ flex:1; height:auto; }
+  .v2deck .det-plat-divider{ background:var(--vrule); width:1px; }
+  .v2deck .det-plat .col-r{ display:flex; flex-direction:column; justify-content:center; gap:28px; padding-left:8px; }
+  .v2deck .det-plat .col-r .row{ display:flex; align-items:center; gap:22px; }
+  .v2deck .det-plat .col-r .row .icon{ width:36px; height:36px; flex:none; }
+  .v2deck .det-plat .col-r .row .val{ font-family:var(--vfont-head); font-size:24px; font-weight:700; color:var(--vink); }
+  .v2deck .det-plat .col-r .row .pname{ font-size:14px; color:var(--vink-3); }
+  .v2deck .plat-empty{ font-size:13px; color:var(--vink-3); font-style:italic; }
+  .v2deck .plat-ph{ height:348px; display:flex; align-items:center; justify-content:center; text-align:center; padding:0 20px; background:var(--vrule-soft); border:1px dashed var(--vrule); color:var(--vink-3); font-size:13px; font-style:italic; }
+
+  /* anúncio thumb */
+  .v2deck .ad-thumb{ background:#f0f0f0; border:1px solid var(--vrule); aspect-ratio:260/420; overflow:hidden; position:relative; }
+  .v2deck .ad-thumb image-slot{ width:100%; height:100%; display:block; }
+
+  .v2deck .icon-ig, .v2deck .icon-fb, .v2deck .icon-mb{ width:36px; height:36px; }
+
+  /* botão remover anúncio (modo edição) */
+  .v2deck .ad-del{ position:absolute; top:300px; right:88px; display:none; background:#c0392b; color:#fff; border:0; width:30px; height:30px; border-radius:50%; cursor:pointer; font-size:16px; z-index:4; }
+  body.rt-editing .v2deck section:hover .ad-del{ display:block; }
+  @media print{ .v2deck .ad-del{ display:none !important; } }
+
+  /* ─── foto do profissional: skeleton blur quando vazia; sobe 1x e propaga ─── */
+  .v2deck .pro-photo{ position:relative; }
+  body.rt-editing .v2deck .pro-photo{ cursor:pointer; outline-offset:3px; }
+  body.rt-editing .v2deck .pro-photo:hover{ outline:2px dashed var(--accent); }
+  .v2deck .pro-photo.empty{ background:linear-gradient(135deg,#d7dce0,#eef1f3) !important; }
+  .v2deck .pro-photo.empty::after{ content:""; position:absolute; inset:0; border-radius:inherit; background:linear-gradient(100deg, rgba(255,255,255,0) 30%, rgba(255,255,255,.7) 50%, rgba(255,255,255,0) 70%); background-size:250% 100%; animation:pp-shimmer 1.9s linear infinite; pointer-events:none; }
+  .v2deck .pro-photo .pp-label{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:8px; color:#74797e; font-weight:600; padding:10px; pointer-events:none; z-index:1; }
+  .v2deck .pro-photo:not(.empty) .pp-label{ display:none; }
+  .v2deck .cover-portrait .pp-label{ font-size:18px; letter-spacing:.03em; line-height:1.3; }
+  .v2deck .cover-portrait .pp-label svg{ width:56px; height:56px; opacity:.55; }
+  .v2deck .head .avatar .pp-label{ font-size:9px; letter-spacing:.06em; gap:3px; }
+  .v2deck .head .avatar .pp-label svg{ width:24px; height:24px; opacity:.55; }
+  @keyframes pp-shimmer{ 0%{background-position:130% 0} 100%{background-position:-130% 0} }
+  @media print{ .v2deck .pro-photo.empty::after{ animation:none; display:none; } }
+
+  /* ─── miniaturas do navegador em proporção A4 retrato ───
+     A regra base (css/styles.css) é 16/9, herdada da V1 (1920×1080). Na V2 as
+     páginas são A4 retrato (1240×1754); com 16/9 a moldura recortava só o topo
+     (cabeçalho com a foto), deixando todas as miniaturas iguais. Aqui ajustamos
+     a moldura e o palco da miniatura para a página inteira caber. */
+  #nav-drawer .nav-frame{ aspect-ratio:1240/1754; }
+  #nav-drawer .nav-scale{ width:1240px; height:1754px; }
+
+  /* ─── zoom das páginas (controles ficam na barra única #deck-bar, em styles.css) ─── */
+  #zoomwrap{ position:fixed; inset:0; overflow:auto; background:#22201d; }
+  /* arrastar para navegar quando há zoom (grab-to-pan) */
+  #zoomwrap.pannable{ cursor:grab; }
+  #zoomwrap.grabbing, #zoomwrap.grabbing *{ cursor:grabbing !important; }
+  body.rt-editing #zoomwrap .ed{ cursor:text; }
+  #zoom-reset{ font-size:15px !important; }
+  @media print{
+    /* o wrapper de zoom não pode confinar a paginação na impressão */
+    #zoomwrap{ position:static !important; overflow:visible !important; inset:auto !important; height:auto !important; width:auto !important; background:#fff !important; }
+  }
+</style>
+</head>
+
+<body>
+
+<!-- ════ Menu flutuante (oculto na exportação) ════ -->
+<div id="report-toolbar" class="export-hidden">
+  <button id="rt-fab" type="button" title="Menu" aria-label="Menu">☰</button>
+  <div id="rt-menu">
+    <div class="rt-group">
+      <span class="rt-group-h">Navegação</span>
+      <button class="rt-btn" id="rt-help" type="button">❓ Ajuda (tutorial)</button>
+      <button class="rt-btn" id="rt-home" type="button">🏠 Trocar versão (início)</button>
+    </div>
+    <div class="rt-group">
+      <span class="rt-group-h">Dados</span>
+      <label class="rt-btn">Subir relatório
+        <input type="file" id="rt-file" accept=".xlsx,.xls,.csv" hidden>
+      </label>
+      <label class="rt-btn">Plataforma (2º Excel)
+        <input type="file" id="rt-platform" accept=".xlsx,.xls,.csv" hidden>
+      </label>
+      <button class="rt-btn" id="rt-config" type="button">Mapear colunas</button>
+      <button class="rt-btn" id="rt-testdata" type="button">Dados de exemplo</button>
+    </div>
+    <div class="rt-group">
+      <span class="rt-group-h">Personalizar</span>
+      <button class="rt-btn" id="rt-sections" type="button">Configurações</button>
+      <button class="rt-btn rt-btn-soft" id="rt-restore" type="button" title="Traz de volta anúncios/seções que foram removidos ou ocultados">↩ Restaurar removidos</button>
+      <label class="rt-btn">Foto do profissional
+        <input type="file" id="rt-photo" accept="image/*" hidden>
+      </label>
+      <label class="rt-btn">Imagens dos criativos
+        <input type="file" id="rt-images" accept="image/*" multiple hidden>
+      </label>
+      <button class="rt-btn" id="rt-edit" type="button">Editar: ON</button>
+    </div>
+    <div class="rt-group">
+      <span class="rt-group-h">Exportar</span>
+      <button class="rt-btn" id="rt-pdf" type="button">Exportar PDF</button>
+    </div>
+    <span id="rt-status">Suba o relatório (.xlsx) do Meta Ads.</span>
+    <div id="rt-version" title="Versão do código carregado. Se não mudar após subir os arquivos, é cache — atualize com Ctrl+F5.">Versão …</div>
+  </div>
+</div>
+
+<!-- ════ Navegador de páginas ════ -->
+<div id="nav-drawer" class="export-hidden"></div>
+<button id="nav-toggle" class="export-hidden" type="button" title="Páginas">❮ Páginas</button>
+
+<!-- ════ Tela inicial — assistente de upload (3 passos) ════ -->
+<div id="start-screen">
+  <div class="ss-bg"></div>
+  <div class="ss-overlay"></div>
+  <div class="ss-card ss-wizard">
+
+    <!-- indicador de passos -->
+    <div class="ss-steps">
+      <div class="ss-step-dot is-active" data-go="0"><b>1</b><span>Sobre</span></div>
+      <div class="ss-step-line"></div>
+      <div class="ss-step-dot" data-go="1"><b>2</b><span>Relatório 1</span></div>
+      <div class="ss-step-line"></div>
+      <div class="ss-step-dot" data-go="2"><b>3</b><span>Relatório 2</span></div>
+    </div>
+
+    <!-- PÁGINA 1 — sobre -->
+    <section class="ss-page is-active" data-page="0">
+      <div class="ss-brand">FORMATO 01 · META ADS</div>
+      <h1>Vamos montar seu relatório</h1>
+      <p>Você exporta os dados brutos do Gerenciador de Anúncios da Meta e o app monta o relatório visual sozinho — você só ajusta as imagens e os detalhes.</p>
+      <div class="ss-flow">
+        <div class="ss-flow-card"><span class="ss-flow-n">1</span><b>Relatório 1</b><small>Idade e Gênero</small></div>
+        <div class="ss-flow-card"><span class="ss-flow-n">2</span><b>Relatório 2</b><small>Plataforma</small></div>
+        <div class="ss-flow-card ss-flow-done"><span class="ss-flow-n">✓</span><b>Pronto</b><small>Relatório gerado</small></div>
+      </div>
+      <p class="ss-flow-note">São <b>dois</b> arquivos .xlsx do mesmo mês — o assistente guia você em cada um. Leva cerca de 2 minutos.</p>
+      <div class="ss-nav ss-nav-1">
+        <button class="ss-btn" data-next type="button">Começar →</button>
+      </div>
+      <button class="ss-demo" id="ss-testdata" type="button">Só explorar com dados de teste</button>
+    </section>
+
+    <!-- PÁGINA 2 — relatório 1 (Idade/Gênero) -->
+    <section class="ss-page" data-page="1">
+      <div class="ss-brand">PASSO 1 DE 2 · DETALHAMENTO GERAL</div>
+      <h1>Relatório 1 — Idade e Gênero</h1>
+      <p>No Gerenciador de Anúncios → <b>Relatórios de anúncios</b>, crie um relatório com o detalhamento e as métricas abaixo, no mês desejado, e <b>exporte em .xlsx</b>.</p>
+      <div class="ss-specs">
+        <div class="ss-spec">
+          <div class="ss-spec-h">Detalhamento</div>
+          <ul class="ss-speclist">
+            <li>Nome da campanha</li>
+            <li>Nome do conjunto de anúncios</li>
+            <li>Nome do anúncio</li>
+            <li class="hi">Idade</li>
+            <li class="hi">Gênero</li>
+            <li>Dia</li>
+          </ul>
+        </div>
+        <div class="ss-spec">
+          <div class="ss-spec-h">Métricas</div>
+          <ul class="ss-speclist ss-speclist-2">
+            <li>Valor usado</li>
+            <li>Impressões</li>
+            <li>Alcance</li>
+            <li>Resultados</li>
+            <li>Custo por resultado</li>
+            <li>Frequência</li>
+            <li>Cliques no link</li>
+            <li>CPC (clique no link)</li>
+            <li>CPM (por 1.000 impr.)</li>
+            <li>CTR (todos)</li>
+            <li>Visualizações</li>
+            <li>Cliques (todos)</li>
+            <li>CPC (todos)</li>
+            <li>Seguidores no Instagram</li>
+          </ul>
+        </div>
+      </div>
+      <div class="ss-uprow">
+        <button class="ss-btn" id="ss-pick" type="button">Selecionar Relatório 1 (.xlsx)</button>
+        <div class="ss-ok" id="ss-ok-msg"></div>
+      </div>
+      <div class="ss-nav">
+        <button class="ss-prev" data-prev type="button">← Voltar</button>
+        <button class="ss-btn" id="ss-next-1" data-next type="button" disabled>Próximo →</button>
+      </div>
+    </section>
+
+    <!-- PÁGINA 3 — relatório 2 (Plataforma) -->
+    <section class="ss-page" data-page="2">
+      <div class="ss-brand">PASSO 2 DE 2 · DETALHAMENTO PLATAFORMA</div>
+      <h1>Relatório 2 — Plataforma</h1>
+      <p><b>Mesmo período e mesmas métricas</b> do Relatório 1. Muda só o detalhamento: troque <b>Idade/Gênero</b> por <b>Plataforma/Posicionamento</b>. O app confere se os totais batem e avisa se algo destoar.</p>
+      <div class="ss-specs">
+        <div class="ss-spec">
+          <div class="ss-spec-h">Detalhamento</div>
+          <ul class="ss-speclist">
+            <li>Nome da campanha</li>
+            <li>Nome do conjunto de anúncios</li>
+            <li>Nome do anúncio</li>
+            <li class="hi">Plataforma</li>
+            <li class="hi">Posicionamento</li>
+            <li>Dia</li>
+          </ul>
+        </div>
+        <div class="ss-spec">
+          <div class="ss-spec-h">Métricas <small style="font-weight:600;color:var(--ink-soft)">(as mesmas do Relatório 1)</small></div>
+          <ul class="ss-speclist ss-speclist-2">
+            <li>Valor usado</li>
+            <li>Impressões</li>
+            <li>Alcance</li>
+            <li>Resultados</li>
+            <li>Custo por resultado</li>
+            <li>Frequência</li>
+            <li>Cliques no link</li>
+            <li>CPC (clique no link)</li>
+            <li>CPM (por 1.000 impr.)</li>
+            <li>CTR (todos)</li>
+            <li>Visualizações</li>
+            <li>Cliques (todos)</li>
+            <li>CPC (todos)</li>
+            <li>Seguidores no Instagram</li>
+          </ul>
+        </div>
+      </div>
+      <div class="ss-uprow">
+        <button class="ss-btn2" id="ss-pick-plat" type="button">Selecionar Relatório 2 (.xlsx)</button>
+        <div class="ss-platmsg" id="ss-plat-msg"></div>
+      </div>
+      <div class="ss-nav">
+        <button class="ss-prev" data-prev type="button">← Voltar</button>
+        <button class="ss-btn" id="ss-go" type="button" disabled>Ver relatório →</button>
+      </div>
+    </section>
+
+    <button class="ss-back" id="ss-home" type="button">← Trocar versão (voltar ao início)</button>
+  </div>
+</div>
+
+<div id="zoomwrap"><deck-stage id="deck" class="v2deck" width="1240" height="1754" no-rail></deck-stage></div>
+<div id="deck-bar" class="export-hidden">
+  <button id="zoom-out" type="button" title="Diminuir zoom">−</button>
+  <span class="db-lbl" id="zoom-lbl">Ajustar</span>
+  <button id="zoom-in" type="button" title="Aumentar zoom">+</button>
+  <button id="zoom-reset" type="button" title="Ajustar à tela">⤢</button>
+  <span class="db-sep"></span>
+  <button id="pg-prev" type="button" title="Página anterior">‹</button>
+  <span class="db-lbl" id="pg-lbl">– / –</span>
+  <button id="pg-next" type="button" title="Próxima página">›</button>
+</div>
+
+<!-- ════ Charts (line / grouped-bar / grouped-bar-dual) ════ -->
+<script>
+const V2_PURPLE = '#5c3bbf', V2_TEAL = '#32cdcd', V2_MUTE_A = '#9a9a9a', V2_MUTE_B = '#cdcdcd';
+const V2_TICK = '#7a7a7a', V2_GRID = 'rgba(0,0,0,.06)';
+
+// Fundo do canvas = cor real da página (corrige o Chrome rasterizar <canvas>
+// com fundo branco/errado no PDF). Pinta atrás do gráfico, sem cobrir dados.
+const pageBgPlugin = { id:'pageBg', beforeDraw(chart){
+  let bg=''; const sec=chart.canvas.closest('section'); if(sec) bg=getComputedStyle(sec).backgroundColor;
+  if(!bg || bg==='rgba(0, 0, 0, 0)' || bg==='transparent') bg='#ffffff';
+  const ctx=chart.ctx; ctx.save(); ctx.globalCompositeOperation='destination-over';
+  ctx.fillStyle=bg; ctx.fillRect(0,0,chart.width,chart.height); ctx.restore();
+}};
+if (window.Chart && Chart.register) Chart.register(pageBgPlugin);
+
+function v2Line(ctx, labels, values, opts) {
+  opts = opts || {};
+  const color = opts.muted ? V2_MUTE_A : V2_TEAL;
+  return new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [{ label: opts.label || '', data: values, borderColor: color, backgroundColor: 'transparent', borderWidth: 1.6, tension: .25, pointRadius: 0 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: { duration: 400 },
+      plugins: { legend: { display: !!opts.label && !opts.muted, position: 'bottom', labels: { color: V2_TICK, font: { family: 'Open Sans', size: 13 }, boxWidth: 10, boxHeight: 10 } }, tooltip: { enabled: false } },
+      scales: {
+        x: { ticks: { color: V2_TICK, font: { family: 'Open Sans', size: 13 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }, grid: { display: false }, border: { color: V2_GRID } },
+        y: { ticks: { color: V2_TICK, font: { family: 'Open Sans', size: 13 }, callback: v => (opts.suffix || '') + v }, grid: { color: V2_GRID }, border: { display: false }, beginAtZero: true }
+      }
+    }
+  });
+}
+function v2Grouped(ctx, labels, series, opts) {
+  opts = opts || {};
+  const palette = opts.muted ? [V2_MUTE_A, V2_MUTE_B, '#e0e0e0'] : [V2_PURPLE, V2_TEAL, '#b5b5b5'];
+  return new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: series.map((s, i) => ({ label: s.name, data: s.values, backgroundColor: palette[i % palette.length], borderRadius: 0, barPercentage: 1.0, categoryPercentage: 0.62 })) },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: { duration: 400 },
+      plugins: { legend: { position: 'bottom', labels: { color: V2_TICK, font: { family: 'Open Sans', size: 13 }, boxWidth: 10, boxHeight: 10 } }, tooltip: { enabled: false } },
+      scales: {
+        x: { ticks: { color: V2_TICK, font: { family: 'Open Sans', size: 13 } }, grid: { display: false }, border: { color: V2_GRID } },
+        y: { title: { display: !opts.muted, text: 'Nº de resultados', color: V2_TICK, font: { family: 'Open Sans', size: 12, weight: '600' } }, ticks: { color: V2_TICK, font: { family: 'Open Sans', size: 13 } }, grid: { color: V2_GRID }, border: { display: false }, beginAtZero: true }
+      }
+    }
+  });
+}
+function v2GroupedDual(ctx, labels, series) {
+  return new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [
+      { label: series[0].name, data: series[0].values, backgroundColor: V2_PURPLE, yAxisID: 'y', borderRadius: 0, barPercentage: 1.0, categoryPercentage: 0.62 },
+      { label: series[1].name, data: series[1].values, backgroundColor: V2_TEAL, yAxisID: 'y1', borderRadius: 0, barPercentage: 1.0, categoryPercentage: 0.62 }
+    ] },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: { duration: 400 },
+      plugins: { legend: { position: 'bottom', labels: { color: V2_TICK, font: { family: 'Open Sans', size: 13 }, boxWidth: 10, boxHeight: 10 } }, tooltip: { enabled: false } },
+      scales: {
+        x: { ticks: { color: V2_TICK, font: { family: 'Open Sans', size: 13 } }, grid: { display: false }, border: { color: V2_GRID } },
+        y: { position: 'left', ticks: { color: V2_TICK, font: { family: 'Open Sans', size: 13 }, callback: v => v >= 1000 ? (v / 1000) + ' mil' : v }, grid: { color: V2_GRID }, border: { display: false }, beginAtZero: true },
+        y1: { position: 'right', ticks: { color: V2_TICK, font: { family: 'Open Sans', size: 13 } }, grid: { display: false }, border: { display: false }, beginAtZero: true }
+      }
+    }
+  });
+}
+// desenha UM gráfico (linha / barras agrupadas / barras duplo-eixo)
+function v2RenderOne(c) {
+  if (c.__chart) { c.__chart.destroy(); c.__chart = null; }
+  const kind = c.dataset.chart;
+  try {
+    if (kind === 'line' || kind === 'line-mute') {
+      c.__chart = v2Line(c, JSON.parse(c.dataset.labels || '[]'), JSON.parse(c.dataset.values || '[]'), { muted: kind === 'line-mute', suffix: c.dataset.suffix || '', label: c.dataset.label || '' });
+    } else if (kind === 'grouped-bar' || kind === 'grouped-bar-mute') {
+      c.__chart = v2Grouped(c, JSON.parse(c.dataset.labels || '[]'), JSON.parse(c.dataset.series || '[]'), { muted: kind === 'grouped-bar-mute' });
+    } else if (kind === 'grouped-bar-dual') {
+      c.__chart = v2GroupedDual(c, JSON.parse(c.dataset.labels || '[]'), JSON.parse(c.dataset.series || '[]'));
+    }
+  } catch (e) { console.warn('chart err', e); }
+}
+
+// Renderização em lotes: a tela engata rápido (não trava montando ~185
+// gráficos de uma vez). Cada lote desenha alguns por frame.
+var __chartGen = 0, __chartQueue = [];
+window.__renderCharts = function () {
+  __chartGen++; var gen = __chartGen;
+  __chartQueue = [].slice.call(document.querySelectorAll('canvas[data-chart]'));
+  (function step() {
+    if (gen !== __chartGen) return;                 // um render novo assumiu
+    var batch = __chartQueue.splice(0, 8);
+    batch.forEach(function (c) { if (c.isConnected) v2RenderOne(c); });
+    if (__chartQueue.length) requestAnimationFrame(step);
+  })();
+};
+// Antes de Exportar PDF / imprimir: garante TODOS os gráficos desenhados e no
+// estado final (sem animação), mesmo as páginas que o usuário não abriu.
+window.addEventListener('beforeprint', function () {
+  __chartGen++;                                     // cancela lotes pendentes
+  [].slice.call(document.querySelectorAll('canvas[data-chart]')).forEach(function (c) {
+    if (!c.isConnected) return;
+    if (!c.__chart) v2RenderOne(c);
+    if (c.__chart) { c.__chart.options.animation = false; c.__chart.update('none'); }
+  });
+});
+</script>
+
+<script src="js/report-parser.js"></script>
+<script src="js/report-render-v2.js"></script>
+<script src="js/meta-api-v3.js"></script>
+<script src="js/image-modal.js"></script>
+<script src="js/help-modal.js"></script>
+
+</body>
+</html>

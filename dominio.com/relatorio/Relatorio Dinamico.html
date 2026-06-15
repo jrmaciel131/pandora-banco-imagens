@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Relatório Mensal — Dinâmico</title>
+<meta name="viewport" content="width=1920">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="css/styles.css">
+
+<!-- libs servidas localmente (servidor pode ter CSP que bloqueia CDN externo) -->
+<script src="vendor/chart.umd.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="js/deck-stage.js"></script>
+<script src="js/image-slot.js"></script>
+<script src="js/fit-numbers.js"></script>
+</head>
+
+<body>
+
+<!-- ════ Menu flutuante (oculto na exportação) ════ -->
+<div id="report-toolbar" class="export-hidden">
+  <button id="rt-fab" type="button" title="Menu" aria-label="Menu">☰</button>
+  <div id="rt-menu">
+    <div class="rt-group">
+      <span class="rt-group-h">Navegação</span>
+      <button class="rt-btn" id="rt-help" type="button">❓ Ajuda (tutorial)</button>
+      <button class="rt-btn" id="rt-home" type="button">🏠 Trocar versão (início)</button>
+    </div>
+    <div class="rt-group">
+      <span class="rt-group-h">Dados</span>
+      <label class="rt-btn">Subir relatório
+        <input type="file" id="rt-file" accept=".xlsx,.xls,.csv" hidden>
+      </label>
+      <label class="rt-btn">Plataforma (2º Excel)
+        <input type="file" id="rt-platform" accept=".xlsx,.xls,.csv" hidden>
+      </label>
+      <button class="rt-btn" id="rt-config" type="button">Mapear colunas</button>
+      <button class="rt-btn" id="rt-testdata" type="button">Dados de exemplo</button>
+    </div>
+    <div class="rt-group">
+      <span class="rt-group-h">Personalizar</span>
+      <button class="rt-btn" id="rt-sections" type="button">Configurações</button>
+      <button class="rt-btn rt-btn-soft" id="rt-restore" type="button" title="Traz de volta KPIs ocultos, anúncios removidos e seções desmarcadas">↩ Restaurar removidos</button>
+      <label class="rt-btn">Imagens dos criativos
+        <input type="file" id="rt-images" accept="image/*" multiple hidden>
+      </label>
+      <button class="rt-btn" id="rt-edit" type="button">Editar: ON</button>
+    </div>
+    <div class="rt-group">
+      <span class="rt-group-h">Exportar</span>
+      <button class="rt-btn" id="rt-pdf" type="button">Exportar PDF</button>
+    </div>
+    <span id="rt-status">Suba o relatório (.xlsx) do Meta Ads.</span>
+    <div id="rt-version" title="Versão do código carregado. Se não mudar após subir os arquivos, é cache — atualize com Ctrl+F5.">Versão …</div>
+  </div>
+</div>
+
+<!-- ════ Navegador de páginas (drawer à esquerda) ════ -->
+<div id="nav-drawer" class="export-hidden"></div>
+<button id="nav-toggle" class="export-hidden" type="button" title="Páginas">❮ Páginas</button>
+
+<!-- ════ Tela inicial — assistente de upload (3 passos) ════ -->
+<div id="start-screen">
+  <div class="ss-bg"></div>
+  <div class="ss-overlay"></div>
+  <div class="ss-card ss-wizard">
+
+    <!-- indicador de passos -->
+    <div class="ss-steps">
+      <div class="ss-step-dot is-active" data-go="0"><b>1</b><span>Sobre</span></div>
+      <div class="ss-step-line"></div>
+      <div class="ss-step-dot" data-go="1"><b>2</b><span>Relatório 1</span></div>
+      <div class="ss-step-line"></div>
+      <div class="ss-step-dot" data-go="2"><b>3</b><span>Relatório 2</span></div>
+    </div>
+
+    <!-- PÁGINA 1 — sobre -->
+    <section class="ss-page is-active" data-page="0">
+      <div class="ss-brand">FORMATO 01 · META ADS</div>
+      <h1>Vamos montar seu relatório</h1>
+      <p>Você exporta os dados brutos do Gerenciador de Anúncios da Meta e o app monta o relatório visual sozinho — você só ajusta as imagens e os detalhes.</p>
+      <div class="ss-flow">
+        <div class="ss-flow-card"><span class="ss-flow-n">1</span><b>Relatório 1</b><small>Idade e Gênero</small></div>
+        <div class="ss-flow-card"><span class="ss-flow-n">2</span><b>Relatório 2</b><small>Plataforma</small></div>
+        <div class="ss-flow-card ss-flow-done"><span class="ss-flow-n">✓</span><b>Pronto</b><small>Relatório gerado</small></div>
+      </div>
+      <p class="ss-flow-note">São <b>dois</b> arquivos .xlsx do mesmo mês — o assistente guia você em cada um. Leva cerca de 2 minutos.</p>
+      <div class="ss-nav ss-nav-1">
+        <button class="ss-btn" data-next type="button">Começar →</button>
+      </div>
+      <button class="ss-demo" id="ss-testdata" type="button">Só explorar com dados de teste</button>
+    </section>
+
+    <!-- PÁGINA 2 — relatório 1 (Idade/Gênero) -->
+    <section class="ss-page" data-page="1">
+      <div class="ss-brand">PASSO 1 DE 2 · DETALHAMENTO GERAL</div>
+      <h1>Relatório 1 — Idade e Gênero</h1>
+      <p>No Gerenciador de Anúncios → <b>Relatórios de anúncios</b>, crie um relatório com o detalhamento e as métricas abaixo, no mês desejado, e <b>exporte em .xlsx</b>.</p>
+      <div class="ss-specs">
+        <div class="ss-spec">
+          <div class="ss-spec-h">Detalhamento</div>
+          <ul class="ss-speclist">
+            <li>Nome da campanha</li>
+            <li>Nome do conjunto de anúncios</li>
+            <li>Nome do anúncio</li>
+            <li class="hi">Idade</li>
+            <li class="hi">Gênero</li>
+            <li>Dia</li>
+          </ul>
+        </div>
+        <div class="ss-spec">
+          <div class="ss-spec-h">Métricas</div>
+          <ul class="ss-speclist ss-speclist-2">
+            <li>Valor usado</li>
+            <li>Impressões</li>
+            <li>Alcance</li>
+            <li>Resultados</li>
+            <li>Custo por resultado</li>
+            <li>Frequência</li>
+            <li>Cliques no link</li>
+            <li>CPC (clique no link)</li>
+            <li>CPM (por 1.000 impr.)</li>
+            <li>CTR (todos)</li>
+            <li>Visualizações</li>
+            <li>Cliques (todos)</li>
+            <li>CPC (todos)</li>
+            <li>Seguidores no Instagram</li>
+          </ul>
+        </div>
+      </div>
+      <div class="ss-uprow">
+        <button class="ss-btn" id="ss-pick" type="button">Selecionar Relatório 1 (.xlsx)</button>
+        <div class="ss-ok" id="ss-ok-msg"></div>
+      </div>
+      <div class="ss-nav">
+        <button class="ss-prev" data-prev type="button">← Voltar</button>
+        <button class="ss-btn" id="ss-next-1" data-next type="button" disabled>Próximo →</button>
+      </div>
+    </section>
+
+    <!-- PÁGINA 3 — relatório 2 (Plataforma) -->
+    <section class="ss-page" data-page="2">
+      <div class="ss-brand">PASSO 2 DE 2 · DETALHAMENTO PLATAFORMA</div>
+      <h1>Relatório 2 — Plataforma</h1>
+      <p><b>Mesmo período e mesmas métricas</b> do Relatório 1. Muda só o detalhamento: troque <b>Idade/Gênero</b> por <b>Plataforma/Posicionamento</b>. O app confere se os totais batem e avisa se algo destoar.</p>
+      <div class="ss-specs">
+        <div class="ss-spec">
+          <div class="ss-spec-h">Detalhamento</div>
+          <ul class="ss-speclist">
+            <li>Nome da campanha</li>
+            <li>Nome do conjunto de anúncios</li>
+            <li>Nome do anúncio</li>
+            <li class="hi">Plataforma</li>
+            <li class="hi">Posicionamento</li>
+            <li>Dia</li>
+          </ul>
+        </div>
+        <div class="ss-spec">
+          <div class="ss-spec-h">Métricas <small style="font-weight:600;color:var(--ink-soft)">(as mesmas do Relatório 1)</small></div>
+          <ul class="ss-speclist ss-speclist-2">
+            <li>Valor usado</li>
+            <li>Impressões</li>
+            <li>Alcance</li>
+            <li>Resultados</li>
+            <li>Custo por resultado</li>
+            <li>Frequência</li>
+            <li>Cliques no link</li>
+            <li>CPC (clique no link)</li>
+            <li>CPM (por 1.000 impr.)</li>
+            <li>CTR (todos)</li>
+            <li>Visualizações</li>
+            <li>Cliques (todos)</li>
+            <li>CPC (todos)</li>
+            <li>Seguidores no Instagram</li>
+          </ul>
+        </div>
+      </div>
+      <div class="ss-uprow">
+        <button class="ss-btn2" id="ss-pick-plat" type="button">Selecionar Relatório 2 (.xlsx)</button>
+        <div class="ss-platmsg" id="ss-plat-msg"></div>
+      </div>
+      <div class="ss-nav">
+        <button class="ss-prev" data-prev type="button">← Voltar</button>
+        <button class="ss-btn" id="ss-go" type="button" disabled>Ver relatório →</button>
+      </div>
+    </section>
+
+    <button class="ss-back" id="ss-home" type="button">← Trocar versão (voltar ao início)</button>
+  </div>
+</div>
+
+<!-- ícones SVG reutilizáveis -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="ico-people" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="22" cy="22" r="7"/><circle cx="44" cy="24" r="6"/>
+      <path d="M8 50c0-7 6-12 14-12s14 5 14 12"/>
+      <path d="M34 48c2-5 6-8 12-8s10 3 12 8"/>
+    </symbol>
+    <symbol id="ico-marketing" viewBox="0 0 16 16" fill="currentColor" stroke="none">
+      <path d="M14.25 2.1a1.25 1.25 0 0 0-1.17-.1L6.91 4.43a1.22 1.22 0 0 1-.46.09H2.5a1.25 1.25 0 0 0-1.25 1.25v.1H0v3h1.25V9a1.25 1.25 0 0 0 1.25 1.22L4 13.4a1.26 1.26 0 0 0 1.13.72h.63A1.25 1.25 0 0 0 7 12.87v-2.53l6.08 2.43a1.27 1.27 0 0 0 .47.09 1.29 1.29 0 0 0 .7-.22 1.25 1.25 0 0 0 .55-1V3.13a1.25 1.25 0 0 0-.55-1.03zm-8.5 3.67V9H2.5V5.77zm0 7.1h-.63l-1.23-2.65h1.86zm1.62-3.72A2.29 2.29 0 0 0 7 9V5.7a2.26 2.26 0 0 0 .37-.11l6.18-2.46v8.48zm7.46-3.03v2.5a1.25 1.25 0 0 0 0-2.5z"/>
+    </symbol>
+    <symbol id="ico-upload" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 42v8a4 4 0 0 0 4 4h28a4 4 0 0 0 4-4v-8"/>
+      <path d="M32 12v28"/><path d="M20 24l12-12 12 12"/>
+    </symbol>
+    <symbol id="ico-eye" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 32s10-16 28-16 28 16 28 16-10 16-28 16S4 32 4 32z"/>
+      <circle cx="32" cy="32" r="7"/>
+    </symbol>
+    <symbol id="ico-money" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="32" cy="32" r="22"/>
+      <path d="M38 24c-1.5-2-4-3-7-3-4 0-7 2-7 5s3 4 7 5 7 2 7 5-3 5-7 5c-3 0-5.5-1-7-3"/>
+      <path d="M32 18v3M32 43v3"/>
+    </symbol>
+    <symbol id="ico-money-cycle" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M50 22a22 22 0 0 0-39 4"/><path d="M50 14v8h-8"/>
+      <path d="M14 42a22 22 0 0 0 39-4"/><path d="M14 50v-8h8"/>
+      <text x="32" y="38" text-anchor="middle" font-family="Montserrat" font-weight="900" font-size="18" stroke="none" fill="currentColor">$</text>
+    </symbol>
+  </defs>
+</svg>
+
+<div id="zoomwrap"><deck-stage id="deck" no-rail></deck-stage></div>
+<div id="deck-bar" class="export-hidden">
+  <button id="zoom-out" type="button" title="Diminuir zoom">−</button>
+  <span class="db-lbl" id="zoom-lbl">Ajustar</span>
+  <button id="zoom-in" type="button" title="Aumentar zoom">+</button>
+  <button id="zoom-reset" type="button" title="Ajustar à tela">⤢</button>
+  <span class="db-sep"></span>
+  <button id="pg-prev" type="button" title="Página anterior">‹</button>
+  <span class="db-lbl" id="pg-lbl">– / –</span>
+  <button id="pg-next" type="button" title="Próxima página">›</button>
+</div>
+
+<!-- ════ Charts (barras horizontais + colunas + rosca) ════ -->
+<script>
+const BAR_COLORS = ['#14d4d4','#5ec3f0','#6ba1ec','#b073d4','#9d8be6'];
+const DONUT_COLORS = ['#14d4d4','#b073d4','#5ec3f0','#9d8be6','#6ba1ec','#7dd8d8','#c9a9ea'];
+const fmtVal = (n, kind) => kind === 'cur'
+  ? 'R$ ' + (+n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  : Math.round(+n).toLocaleString('pt-BR');
+
+// Fundo do canvas = cor real da página. Corrige o Chrome rasterizar o <canvas>
+// com fundo BRANCO ao gerar o PDF — que neste tema escuro fica "nada a ver".
+// Pinta atrás do gráfico (destination-over), então não cobre barras/textos.
+const pageBgPlugin = { id:'pageBg', beforeDraw(chart){
+  let bg=''; const sec=chart.canvas.closest('section'); if(sec) bg=getComputedStyle(sec).backgroundColor;
+  if(!bg || bg==='rgba(0, 0, 0, 0)' || bg==='transparent') bg='#ffffff';
+  const ctx=chart.ctx; ctx.save(); ctx.globalCompositeOperation='destination-over';
+  ctx.fillStyle=bg; ctx.fillRect(0,0,chart.width,chart.height); ctx.restore();
+}};
+if (window.Chart && Chart.register) Chart.register(pageBgPlugin);
+
+// valor no topo de cada coluna
+const colLabels = { id:'colLabels', afterDatasetsDraw(chart){
+  const { ctx } = chart; const kind = (chart.canvas && chart.canvas.dataset.fmt) || 'int';
+  const ds = chart.data.datasets[0]; const meta = chart.getDatasetMeta(0);
+  meta.data.forEach((bar, i) => {
+    const v = ds.data[i]; if (v == null) return;
+    ctx.save();
+    ctx.fillStyle = '#ffffff'; ctx.font = '600 16px Montserrat';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillText(fmtVal(v, kind), bar.x, bar.y - 8);
+    ctx.restore();
+  });
+}};
+// % dentro de cada fatia da rosca
+const donutLabels = { id:'donutLabels', afterDatasetsDraw(chart){
+  const { ctx } = chart; const ds = chart.data.datasets[0];
+  const total = ds.data.reduce((a, b) => a + (+b || 0), 0); if (!total) return;
+  const meta = chart.getDatasetMeta(0);
+  meta.data.forEach((arc, i) => {
+    const v = +ds.data[i] || 0; if (v / total < 0.05) return;
+    const p = arc.tooltipPosition();
+    ctx.save();
+    ctx.fillStyle = '#06121f'; ctx.font = '700 18px Montserrat';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(Math.round(v / total * 100) + '%', p.x, p.y);
+    ctx.restore();
+  });
+}};
+
+// desenha UM gráfico (barras Top5 / colunas idade / rosca gênero-plataforma)
+function v1RenderOne(c){
+  if (c.__chart){ c.__chart.destroy(); c.__chart = null; }
+  const type = c.dataset.chart;
+  const labels = JSON.parse(c.dataset.labels || '[]');
+  const values = JSON.parse(c.dataset.values || '[]');
+  if (type === 'bar'){
+    const colors = labels.map((_, i) => BAR_COLORS[i % BAR_COLORS.length]);
+    c.__chart = new Chart(c, {
+      type: 'bar',
+      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 0, barThickness: 'flex', maxBarThickness: 38, borderSkipped: false }]},
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        animation: { duration: 600 },
+        plugins: { legend: { display: false }, tooltip: { enabled:false } },
+        scales: {
+          x: { ticks: { color:'#d8d8d8', font:{ family:'Montserrat', size:18 } }, grid:{ color:'rgba(255,255,255,.08)' }, border:{ color:'rgba(255,255,255,.25)' } },
+          y: { ticks: { color:'#ffffff', font:{ family:'Montserrat', size:18, weight:'500' }, autoSkip:false,
+                 callback: function(v){ const l = this.getLabelForValue(v); return l.length > 30 ? l.slice(0,30)+'…' : l; } },
+               grid:{ display:false }, border:{ color:'rgba(255,255,255,.25)' } }
+        }
+      }
+    });
+    const legendEl = document.querySelector(`[data-legend-for="${c.id}"]`);
+    if (legendEl){ legendEl.innerHTML = labels.map((l,i) => `<span><span class="dot" style="background:${colors[i]}"></span>${l}</span>`).join(''); }
+  } else if (type === 'col'){
+    const kind = c.dataset.fmt || 'int';
+    const colors = labels.map((_, i) => BAR_COLORS[i % BAR_COLORS.length]);
+    c.__chart = new Chart(c, {
+      type: 'bar',
+      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 6, maxBarThickness: 92, borderSkipped: false }]},
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        layout: { padding: { top: 30 } },
+        animation: { duration: 600 },
+        plugins: { legend: { display: false }, tooltip: { enabled:false } },
+        scales: {
+          x: { ticks: { color:'#ffffff', font:{ family:'Montserrat', size:18, weight:'500' } }, grid:{ display:false }, border:{ color:'rgba(255,255,255,.25)' } },
+          y: { beginAtZero:true, ticks: { color:'#d8d8d8', font:{ family:'Montserrat', size:14 },
+                 callback: function(v){ return kind === 'cur' ? 'R$ ' + (+v).toLocaleString('pt-BR') : (+v).toLocaleString('pt-BR'); } },
+               grid:{ color:'rgba(255,255,255,.08)' }, border:{ color:'rgba(255,255,255,.25)' } }
+        }
+      },
+      plugins: [colLabels]
+    });
+  } else if (type === 'donut'){
+    const kind = c.dataset.fmt || 'int';
+    const colors = labels.map((_, i) => DONUT_COLORS[i % DONUT_COLORS.length]);
+    c.__chart = new Chart(c, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor:'#0c1322', borderWidth:3, hoverOffset:6 }]},
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: '56%',
+        animation: { duration: 600 },
+        plugins: { legend: { display: false }, tooltip: { enabled:false } }
+      },
+      plugins: [donutLabels]
+    });
+    const total = values.reduce((a, b) => a + (+b || 0), 0);
+    const legendEl = document.querySelector(`[data-legend-for="${c.id}"]`);
+    if (legendEl){
+      legendEl.innerHTML = labels.map((l, i) => {
+        const v = +values[i] || 0; const pct = total ? Math.round(v / total * 100) : 0;
+        return `<span class="brk-leg-item"><span class="dot" style="background:${colors[i]}"></span><b>${l}</b> ${pct}% · ${fmtVal(v, kind)}</span>`;
+      }).join('');
+    }
+  }
+}
+
+// Renderização em lotes: a tela engata rápido (não trava montando todos os
+// gráficos de uma vez). Cada lote desenha alguns por frame.
+let __chartGen = 0, __chartQueue = [];
+window.__renderCharts = function(){
+  __chartGen++; const gen = __chartGen;
+  __chartQueue = [].slice.call(document.querySelectorAll('canvas[data-chart]'));
+  (function step(){
+    if (gen !== __chartGen) return;                 // um render novo assumiu
+    const batch = __chartQueue.splice(0, 8);
+    batch.forEach(c => { if (c.isConnected) v1RenderOne(c); });
+    if (__chartQueue.length) requestAnimationFrame(step);
+  })();
+};
+// Antes de Exportar PDF / imprimir: garante TODOS os gráficos desenhados e no
+// estado final (sem animação), mesmo as páginas que o usuário não abriu.
+window.addEventListener('beforeprint', function(){
+  __chartGen++;                                     // cancela lotes pendentes
+  [].slice.call(document.querySelectorAll('canvas[data-chart]')).forEach(c => {
+    if (!c.isConnected) return;
+    if (!c.__chart) v1RenderOne(c);
+    if (c.__chart){ c.__chart.options.animation = false; c.__chart.update('none'); }
+  });
+});
+</script>
+
+<script src="js/report-parser.js"></script>
+<script src="js/report-render.js"></script>
+<script src="js/image-modal.js"></script>
+<script src="js/help-modal.js"></script>
+
+</body>
+</html>

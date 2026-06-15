@@ -1,0 +1,29 @@
+# ─────────────────────────────────────────────────────────────────────
+# Cache automático — substitui o ?v= manual.
+# App (HTML/CSS/JS): o navegador SEMPRE confere se o arquivo mudou.
+#   • não mudou  → servidor responde "304 Not Modified" (sem rebaixar nada)
+#   • mudou      → baixa a versão nova na hora
+# Assim, ao subir um arquivo novo, todos veem a atualização sem precisar
+# limpar cache nem trocar número de versão.
+# ─────────────────────────────────────────────────────────────────────
+<IfModule mod_headers.c>
+  # nosso código: revalidar sempre (304 quando igual)
+  <FilesMatch "\.(html|css|js)$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+
+  # imagens podem ser trocadas (logo, fundos) → revalidar também
+  # (assim, ao substituir um arquivo de imagem com o MESMO nome, a versão nova
+  #  aparece na hora; quando não muda, o servidor responde 304 — continua leve)
+  <FilesMatch "\.(png|jpe?g|gif|webp|avif|svg|ico)$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+
+  # fontes e PDFs praticamente não mudam → cache longo (30 dias)
+  <FilesMatch "\.(woff2?|ttf|eot|pdf)$">
+    Header set Cache-Control "public, max-age=2592000"
+  </FilesMatch>
+</IfModule>
+
+# ETag por data+tamanho do arquivo (revalidação 304 confiável entre deploys)
+FileETag MTime Size

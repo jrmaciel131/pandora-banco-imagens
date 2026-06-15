@@ -1,0 +1,10 @@
+# API da V3 do relatório. Só serve PHP; sem listagem de diretório.
+Options -Indexes
+
+# Respostas da API carregam dados de relatório (mudam a cada consulta) e nunca
+# devem ser cacheadas pelo navegador nem por proxies.
+<IfModule mod_headers.c>
+  <FilesMatch "\.php$">
+    Header set Cache-Control "no-store, no-cache, must-revalidate"
+  </FilesMatch>
+</IfModule>

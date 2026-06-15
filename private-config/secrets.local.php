@@ -18,3 +18,15 @@ define('CRON_KEY', 'GERE_UMA_CHAVE_LONGA_E_ALEATORIA_AQUI_USE_OPENSSL_RAND_HEX_3
 // Enquanto vazias, o Turnstile permanece desligado.
 define('TURNSTILE_SITE_KEY', '');
 define('TURNSTILE_SECRET', '');
+
+// ── Meta Marketing API — V3 do /relatorio (ver relatorio/DEPLOY-V3.md) ──────
+// Token do Usuário do Sistema do Gerenciador de Negócios, com permissão
+// ads_read. É SOMENTE LEITURA — não gasta verba nem altera campanha. Nunca
+// coloque o valor real em repositório: preencha apenas no servidor.
+define('META_ACCESS_TOKEN', '');   // cole aqui o token real (somente no servidor)
+define('META_API_VERSION', 'v21.0');
+// Contas dos clientes que a V3 pode ler (allowlist). Pegue o ID em Gerenciador
+// de Anúncios → Configurações → "ID da conta de anúncios" (só números).
+define('META_ACCOUNTS', [
+    // ['label' => 'Cliente Exemplo', 'act_id' => '000000000000000'],
+]);
