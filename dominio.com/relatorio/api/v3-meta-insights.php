@@ -12,7 +12,7 @@
  *   - O token da Meta NUNCA chega ao navegador: vive só em secrets.local.php.
  *   - Só leitura (ads_read): não gasta verba nem altera campanha.
  *   - Stateless: nada é gravado em disco/banco; cada relatório é uma consulta nova.
- *   - Allowlist: só aceita contas listadas em META_ACCOUNTS.
+ *   - Suporta várias BMs (META_TOKENS): um token por BM, escolhido conforme a conta.
  *
  * Resposta de sucesso: { ok:true, main:[[...]], platform:[[...]], meta:{...} }
  *   onde main/platform são "array de arrays" (linha 0 = cabeçalhos).
@@ -99,38 +99,71 @@ $accountId = preg_replace('/[^0-9]/', '', (string)($body['account'] ?? ''));
 $month     = trim((string)($body['month'] ?? ''));   // formato AAAA-MM
 $debug     = !empty($body['debug']);                  // ?debug=1 → lista tipos de ação
 
-/* ── 6) Token + allowlist de contas ───────────────────────────────────────
-   Sem conta escolhida, devolve a lista de contas permitidas (para o seletor). */
-if (META_ACCESS_TOKEN === '') {
-    fail('NOT_CONFIGURED', 'A API da Meta ainda não foi configurada no servidor. Veja relatorio/DEPLOY-V3.md.', 503);
+/* ── 6) Tokens (uma BM = um token) + lista de contas ──────────────────────
+   Suporta VÁRIAS BMs: META_TOKENS é uma lista [{label, token}]. Mantém
+   compatibilidade com o token único antigo (META_ACCESS_TOKEN). Cada conta
+   carrega o índice 't' da BM/token a que pertence. */
+$tokens = [];
+if (defined('META_TOKENS') && is_array(META_TOKENS)) {
+    foreach (META_TOKENS as $i => $t) {
+        $tok = trim((string)($t['token'] ?? ''));
+        if ($tok === '') continue;
+        $tokens[] = ['label' => (string)($t['label'] ?? ('BM' . ($i + 1))), 'token' => $tok];
+    }
 }
+if (!$tokens && defined('META_ACCESS_TOKEN') && META_ACCESS_TOKEN !== '') {
+    $tokens[] = ['label' => 'Meta', 'token' => META_ACCESS_TOKEN];
+}
+if (!$tokens) {
+    fail('NOT_CONFIGURED', 'A API da Meta ainda não foi configurada no servidor (nenhum token). Veja relatorio/DEPLOY-V3.md.', 503);
+}
+
 $accounts = defined('META_ACCOUNTS') ? META_ACCOUNTS : [];
 $normAccts = array_values(array_filter(array_map(function ($a) {
     return [
         'label'  => (string)($a['label'] ?? ($a['act_id'] ?? '')),
         'act_id' => preg_replace('/[^0-9]/', '', (string)($a['act_id'] ?? '')),
+        't'      => (int)($a['bm'] ?? 0),   // índice da BM/token (modo curado)
     ];
 }, $accounts), function ($a) { return $a['act_id'] !== ''; }));
 $curated = count($normAccts) > 0;   // lista manual preenchida = allowlist fixa
 
 if ($accountId === '') {
-    // Sem conta escolhida → devolve a lista para o seletor da V3. Se META_ACCOUNTS
-    // estiver vazio, busca automaticamente as contas que o próprio token enxerga;
-    // assim, adicionar um cliente é só fazer a parceria na Meta, sem editar arquivo.
-    $list = $curated ? $normAccts : metaFetchAccounts();
-    echo json_encode(['ok' => true, 'accounts' => $list, 'auto' => !$curated, 'csrf' => $_SESSION['csrf']], JSON_UNESCAPED_UNICODE);
+    // Sem conta escolhida → devolve a lista para o seletor. Em modo automático
+    // (META_ACCOUNTS vazio), busca as contas de CADA BM via /me/adaccounts e
+    // junta tudo; cada conta leva o índice 't' da BM e o rótulo 'bm'.
+    $list = [];
+    if ($curated) {
+        foreach ($normAccts as $a) {
+            $ti = ($a['t'] >= 0 && $a['t'] < count($tokens)) ? $a['t'] : 0;
+            $list[] = ['label' => $a['label'], 'act_id' => $a['act_id'], 't' => $ti, 'bm' => $tokens[$ti]['label']];
+        }
+    } else {
+        foreach ($tokens as $ti => $tk) {
+            foreach (metaFetchAccounts($tk['token']) as $acc) {
+                $acc['t'] = $ti; $acc['bm'] = $tk['label'];
+                $list[] = $acc;
+            }
+        }
+        usort($list, function ($a, $b) { return strcasecmp($a['label'], $b['label']); });
+    }
+    echo json_encode(['ok' => true, 'accounts' => $list, 'auto' => !$curated, 'multi' => count($tokens) > 1, 'csrf' => $_SESSION['csrf']], JSON_UNESCAPED_UNICODE);
     exit;
 }
 if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
     fail('BAD_MONTH', 'Mês inválido. Use o formato AAAA-MM (ex.: 2026-04).');
 }
+// Qual token usar nesta consulta: o índice 't' (BM) que veio do seletor. Sem
+// isso, usa o primeiro. A própria Meta barra se o token não puder ler a conta.
+$tIdx = (int)($body['t'] ?? 0);
+if ($tIdx < 0 || $tIdx >= count($tokens)) $tIdx = 0;
+$activeToken = $tokens[$tIdx]['token'];
 // Allowlist: havendo lista manual, a conta precisa estar nela. Sem lista manual
-// (modo automático), confiamos no token — a própria Meta recusa o acesso a
-// contas que ele não pode ler (devolve PERMISSION).
+// (modo automático), confiamos nos tokens — a Meta recusa contas fora da BM.
 if ($curated) {
     $allowed = false;
     foreach ($normAccts as $a) { if ($a['act_id'] === $accountId) { $allowed = true; break; } }
-    if (!$allowed) fail('ACCOUNT_NOT_ALLOWED', 'Essa conta não está na lista META_ACCOUNTS. Apague a lista para liberar todas as contas do token, ou inclua esta conta.', 403);
+    if (!$allowed) fail('ACCOUNT_NOT_ALLOWED', 'Essa conta não está na lista META_ACCOUNTS. Apague a lista para liberar todas as contas dos tokens, ou inclua esta conta.', 403);
 }
 
 /* ── 7) Intervalo do mês escolhido ────────────────────────────────────────
@@ -143,8 +176,8 @@ $until = date('Y-m-t', $tsSince);
 /* Lista as contas de anúncios que o token enxerga (modo automático, usado
    quando META_ACCOUNTS está vazio). Adicionar um cliente passa a ser só fazer a
    parceria/atribuição na Meta — sem editar arquivo no servidor. */
-function metaFetchAccounts() {
-    $rows = metaGet('me/adaccounts', ['fields' => 'account_id,name', 'limit' => 200]);
+function metaFetchAccounts($token) {
+    $rows = metaGet('me/adaccounts', ['fields' => 'account_id,name', 'limit' => 200], $token);
     $out = [];
     foreach ($rows as $r) {
         $id = preg_replace('/[^0-9]/', '', (string)($r['account_id'] ?? ''));
@@ -157,7 +190,7 @@ function metaFetchAccounts() {
 
 /* ── 8) Chamada genérica à Graph API (cURL + paginação) ───────────────────
    O token vai no header Authorization (não na URL, para não vazar em logs). */
-function metaGet($path, array $params) {
+function metaGet($path, array $params, $token) {
     $base = 'https://graph.facebook.com/' . META_API_VERSION . '/' . ltrim($path, '/');
     $url  = $base . '?' . http_build_query($params);
     $out  = [];
@@ -168,7 +201,7 @@ function metaGet($path, array $params) {
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT        => 90,
             CURLOPT_CONNECTTIMEOUT => 20,
-            CURLOPT_HTTPHEADER     => ['Accept: application/json', 'Authorization: Bearer ' . META_ACCESS_TOKEN],
+            CURLOPT_HTTPHEADER     => ['Accept: application/json', 'Authorization: Bearer ' . $token],
         ]);
         $raw   = curl_exec($ch);
         $errno = curl_errno($ch);
@@ -215,12 +248,12 @@ $commonParams = [
 /* Consulta A: idade × gênero (relatório "principal"). */
 $mainParams = $commonParams;
 $mainParams['breakdowns'] = 'age,gender';
-$mainRows = metaGet('act_' . $accountId . '/insights', $mainParams);
+$mainRows = metaGet('act_' . $accountId . '/insights', $mainParams, $activeToken);
 
 /* Consulta B: plataforma × posicionamento (não pode coexistir com idade/gênero). */
 $platParams = $commonParams;
 $platParams['breakdowns'] = 'publisher_platform,platform_position';
-$platRows = metaGet('act_' . $accountId . '/insights', $platParams);
+$platRows = metaGet('act_' . $accountId . '/insights', $platParams, $activeToken);
 
 if (!$mainRows && !$platRows) {
     fail('NO_DATA', 'Não há dados para essa conta neste mês (ou as campanhas não veicularam no período).', 404);
@@ -320,6 +353,7 @@ echo json_encode([
     'platform' => count($platform) > 1 ? $platform : null,
     'meta'     => [
         'account'       => $accountId,
+        'bm'            => $tokens[$tIdx]['label'],
         'month'         => $month,
         'since'         => $since,
         'until'         => $until,

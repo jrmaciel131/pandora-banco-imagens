@@ -11,8 +11,13 @@ Na V1 e na V2 você exporta 2 planilhas Excel da Meta e sobe à mão. A **V3 aca
 isso**: você entra logado, escolhe o **cliente** e o **mês**, e o sistema busca os
 números sozinho na conta de anúncios. O relatório sai no mesmo layout da V2.
 
-**Você só precisa configurar UMA coisa no servidor: o token da Meta.** A lista de
+**Você só precisa configurar UMA coisa no servidor: o(s) token(s) da Meta.** A lista de
 clientes aparece **automaticamente** (todas as contas que o token enxerga).
+
+> **Tem mais de uma BM?** (ex.: clientes divididos 50/50 entre BM1 e BM2, para evitar
+> restrições.) Sem problema: você gera **um token por BM** e cola os dois. A V3 junta as
+> contas das duas BMs no mesmo seletor e usa o token certo para cada cliente. **Não junte
+> as BMs** — mantê-las separadas é o que protege você do contágio de restrições.
 
 **Pré-requisitos:**
 - Ser **admin do Gerenciador de Negócios** (Business Manager) da agência.
@@ -92,6 +97,10 @@ cliente aparecer sozinho na V3.**
 4. Expiração: **"Nunca"**, se a opção existir.
 5. **Copie o token agora** — a Meta só mostra uma vez.
 
+> **Várias BMs:** se você divide os clientes entre 2 (ou mais) BMs, **repita os passos
+> A1–A4 em cada BM** e guarde **um token de cada**. (Pode ser preciso ter um App por BM no
+> passo A1, já que um App pertence a uma BM.)
+
 ---
 
 ## 4. Parte B — Colar o token no servidor
@@ -103,12 +112,17 @@ navegador nem encontra no repositório.
 1. Conecte por **SFTP** (mesmo acesso do Pandora).
 2. Abra `private-config/secrets.local.php` (na raiz da conta, **ao lado** da pasta do
    domínio — não dentro dela).
-3. Preencha **só o token** (o bloco já existe no arquivo):
+3. Preencha **os tokens** (o bloco já existe no arquivo) — **uma BM por linha**:
    ```php
-   define('META_ACCESS_TOKEN', 'COLE_AQUI_O_TOKEN_DO_PASSO_A4');
+   define('META_TOKENS', [
+       ['label' => 'BM1', 'token' => 'TOKEN_DA_BM1'],
+       ['label' => 'BM2', 'token' => 'TOKEN_DA_BM2'],   // remova esta linha se só tiver 1 BM
+   ]);
    define('META_API_VERSION', 'v21.0');   // suba a versão quando a Meta atualizar
    define('META_ACCOUNTS', []);           // DEIXE VAZIO → lista os clientes sozinho
    ```
+   > **Só tem 1 BM?** Pode usar `define('META_ACCESS_TOKEN', 'SEU_TOKEN');` e deixar
+   > `META_TOKENS` vazio — tanto faz.
 4. Salve. Permissão do arquivo: **600** (`chmod 600 secrets.local.php`).
 
 > **Sobre os clientes:** com `META_ACCOUNTS` vazio, a V3 mostra **automaticamente** todas as

@@ -23,6 +23,7 @@
   function ym(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1); }
   function lastMonth() { var d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return ym(d); }
   function thisMonth() { return ym(new Date()); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
   /* Converte um "array de arrays" (linha 0 = cabeçalhos) num arquivo .xlsx em
      memória, para reaproveitar exatamente o mesmo caminho do upload de Excel. */
@@ -156,14 +157,21 @@
       msg('Nenhuma conta acessível pelo token. Confira a parceria/atribuição da conta ao Usuário do Sistema (ou preencha META_ACCOUNTS). Veja <b>relatorio/DEPLOY-V3.md</b>.', 'err');
       return;
     }
-    sel.innerHTML = accts.map(function (a) { return '<option value="' + a.act_id + '">' + a.label + '</option>'; }).join('');
+    var multi = !!data.multi;   // mais de uma BM → mostra de qual cada conta veio
+    sel.innerHTML = accts.map(function (a) {
+      var lbl = esc(a.label) + (multi && a.bm ? ' · ' + esc(a.bm) : '');
+      return '<option value="' + esc(a.act_id) + '" data-t="' + (a.t || 0) + '">' + lbl + '</option>';
+    }).join('');
     document.getElementById('v3-go').disabled = false;
     msg('Pronto (' + accts.length + ' conta' + (accts.length > 1 ? 's' : '') + (data.auto ? ', lista automática da Meta' : '') + '). Escolha o cliente e o mês e clique em <b>Gerar relatório</b>.');
   }
 
   async function generate() {
     if (!accountsLoaded) { await loadAccounts(); return; }
-    var account = document.getElementById('v3-acc').value;
+    var sel = document.getElementById('v3-acc');
+    var account = sel.value;
+    var opt = sel.options[sel.selectedIndex];
+    var t = opt ? Number(opt.getAttribute('data-t') || 0) : 0;   // qual BM/token
     var month = document.getElementById('v3-month').value;
     if (!account) { msg('Selecione um cliente.', 'err'); return; }
     if (!/^\d{4}-\d{2}$/.test(month)) { msg('Selecione um mês válido.', 'err'); return; }
@@ -172,7 +180,7 @@
     btn.disabled = true;
     msg('<span class="v3-spin"></span>Consultando a Meta e montando o relatório… (pode levar alguns segundos)');
     try {
-      var data = await callApi({ method: 'POST', body: { account: account, month: month } });
+      var data = await callApi({ method: 'POST', body: { account: account, month: month, t: t } });
       if (!data.ok) {
         if (data.code === 'AUTH' || data.code === 'SESSION_EXPIRED' || data._http === 401) { msg('Sua sessão do Pandora expirou.', 'err'); showLogin(true); return; }
         msg(data.error || 'Não foi possível gerar o relatório.', 'err');

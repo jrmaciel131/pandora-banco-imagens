@@ -119,7 +119,8 @@ if (!defined('TURNSTILE_SECRET'))   define('TURNSTILE_SECRET', '');
 // sensíveis e ficam em secrets.local.php (fora do Git). Aqui só os fallbacks:
 // enquanto o token estiver vazio, a V3 responde "API não configurada".
 // Passo a passo em dominio.com/relatorio/DEPLOY-V3.md.
-if (!defined('META_ACCESS_TOKEN')) define('META_ACCESS_TOKEN', '');
+if (!defined('META_TOKENS'))       define('META_TOKENS', []);        // lista [{label, token}] — uma BM por token
+if (!defined('META_ACCESS_TOKEN')) define('META_ACCESS_TOKEN', '');  // alternativa de 1 token só (BM única)
 if (!defined('META_API_VERSION'))  define('META_API_VERSION', 'v21.0');
 if (!defined('META_ACCOUNTS'))     define('META_ACCOUNTS', []);
 
