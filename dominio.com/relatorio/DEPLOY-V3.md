@@ -141,8 +141,16 @@ navegador nem encontra no repositório.
    define('META_API_VERSION', 'v21.0');   // suba a versão quando a Meta atualizar
    define('META_ACCOUNTS', []);           // DEIXE VAZIO → lista os clientes sozinho
    ```
-   > **Só tem 1 BM?** Pode usar `define('META_ACCESS_TOKEN', 'SEU_TOKEN');` e deixar
-   > `META_TOKENS` vazio — tanto faz.
+   > **`META_TOKENS` × `META_ACCESS_TOKEN` — qual a diferença?** Os dois guardam o MESMO
+   > tipo de coisa: o token do passo A5. A diferença é só a forma:
+   > - **`META_TOKENS`** = a **lista** para VÁRIAS BMs. Cada linha tem `label` (um apelido
+   >   que VOCÊ inventa, só pra reconhecer — aparece no seletor) e `token` (a chave real
+   >   gerada **naquela** BM). É o que você usa por ter 2 BMs.
+   > - **`META_ACCESS_TOKEN`** = atalho de **uma BM só** (um campo único).
+   >
+   > **Use um OU outro.** Com 2 BMs: preencha `META_TOKENS` (2 linhas) e deixe
+   > `META_ACCESS_TOKEN` vazio. `'TOKEN_DA_BM1'` é só um lugar reservado — troque pela chave
+   > de verdade que você copiou logado **na BM1**; idem para a BM2.
 4. Salve. Permissão do arquivo: **600** (`chmod 600 secrets.local.php`).
 
 > **Sobre os clientes:** com `META_ACCOUNTS` vazio, a V3 mostra **automaticamente** todas as
