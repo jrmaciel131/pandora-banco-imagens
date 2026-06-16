@@ -105,24 +105,32 @@ if (META_ACCESS_TOKEN === '') {
     fail('NOT_CONFIGURED', 'A API da Meta ainda não foi configurada no servidor. Veja relatorio/DEPLOY-V3.md.', 503);
 }
 $accounts = defined('META_ACCOUNTS') ? META_ACCOUNTS : [];
-$normAccts = array_map(function ($a) {
+$normAccts = array_values(array_filter(array_map(function ($a) {
     return [
         'label'  => (string)($a['label'] ?? ($a['act_id'] ?? '')),
         'act_id' => preg_replace('/[^0-9]/', '', (string)($a['act_id'] ?? '')),
     ];
-}, $accounts);
+}, $accounts), function ($a) { return $a['act_id'] !== ''; }));
+$curated = count($normAccts) > 0;   // lista manual preenchida = allowlist fixa
 
 if ($accountId === '') {
-    echo json_encode(['ok' => true, 'accounts' => array_values($normAccts), 'csrf' => $_SESSION['csrf']], JSON_UNESCAPED_UNICODE);
+    // Sem conta escolhida → devolve a lista para o seletor da V3. Se META_ACCOUNTS
+    // estiver vazio, busca automaticamente as contas que o próprio token enxerga;
+    // assim, adicionar um cliente é só fazer a parceria na Meta, sem editar arquivo.
+    $list = $curated ? $normAccts : metaFetchAccounts();
+    echo json_encode(['ok' => true, 'accounts' => $list, 'auto' => !$curated, 'csrf' => $_SESSION['csrf']], JSON_UNESCAPED_UNICODE);
     exit;
-}
-$allowed = false;
-foreach ($normAccts as $a) { if ($a['act_id'] === $accountId) { $allowed = true; break; } }
-if (!$allowed) {
-    fail('ACCOUNT_NOT_ALLOWED', 'Essa conta não está liberada nesta ferramenta. Adicione-a em META_ACCOUNTS.', 403);
 }
 if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
     fail('BAD_MONTH', 'Mês inválido. Use o formato AAAA-MM (ex.: 2026-04).');
+}
+// Allowlist: havendo lista manual, a conta precisa estar nela. Sem lista manual
+// (modo automático), confiamos no token — a própria Meta recusa o acesso a
+// contas que ele não pode ler (devolve PERMISSION).
+if ($curated) {
+    $allowed = false;
+    foreach ($normAccts as $a) { if ($a['act_id'] === $accountId) { $allowed = true; break; } }
+    if (!$allowed) fail('ACCOUNT_NOT_ALLOWED', 'Essa conta não está na lista META_ACCOUNTS. Apague a lista para liberar todas as contas do token, ou inclua esta conta.', 403);
 }
 
 /* ── 7) Intervalo do mês escolhido ────────────────────────────────────────
@@ -131,6 +139,21 @@ $since = $month . '-01';
 $tsSince = strtotime($since);
 if ($tsSince === false) fail('BAD_MONTH', 'Mês inválido.');
 $until = date('Y-m-t', $tsSince);
+
+/* Lista as contas de anúncios que o token enxerga (modo automático, usado
+   quando META_ACCOUNTS está vazio). Adicionar um cliente passa a ser só fazer a
+   parceria/atribuição na Meta — sem editar arquivo no servidor. */
+function metaFetchAccounts() {
+    $rows = metaGet('me/adaccounts', ['fields' => 'account_id,name', 'limit' => 200]);
+    $out = [];
+    foreach ($rows as $r) {
+        $id = preg_replace('/[^0-9]/', '', (string)($r['account_id'] ?? ''));
+        if ($id === '') continue;
+        $out[] = ['label' => (string)($r['name'] ?? $id), 'act_id' => $id];
+    }
+    usort($out, function ($a, $b) { return strcasecmp($a['label'], $b['label']); });
+    return $out;
+}
 
 /* ── 8) Chamada genérica à Graph API (cURL + paginação) ───────────────────
    O token vai no header Authorization (não na URL, para não vazar em logs). */

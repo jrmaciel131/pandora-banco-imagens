@@ -25,8 +25,10 @@ define('TURNSTILE_SECRET', '');
 // coloque o valor real em repositório: preencha apenas no servidor.
 define('META_ACCESS_TOKEN', '');   // cole aqui o token real (somente no servidor)
 define('META_API_VERSION', 'v21.0');
-// Contas dos clientes que a V3 pode ler (allowlist). Pegue o ID em Gerenciador
-// de Anúncios → Configurações → "ID da conta de anúncios" (só números).
+// Contas que a V3 mostra no seletor. DEIXE VAZIO para listar AUTOMATICAMENTE
+// todas as contas que o token enxerga (recomendado — adicionar cliente passa a
+// ser só fazer a parceria na Meta, sem mexer aqui). Preencha apenas se quiser
+// CURAR/renomear a lista (vira allowlist fixa):
 define('META_ACCOUNTS', [
     // ['label' => 'Cliente Exemplo', 'act_id' => '000000000000000'],
 ]);

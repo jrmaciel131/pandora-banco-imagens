@@ -152,13 +152,13 @@
     var sel = document.getElementById('v3-acc');
     var accts = data.accounts || [];
     if (!accts.length) {
-      sel.innerHTML = '<option value="">(nenhuma conta configurada)</option>';
-      msg('Nenhuma conta cadastrada em <b>META_ACCOUNTS</b>. Adicione os clientes no servidor — veja <b>relatorio/DEPLOY-V3.md</b>.', 'err');
+      sel.innerHTML = '<option value="">(nenhuma conta)</option>';
+      msg('Nenhuma conta acessível pelo token. Confira a parceria/atribuição da conta ao Usuário do Sistema (ou preencha META_ACCOUNTS). Veja <b>relatorio/DEPLOY-V3.md</b>.', 'err');
       return;
     }
     sel.innerHTML = accts.map(function (a) { return '<option value="' + a.act_id + '">' + a.label + '</option>'; }).join('');
     document.getElementById('v3-go').disabled = false;
-    msg('Pronto. Escolha o cliente e o mês e clique em <b>Gerar relatório</b>.');
+    msg('Pronto (' + accts.length + ' conta' + (accts.length > 1 ? 's' : '') + (data.auto ? ', lista automática da Meta' : '') + '). Escolha o cliente e o mês e clique em <b>Gerar relatório</b>.');
   }
 
   async function generate() {
