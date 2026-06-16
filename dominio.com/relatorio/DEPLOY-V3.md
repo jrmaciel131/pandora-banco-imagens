@@ -67,39 +67,59 @@ private-config/                      ← FORA do webroot (não acessível pela w
 
 ## 3. Parte A — Configurar a API da Meta (uma vez)
 
-### A1. Criar um App da Meta
-**Por quê:** a Meta só conversa com a API através de um "App" registrado.
-1. Entre em <https://developers.facebook.com> com o Facebook que administra o negócio.
-2. **Meus Apps → Criar app → tipo "Negócios" (Business)**. Associe ao seu Gerenciador de Negócios.
-3. Adicione o produto **"Marketing API"**.
+> ⚠️ **VOCÊ NÃO PRECISA "PUBLICAR" O APP.** Deixe ele em **"Não publicado" (modo de
+> desenvolvimento)** mesmo. A tela **Publicar** (com Política de Privacidade e a lista de
+> "requisitos") é a **Análise do App (App Review)** — ela só é exigida quando *outras
+> pessoas* fazem login no seu app. No nosso caso, quem lê as contas é o **Usuário do
+> Sistema da sua própria agência**, e isso funciona em desenvolvimento. **Ignore a tela
+> "Publicar" e o botão azul de Publicar.**
 
-### A2. Criar um Usuário do Sistema (o "robô" que lê as contas)
-**Por quê:** é uma identidade de máquina que pertence ao negócio (não a uma pessoa) — é
-ela que carrega o token. Se alguém sair da equipe, o acesso não quebra.
-1. <https://business.facebook.com/settings> → **Usuários → Usuários do sistema → Adicionar**.
+### A1. Criar o App (você já fez: "Relatorios API")
+1. Em <https://developers.facebook.com> → **Meus Apps → Criar app**.
+2. Tipo: **"Negócios"**. Vincule ao seu **Gerenciador de Negócios**.
+3. Em **Casos de uso**, adicione **"Mensurar dados de desempenho do anúncio com a API de
+   Marketing"** (é o caso de uso que concede o `ads_read`). **Não precisa publicá-lo.**
+
+### A2. Garantir que o App pertence ao Gerenciador de Negócios (passo que costuma faltar)
+**Por quê:** se o app não estiver "dentro" da BM, ele **não aparece** na hora de gerar o
+token — e nada funciona no Gerenciador.
+1. <https://business.facebook.com/settings> → **Contas → Apps**.
+2. Se **"Relatorios API"** não estiver na lista: **Adicionar → Conectar um ID de app** e
+   cole o **ID do app** (fica em Configurações do app → Básico, no developers.facebook.com).
+   Você precisa ser admin do app **e** da BM.
+
+### A3. Criar o Usuário do Sistema (o "robô" que lê as contas)
+**Por quê:** identidade de máquina que pertence à BM (não a uma pessoa) — é ela que carrega
+o token; se alguém sair da equipe, o acesso não quebra.
+1. Business Settings → **Usuários → Usuários do sistema → Adicionar**.
 2. Nome: `Relatorios API`. Função: **Administrador**.
 
-### A3. Dar acesso às contas dos clientes (a parceria)
-**Por quê:** o robô só lê as contas que você liberar para ele. **É isso que faz cada
-cliente aparecer sozinho na V3.**
-- **Conta sua (no seu BM):** Configurações do negócio → **Contas → Contas de anúncios** →
-  selecione a conta → **Atribuir** o Usuário do Sistema `Relatorios API` com **"Ver desempenho"**.
-- **Conta do cliente (parceria):** o cliente, no BM dele, vai em **Parceiros → Adicionar
-  parceiro**, informa o **ID do seu negócio** e compartilha a **conta de anúncios**. Depois,
-  do seu lado, atribua essa conta ao Usuário do Sistema. O cliente continua dono e pode
-  revogar quando quiser; você só **lê** (não gasta, não altera campanha).
+### A4. Atribuir as contas dos clientes ao Usuário do Sistema
+**Por quê:** o robô só enxerga as contas que você atribuir — **é isto que faz os clientes
+aparecerem na V3**, e é o motivo nº 1 de "não aparece nada".
+1. No Usuário do Sistema → **Atribuir ativos → Contas de anúncios**.
+2. Marque as contas e ligue **"Ver desempenho"** (leitura já basta).
+- **Conta que é do cliente (parceria):** primeiro o cliente, no BM dele, vai em **Parceiros
+  → Adicionar parceiro**, informa o **ID do seu negócio** e compartilha a conta; depois você
+  a atribui ao Usuário do Sistema (passo acima). Ele continua dono e pode revogar; você só **lê**.
 
-### A4. Gerar o token (a única coisa que você cola no servidor)
-1. Em **Usuários do sistema**, selecione `Relatorios API` → **Gerar novo token**.
-2. Escolha o **App** do passo A1.
-3. Permissões: marque **`ads_read`** (recomendo marcar também **`business_management`** —
-   ajuda a listar as contas automaticamente).
-4. Expiração: **"Nunca"**, se a opção existir.
+### A5. Gerar o token (a única coisa que vai pro servidor)
+1. No Usuário do Sistema → **Gerar novo token**.
+2. **App:** escolha "Relatorios API" (se ele **não aparecer** aqui, falta o passo A2).
+3. **Permissões:** marque **`ads_read`** e **`business_management`** (esta ajuda a listar as
+   contas sozinho).
+4. **Expiração:** "Nunca", se houver a opção.
 5. **Copie o token agora** — a Meta só mostra uma vez.
 
-> **Várias BMs:** se você divide os clientes entre 2 (ou mais) BMs, **repita os passos
-> A1–A4 em cada BM** e guarde **um token de cada**. (Pode ser preciso ter um App por BM no
-> passo A1, já que um App pertence a uma BM.)
+> **Teste rápido (opcional):** em **Ferramentas → Graph API Explorer**, escolha o app, cole
+> o token e rode `me/adaccounts`. Se listar as contas, está tudo certo.
+
+> **Se a lista de contas vier VAZIA** mesmo com tudo atribuído: em **Casos de uso → API de
+> Marketing**, peça **"Acesso Avançado" (Advanced Access)** para `ads_read`. É uma
+> solicitação **bem mais leve que publicar** — não exige a App Review completa.
+
+> **Várias BMs:** repita A1–A5 em **cada** BM e guarde **um token de cada**. Um app pertence
+> a uma BM, então provavelmente você terá um app por BM. **Não junte as BMs.**
 
 ---
 
