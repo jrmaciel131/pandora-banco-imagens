@@ -132,7 +132,8 @@ navegador nem encontra no repositório.
 1. Conecte por **SFTP** (mesmo acesso do Pandora).
 2. Abra `private-config/secrets.local.php` (na raiz da conta, **ao lado** da pasta do
    domínio — não dentro dela).
-3. Preencha **os tokens** (o bloco já existe no arquivo) — **uma BM por linha**:
+3. **Adicione** o bloco abaixo no final do arquivo (se ele já existir, só preencha) —
+   **uma BM por linha**. **Não apague** as linhas de `DB_PASS`/`CRON_KEY` que já estão lá:
    ```php
    define('META_TOKENS', [
        ['label' => 'BM1', 'token' => 'TOKEN_DA_BM1'],
@@ -174,10 +175,13 @@ estes — repare nas DUAS áreas (webroot e private-config):
 | `relatorio/index.html`                       | `SEU-DOMINIO/relatorio/index.html`                | ALTERADO — ativa o card V3 |
 
 ### 🟥 Área privada (em `private-config/`, FORA do webroot)
-| Arquivo                          | Onde vai no servidor               | O que é |
-|----------------------------------|------------------------------------|---------|
-| `private-config/config.php`      | `private-config/config.php`        | ALTERADO — passa a ler as constantes META_* |
-| `private-config/secrets.local.php` | `private-config/secrets.local.php` | É onde você colou o token (Parte B) |
+No servidor você **já tem** esses arquivos (o Pandora usa, com os dados reais). **NÃO
+substitua** — **edite** e adicione só o que falta:
+
+| Arquivo | O que fazer no servidor |
+|---|---|
+| `private-config/secrets.local.php` | **EDITAR** (não substituir): adicione o bloco `META_*` com o token (Parte B). **Não toque** nas linhas de `DB_PASS`/`CRON_KEY` existentes. |
+| `private-config/config.php` | *(opcional)* adicionar os 4 fallbacks `META_*`. Dá pra **pular no teste**: como o token e a versão já vão no `secrets.local.php`, funciona sem mexer aqui. |
 
 > ⚠️ A pasta `relatorio/api/` é **nova** — pode ser preciso criá-la no servidor antes de subir.
 > Não confunda com `SEU-DOMINIO/api/` (a do Pandora geral) — ver o mapa na seção 2.
