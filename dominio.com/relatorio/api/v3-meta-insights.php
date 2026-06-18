@@ -2,13 +2,13 @@
 /**
  * Relatório V3 — ponte com a API de Marketing da Meta (Graph API).
  *
- * Recebe { account, month } de um usuário JÁ AUTENTICADO no Pandora, consulta
+ * Recebe { account, since, until } de um usuário JÁ AUTENTICADO no sistema, consulta
  * os insights da conta de anúncios e devolve os números no MESMO formato tabular
  * que um export de Excel teria — as mesmas colunas que o parser do relatório
  * (discoverV2) já entende. Assim a V3 reaproveita 100% do motor da V2.
  *
  * Princípios de segurança:
- *   - Exige sessão do Pandora (mesmo cookie bi_session) + token CSRF em POST.
+ *   - Exige sessão do sistema (mesmo cookie bi_session) + token CSRF em POST.
  *   - O token da Meta NUNCA chega ao navegador: vive só em secrets.local.php.
  *   - Só leitura (ads_read): não gasta verba nem altera campanha.
  *   - Stateless: nada é gravado em disco/banco; cada relatório é uma consulta nova.
@@ -44,7 +44,7 @@ if (!$cfgPath) {
 }
 require_once $cfgPath;
 
-/* ── 2) Sessão idêntica ao handler.php → compartilha o login do Pandora ──── */
+/* ── 2) Sessão idêntica ao handler.php → compartilha o login do sistema ──── */
 $sessionDir = PRIVATE_CONFIG_PATH . '/sessions';
 if (!is_dir($sessionDir)) @mkdir($sessionDir, 0700, true);
 ini_set('session.save_path',       $sessionDir);
@@ -71,10 +71,10 @@ function fail($code, $msg, $http = 400) {
     exit;
 }
 
-/* ── 3) Exige login do Pandora ────────────────────────────────────────────
+/* ── 3) Exige login do sistema ────────────────────────────────────────────
    Só a V3 é protegida; V1/V2 (subir Excel) continuam abertas. */
 if (empty($_SESSION['user'])) {
-    fail('AUTH', 'Você precisa estar logado no Pandora para usar a V3.', 401);
+    fail('AUTH', 'Você precisa estar logado para usar a V3.', 401);
 }
 if (isset($_SESSION['login_time']) && (time() - $_SESSION['login_time']) > SESSION_LIFETIME) {
     fail('SESSION_EXPIRED', 'Sua sessão expirou. Faça login novamente.', 401);
@@ -97,7 +97,7 @@ if (!is_array($body)) $body = [];
 $body += $_GET;
 $accountId = preg_replace('/[^0-9]/', '', (string)($body['account'] ?? ''));
 $month     = trim((string)($body['month'] ?? ''));   // formato AAAA-MM
-$debug     = !empty($body['debug']);                  // ?debug=1 → lista tipos de ação
+$debug     = (string)($body['debug'] ?? '');          // '1' = tipos de ação · '2' = comparação
 
 /* ── 6) Tokens (uma BM = um token) + lista de contas ──────────────────────
    Suporta VÁRIAS BMs: META_TOKENS é uma lista [{label, token}]. Mantém
@@ -150,9 +150,18 @@ if ($accountId === '') {
     echo json_encode(['ok' => true, 'accounts' => $list, 'auto' => !$curated, 'multi' => count($tokens) > 1, 'csrf' => $_SESSION['csrf']], JSON_UNESCAPED_UNICODE);
     exit;
 }
-if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
-    fail('BAD_MONTH', 'Mês inválido. Use o formato AAAA-MM (ex.: 2026-04).');
+// Período: aceita intervalo since/until (AAAA-MM-DD) OU um mês (AAAA-MM, compat).
+$since = trim((string)($body['since'] ?? ''));
+$until = trim((string)($body['until'] ?? ''));
+if ($since === '' || $until === '') {
+    if (!preg_match('/^\d{4}-\d{2}$/', $month)) fail('BAD_PERIOD', 'Informe um período (de/até) ou um mês (AAAA-MM).');
+    $since = $month . '-01';
+    $until = date('Y-m-t', strtotime($since));
 }
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $since) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $until)) {
+    fail('BAD_PERIOD', 'Datas inválidas (use AAAA-MM-DD).');
+}
+if (strtotime($since) > strtotime($until)) fail('BAD_PERIOD', 'A data inicial está depois da final.');
 // Qual token usar nesta consulta: o índice 't' (BM) que veio do seletor. Sem
 // isso, usa o primeiro. A própria Meta barra se o token não puder ler a conta.
 $tIdx = (int)($body['t'] ?? 0);
@@ -166,12 +175,7 @@ if ($curated) {
     if (!$allowed) fail('ACCOUNT_NOT_ALLOWED', 'Essa conta não está na lista META_ACCOUNTS. Apague a lista para liberar todas as contas dos tokens, ou inclua esta conta.', 403);
 }
 
-/* ── 7) Intervalo do mês escolhido ────────────────────────────────────────
-   since = dia 1; until = último dia do mês (date('t')). */
-$since = $month . '-01';
-$tsSince = strtotime($since);
-if ($tsSince === false) fail('BAD_MONTH', 'Mês inválido.');
-$until = date('Y-m-t', $tsSince);
+/* ── 7) Período já resolvido acima ($since / $until) ───────────────────── */
 
 /* Lista as contas de anúncios que o token enxerga (modo automático, usado
    quando META_ACCOUNTS está vazio). Adicionar um cliente passa a ser só fazer a
@@ -231,6 +235,22 @@ function metaGet($path, array $params, $token) {
         $url = $j['paging']['next'] ?? null;
     }
     return $out;
+}
+
+/* Versão "soft" (best-effort): uma página só, devolve null em qualquer erro
+   (não interrompe o relatório). Usada para os extras opcionais (foto, thumbs). */
+function metaGetSoft($path, array $params, $token) {
+    $url = 'https://graph.facebook.com/' . META_API_VERSION . '/' . ltrim($path, '/') . '?' . http_build_query($params);
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30, CURLOPT_CONNECTTIMEOUT => 15,
+        CURLOPT_HTTPHEADER => ['Accept: application/json', 'Authorization: Bearer ' . $token],
+    ]);
+    $raw = curl_exec($ch); $errno = curl_errno($ch); curl_close($ch);
+    if ($errno) return null;
+    $j = json_decode($raw, true);
+    if (!is_array($j) || isset($j['error'])) return null;
+    return $j;
 }
 
 /* Campos comuns às duas consultas. */
@@ -304,8 +324,8 @@ function pickResult(array $row, array $byObj, array $fallback, array $labels) {
     return [0, ''];
 }
 
-/* Modo depuração: lista os tipos de ação presentes, para ajudar a mapear. */
-if ($debug) {
+/* Depuração ?debug=1: lista os tipos de ação presentes, para ajudar a mapear. */
+if ($debug === '1') {
     $seen = [];
     foreach (array_merge($mainRows, $platRows) as $r) {
         foreach (($r['actions'] ?? []) as $a) {
@@ -347,10 +367,57 @@ foreach ($platRows as $r) {
     ];
 }
 
+/* Depuração ?debug=2: comparação principal × plataforma (origem de discrepâncias
+   tipo "resultados diferem X%"), objetivos vistos e amostras das linhas cruas. */
+if ($debug === '2') {
+    $objMain = []; foreach ($mainRows as $r) { $objMain[$r['objective'] ?? '(vazio)'] = true; }
+    $objPlat = []; foreach ($platRows as $r) { $objPlat[$r['objective'] ?? '(vazio)'] = true; }
+    $byCamp = [];
+    $acc = function (&$bc, $c) { if (!isset($bc[$c])) $bc[$c] = ['resMain' => 0, 'resPlat' => 0, 'spendMain' => 0, 'spendPlat' => 0]; };
+    for ($i = 1; $i < count($main); $i++)     { $c = $main[$i][0];     $acc($byCamp, $c); $byCamp[$c]['resMain']  += (float)$main[$i][5];     $byCamp[$c]['spendMain']  += (float)$main[$i][7]; }
+    for ($i = 1; $i < count($platform); $i++) { $c = $platform[$i][0]; $acc($byCamp, $c); $byCamp[$c]['resPlat']  += (float)$platform[$i][5]; $byCamp[$c]['spendPlat']  += (float)$platform[$i][7]; }
+    $tot = function ($aoa) { $r = 0; $s = 0; for ($i = 1; $i < count($aoa); $i++) { $r += (float)$aoa[$i][5]; $s += (float)$aoa[$i][7]; } return ['results' => $r, 'spend' => $s, 'rows' => count($aoa) - 1]; };
+    echo json_encode([
+        'ok' => true, 'debug_compare' => true,
+        'account' => $accountId, 'month' => $month,
+        'objetivos_principal'  => array_keys($objMain),
+        'objetivos_plataforma' => array_keys($objPlat),
+        'totais' => ['principal' => $tot($main), 'plataforma' => $tot($platform)],
+        'por_campanha' => $byCamp,
+        'amostra_principal'  => array_slice($mainRows, 0, 8),
+        'amostra_plataforma' => array_slice($platRows, 0, 8),
+    ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    exit;
+}
+
+/* ── 11) Extras (melhor-esforço; falha NÃO interrompe o relatório) ─────────
+   Foto/nome do cliente (#6/#7) e thumbs dos criativos (#5). São URLs públicas
+   da CDN da Meta — exibem sem o token e sem baixar/embutir nada. */
+$extras = ['photo' => null, 'pageName' => null, 'thumbs' => (object) []];
+$pg = metaGetSoft('act_' . $accountId . '/promote_pages', ['fields' => 'name,picture.width(160).height(160)', 'limit' => 1], $activeToken);
+if ($pg && !empty($pg['data'][0])) {
+    $p0 = $pg['data'][0];
+    $extras['pageName'] = $p0['name'] ?? null;
+    if (!empty($p0['picture']['data']['url'])) $extras['photo'] = $p0['picture']['data']['url'];
+}
+$ads = metaGetSoft('act_' . $accountId . '/ads', ['fields' => 'name,creative{thumbnail_url,image_url}', 'limit' => 200], $activeToken);
+if ($ads && !empty($ads['data'])) {
+    $thumbs = [];
+    foreach ($ads['data'] as $ad) {
+        $n = trim((string) ($ad['name'] ?? ''));
+        if ($n === '' || isset($thumbs[$n])) continue;
+        $cr = $ad['creative'] ?? [];
+        $img = $cr['image_url'] ?? ($cr['thumbnail_url'] ?? '');
+        if ($img) $thumbs[$n] = $img;
+    }
+    if ($thumbs) $extras['thumbs'] = $thumbs;
+}
+
 echo json_encode([
     'ok'       => true,
     'main'     => $main,
     'platform' => count($platform) > 1 ? $platform : null,
+    'extras'   => $extras,
     'meta'     => [
         'account'       => $accountId,
         'bm'            => $tokens[$tIdx]['label'],

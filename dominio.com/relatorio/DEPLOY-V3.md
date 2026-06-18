@@ -22,9 +22,9 @@ clientes aparece **automaticamente** (todas as contas que o token enxerga).
 **Pré-requisitos:**
 - Ser **admin do Gerenciador de Negócios** (Business Manager) da agência.
 - Acesso às contas dos clientes (por posse ou **parceria**).
-- Acesso ao servidor por **SFTP** (o mesmo do Pandora) para colar o token e subir 5 arquivos.
+- Acesso ao servidor por **SFTP** (o mesmo de sempre) para colar o token e subir 5 arquivos.
 
-> A V3 só funciona **logado no Pandora**. V1 e V2 continuam abertas como antes.
+> A V3 só funciona **logado no sistema**. V1 e V2 continuam abertas como antes.
 
 ---
 
@@ -35,8 +35,8 @@ e **não se misturam**:
 
 ```
 SEU-DOMINIO/                         ← pasta pública do site (webroot)
-├── index.php                        ← Pandora (banco de imagens)
-├── api/                             ← (1) API GERAL do Pandora — NÃO é a V3
+├── index.php                        ← Banco de Casos (app de imagens)
+├── api/                             ← (1) API GERAL do Banco de Casos — NÃO é a V3
 │   ├── handler.php                       (banco de imagens)
 │   ├── cron.php
 │   └── gerar-hash.php
@@ -59,7 +59,7 @@ private-config/                      ← FORA do webroot (não acessível pela w
 └── secrets.local.php                ← AQUI vai o token (nunca no Git)
 ```
 
-- **`SEU-DOMINIO/api/`** = API geral do Pandora (banco de imagens). **Você não mexe nela.**
+- **`SEU-DOMINIO/api/`** = API geral do Banco de Casos (app de imagens). **Você não mexe nela.**
 - **`SEU-DOMINIO/relatorio/api/`** = API da V3 (a que conversa com a Meta). **É a que você sobe.**
 - **`private-config/`** fica **fora** da pasta pública — é onde mora o token, em segurança.
 
@@ -129,7 +129,7 @@ aparecerem na V3**, e é o motivo nº 1 de "não aparece nada".
 fica **fora da pasta pública** e **nunca vai para o Git**. Assim ninguém baixa pelo
 navegador nem encontra no repositório.
 
-1. Conecte por **SFTP** (mesmo acesso do Pandora).
+1. Conecte por **SFTP** (mesmo acesso de sempre).
 2. Abra `private-config/secrets.local.php` (na raiz da conta, **ao lado** da pasta do
    domínio — não dentro dela).
 3. **Adicione** o bloco abaixo no final do arquivo (se ele já existir, só preencha) —
@@ -175,7 +175,7 @@ estes — repare nas DUAS áreas (webroot e private-config):
 | `relatorio/index.html`                       | `SEU-DOMINIO/relatorio/index.html`                | ALTERADO — ativa o card V3 |
 
 ### 🟥 Área privada (em `private-config/`, FORA do webroot)
-No servidor você **já tem** esses arquivos (o Pandora usa, com os dados reais). **NÃO
+No servidor você **já tem** esses arquivos (o Banco de Casos usa, com os dados reais). **NÃO
 substitua** — **edite** e adicione só o que falta:
 
 | Arquivo | O que fazer no servidor |
@@ -184,7 +184,7 @@ substitua** — **edite** e adicione só o que falta:
 | `private-config/config.php` | *(opcional)* adicionar os 4 fallbacks `META_*`. Dá pra **pular no teste**: como o token e a versão já vão no `secrets.local.php`, funciona sem mexer aqui. |
 
 > ⚠️ A pasta `relatorio/api/` é **nova** — pode ser preciso criá-la no servidor antes de subir.
-> Não confunda com `SEU-DOMINIO/api/` (a do Pandora geral) — ver o mapa na seção 2.
+> Não confunda com `SEU-DOMINIO/api/` (a do Banco de Casos) — ver o mapa na seção 2.
 >
 > `DEPLOY-V3.md` (este arquivo) **não precisa** ir para o servidor; é só o tutorial.
 
@@ -192,7 +192,7 @@ substitua** — **edite** e adicione só o que falta:
 
 ## 6. Parte D — Testar
 
-1. Abra o site e **faça login no Pandora**.
+1. Abra o site e **faça login no sistema**.
 2. Vá em `…/relatorio/` → clique no card **V3 — Puxar da Meta (API)**.
 3. Aparece a tela "Puxar direto da Meta". A lista de clientes carrega sozinha.
 4. Escolha o cliente, um mês com veiculação, e clique **Gerar relatório**.
@@ -212,7 +212,7 @@ arquivo nenhum.**
 
 | Mensagem na tela | O que significa / como resolver |
 |---|---|
-| **"Você precisa estar logado no Pandora"** | Faça login no Pandora e volte (a V3 usa o mesmo login). |
+| **"Você precisa estar logado"** | Faça login e volte (a V3 usa o mesmo login do sistema). |
 | **"A API da Meta ainda não foi configurada"** | O `META_ACCESS_TOKEN` está vazio no servidor → Parte B. |
 | **"Nenhuma conta acessível pelo token"** | O token não tem contas atribuídas. Faça a parceria/atribuição (A3). Se persistir, gere o token com `business_management` (A4) ou preencha `META_ACCOUNTS` à mão. |
 | **"O token da Meta está inválido ou expirou"** | Gere um token novo (A4) e cole de novo. |
@@ -235,7 +235,7 @@ back-end já mapeia os casos comuns. Se vier zerado para algum cliente:
 - O **token** fica só em `secrets.local.php` (fora do webroot, fora do Git). O navegador
   nunca o vê — ele só fala com o nosso back-end.
 - O token é **`ads_read`** (só leitura): não gasta verba nem altera campanha.
-- A V3 exige **login do Pandora** + token **CSRF** em cada geração.
+- A V3 exige **login do sistema** + token **CSRF** em cada geração.
 - **Nada é salvo:** os números não vão para banco nem disco; somem ao fechar a aba.
 - A pasta `relatorio/uploads/` (PDFs/imagens de clientes) **não** vai para o Git (está no
   `.gitignore`). No servidor ela continua existindo normalmente.

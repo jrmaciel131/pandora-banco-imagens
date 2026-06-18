@@ -159,7 +159,7 @@
     const p = DISCOVERED.period;
     return '<div class="bar-top"></div><div class="bar-bot"></div>' +
       '<div class="head"><div class="avatar pro-photo' + photoEmpty() + '"><span class="pp-label">' + CAM_SVG + 'FOTO</span></div>' +
-      '<div class="id"><div class="ctx">Relatório Mensal</div><div class="name ed" data-sync="client">' + esc(CONFIG.cover.client) + '</div>' +
+      '<div class="id"><div class="ctx">Relatório <span class="ed" data-sync="periodword">' + esc(CONFIG.cover.periodWord || 'Mensal') + '</span></div><div class="name ed" data-sync="client">' + esc(CONFIG.cover.client) + '</div>' +
       '<div class="date"><span data-sync="month">' + esc(p.month) + '</span> · <span data-sync="year">' + esc(p.year) + '</span></div></div>' +
       (kind ? '<div class="head-chip">' + esc(kind) + '</div>' : '') + '</div>';
   }
@@ -256,7 +256,7 @@
       '<div class="cover-portrait pro-photo' + photoEmpty() + '"><span class="pp-label">' + CAM_SVG + 'Inserir foto<br>do profissional</span></div>' +
       '<div class="cover-name ed" data-sync="client">' + esc(CONFIG.cover.client) + '</div><div class="cover-name-rule"></div>' +
       '<div class="cover-agency ed">' + esc(CONFIG.cover.agency) + '</div>' +
-      '<div class="cover-title"><span class="row">RELATÓRIO</span><span class="row">MENSAL</span></div>' +
+      '<div class="cover-title"><span class="row">RELATÓRIO</span><span class="row ed" data-sync="periodword" style="text-transform:uppercase">' + esc(CONFIG.cover.periodWord || 'Mensal') + '</span></div>' +
       '<div class="cover-rule"></div>' +
       '<div class="cover-date"><span class="ed" data-sync="month">' + esc(p.month) + '</span><span class="ed" data-sync="year">' + esc(p.year) + '</span></div></section>');
   }
@@ -345,7 +345,7 @@
   // ── config inicial ────────────────────────────────────────────────
   function buildConfig(d) {
     return {
-      cover: { client: 'Cliente', agency: 'FÁBIO TAVARES' },
+      cover: { client: 'Cliente', agency: 'FÁBIO TAVARES', periodWord: 'Mensal' },
       profilePhoto: null,
       hidden: [], hiddenKinds: [],
       fullConjNames: false, // false = nome do conjunto resumido (padrão); true = nome inteiro
@@ -558,6 +558,7 @@
     if (!t || !t.dataset || !t.dataset.sync || !CONFIG || !DISCOVERED) return;
     const kind = t.dataset.sync, val = (t.textContent || '').trim();
     if (kind === 'client') { CONFIG.cover.client = val; syncAll('client', val); }
+    else if (kind === 'periodword') { CONFIG.cover.periodWord = val; syncAll('periodword', val); }
     else if (kind === 'year') { DISCOVERED.period.year = val; syncAll('year', val); }
     else if (kind === 'month') {
       if (val && val !== DISCOVERED.period.month) {
@@ -1092,6 +1093,14 @@
     render, get config() { return CONFIG; }, get discovered() { return DISCOVERED; },
     loadFile: (file) => onFile(file, document.getElementById('rt-status') || { textContent: '' }),
     loadPlatformFile: (file) => onPlatformFile(file, document.getElementById('rt-status') || { textContent: '' }),
+    // Dados vindos da API (V3): nome do cliente, palavra do período e foto.
+    applyMeta: (o) => {
+      o = o || {};
+      if (!CONFIG) return;
+      if (o.client)     { CONFIG.cover.client = o.client;        syncAll('client', o.client); }
+      if (o.periodWord) { CONFIG.cover.periodWord = o.periodWord; syncAll('periodword', o.periodWord); }
+      if (o.photo)      { CONFIG.profilePhoto = o.photo;          applyPhoto(); }
+    },
   };
   window.addEventListener('load', wire);
 })();

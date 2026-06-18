@@ -150,6 +150,16 @@
     return idbGet(nsKey()).then((map) => { if (map && typeof map === 'object') slots = map; subs.forEach((fn) => fn()); });
   };
 
+  // Define a imagem de um slot por URL/dataURL — usado pela V3 para preencher os
+  // criativos com as thumbs vindas da API. (Sem File: não passa pelo canvas, então
+  // URLs externas da CDN da Meta não "tingem" o canvas nem dependem de CORS.)
+  window.__setSlotImage = function (el, url) {
+    var id = el && el.id;
+    if (!id || !url) return false;
+    setSlot(id, url);
+    return true;
+  };
+
   // KV genérico no mesmo banco (usado p/ a foto do profissional na V2).
   window.__imgPersist = {
     getKV: (k) => (IDB_OK ? idbGet('kv:' + (window.__slotNS || 'default') + ':' + k) : Promise.resolve(null)),
