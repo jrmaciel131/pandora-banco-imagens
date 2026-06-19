@@ -15,6 +15,10 @@
   'use strict';
 
   var API = 'api/v3-meta-insights.php';
+  // Carimbo de versão do FRONTEND. BATA com o V3_BUILD do backend
+  // (api/v3-meta-insights.php) a cada release: a tela mostra os dois e avisa se
+  // divergirem — é assim que se confirma que o deploy (JS + PHP) realmente subiu.
+  var V3_BUILD = 'v3.5 · 2026-06-18';
   var csrf = '';
   var accountsLoaded = false;
 
@@ -24,7 +28,12 @@
   function lastMonth() { var d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return ym(d); }
   function thisMonth() { return ym(new Date()); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
-  function goToLogin() { window.location.href = '/'; }   // não logado → tela de login do sistema
+  // Não logado → tela de login do sistema, pedindo para VOLTAR pra esta página
+  // da V3 (?next=) depois de autenticar, em vez de cair no Banco de Imagens.
+  function goToLogin() {
+    var next = location.pathname + location.search + location.hash;
+    window.location.href = '/?next=' + encodeURIComponent(next);
+  }
   function downloadJson(obj, name) {
     var blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
     var a = document.createElement('a');
@@ -76,6 +85,42 @@
     });
   }
 
+  /* Guarda o último request/resposta para o "baixar diagnóstico" — assim, mesmo
+     quando nada na tela carrega, dá pra exportar o que aconteceu pro suporte. */
+  var lastDiag = null;
+
+  /* Monta uma linha de erro legível com tudo que ajuda a depurar: a mensagem em
+     PT + código, tipo, origem (arquivo:linha) e status HTTP quando houver. */
+  function errLine(d) {
+    if (!d) return 'erro desconhecido';
+    var t = d.error || 'erro não informado';
+    var extra = [];
+    if (d.code) extra.push(d.code);
+    if (d.error_tipo) extra.push(d.error_tipo);
+    if (d.error_origem) extra.push('em ' + d.error_origem);
+    if (d.step) extra.push('etapa: ' + d.step);
+    if (typeof d.ms === 'number') extra.push(d.ms + 'ms');
+    if (typeof d._http === 'number' && d._http) extra.push('HTTP ' + d._http);
+    if (extra.length) t += ' <span style="opacity:.7">[' + esc(extra.join(' · ')) + ']</span>';
+    return t;
+  }
+
+  /* Loga o erro completo no console (nome, tipo, código, HTTP, corpo cru) para
+     dar um "breakpoint" de diagnóstico em qualquer falha. */
+  function logDiag(label, d) {
+    try {
+      console.groupCollapsed('%c[V3] ' + label, 'color:#ff6b6b;font-weight:700');
+      console.error('mensagem :', d && d.error);
+      console.error('code     :', d && d.code);
+      console.error('tipo     :', d && d.error_tipo);
+      console.error('origem   :', d && d.error_origem);
+      console.error('HTTP     :', d && d._http);
+      if (d && d.error_detalhe) console.error('detalhe  :', d.error_detalhe);
+      if (d && d._raw) console.error('corpo cru:', d._raw);
+      console.groupEnd();
+    } catch (e) {}
+  }
+
   async function callApi(opts) {
     opts = opts || {};
     var init = { method: opts.method || 'GET', credentials: 'same-origin', headers: {} };
@@ -84,10 +129,41 @@
       init.headers['X-CSRF-Token'] = csrf;
       init.body = JSON.stringify(opts.body);
     }
-    var res = await fetch(API + (opts.query || ''), init);
-    var data;
-    try { data = await res.json(); } catch (e) { data = { ok: false, error: 'Resposta inválida do servidor.', code: 'BAD_JSON' }; }
+    var url = API + (opts.query || '');
+    var res, raw = '', data;
+
+    // Falha de transporte (offline, DNS, conexão recusada): nunca houve resposta.
+    try {
+      res = await fetch(url, init);
+    } catch (netErr) {
+      data = {
+        ok: false, code: 'NETWORK', _http: 0,
+        error: 'Falha de conexão com o servidor (a requisição não chegou a responder).',
+        error_tipo: (netErr && netErr.name) || 'NetworkError',
+        error_detalhe: (netErr && netErr.message) || String(netErr),
+      };
+      lastDiag = { quando: new Date().toISOString(), metodo: init.method, url: url, body: opts.body || null, http: 0, raw: '', parsed: data };
+      logDiag('callApi NETWORK', data);
+      return data;
+    }
+
+    try { raw = await res.text(); } catch (e) { raw = ''; }
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      // O servidor respondeu, mas não com JSON (502/500 do gateway, crash do PHP,
+      // página de erro HTML). Mostra o status e um trecho do corpo pra diagnosticar.
+      data = {
+        ok: false, code: 'BAD_JSON',
+        error: 'Resposta inválida do servidor (HTTP ' + res.status + (res.statusText ? ' ' + res.statusText : '') + ').',
+        error_tipo: 'NonJSON',
+        error_detalhe: (raw || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400),
+      };
+    }
     data._http = res.status;
+    data._raw = (raw || '').slice(0, 2000);
+    lastDiag = { quando: new Date().toISOString(), metodo: init.method, url: url, body: opts.body || null, http: res.status, raw: (raw || '').slice(0, 4000), parsed: data };
+    if (!data.ok) logDiag('callApi ' + (data.code || 'ERRO'), data);
     return data;
   }
 
@@ -118,6 +194,9 @@
       + '#v3-screen .v3-msg{min-height:20px;margin-top:16px;font-size:13.5px;line-height:1.5;color:#9fc1c9}'
       + '#v3-screen .v3-msg.err{color:#ff9a9a}#v3-screen .v3-msg.ok{color:#7fe3c0}'
       + '#v3-screen .v3-dbg{display:block;text-align:center;margin-top:14px;font-size:12px;color:#6f8a93;text-decoration:underline;cursor:pointer}'
+      + '#v3-screen .v3-build{text-align:center;margin-top:8px;font-size:11px;line-height:1.4;color:#5a737b}'
+      + '#v3-screen .v3-build b{color:#7f9aa3;font-weight:600}'
+      + '#v3-screen .v3-build .warn{color:#ffb454;font-weight:600}'
       + '#v3-reopen{position:fixed;left:14px;bottom:14px;z-index:8000;background:#0e2330;color:#32cdcd;border:1px solid rgba(50,205,205,.4);'
       + 'border-radius:999px;padding:9px 16px;font:600 13px/1 "Open Sans",sans-serif;cursor:pointer;display:none}'
       + '#v3-screen .v3-spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.25);border-top-color:#32cdcd;'
@@ -153,7 +232,8 @@
       + '    <button class="v3-btn" id="v3-go" disabled>Gerar relatório</button>'
       + '  </div>'
       + '  <div class="v3-msg" id="v3-msg"></div>'
-      + '  <a href="#" id="v3-dbg" class="v3-dbg">baixar dados (debug)</a>'
+      + '  <a href="#" id="v3-dbg" class="v3-dbg">baixar diagnóstico (debug)</a>'
+      + '  <div id="v3-build" class="v3-build"></div>'
       + '  <div id="v3-login" style="display:none">'
       + '    <button class="v3-btn" id="v3-login-open">Fazer login</button>'
       + '    <button class="v3-btn alt" id="v3-login-retry">Já entrei — tentar de novo</button>'
@@ -173,8 +253,9 @@
     document.getElementById('v3-until').addEventListener('change', clearPreset);
     document.getElementById('v3-go').addEventListener('click', generate);
     document.getElementById('v3-dbg').addEventListener('click', function (e) { e.preventDefault(); downloadDebug(); });
-    document.getElementById('v3-login-open').addEventListener('click', function () { window.open('/', '_blank'); });
+    document.getElementById('v3-login-open').addEventListener('click', goToLogin);
     document.getElementById('v3-login-retry').addEventListener('click', loadAccounts);
+    setBuildInfo();   // mostra de cara o build do frontend (servidor entra ao listar)
   }
 
   function showOverlay() { document.getElementById('v3-screen').style.display = 'flex'; document.getElementById('v3-reopen').style.display = 'none'; }
@@ -190,6 +271,25 @@
     document.getElementById('v3-form').style.display = on ? 'none' : 'block';
   }
 
+  /* Mostra o build do frontend (esta tela) e, quando o backend responde, o build
+     do servidor — avisando se divergirem. É a confirmação visual de que o deploy
+     (JS + PHP) subiu. backendBuild === undefined → ainda não consultamos o
+     servidor; === null/'' → respondeu mas sem build (PHP antigo, sem o carimbo). */
+  function setBuildInfo(backendBuild) {
+    var el = document.getElementById('v3-build');
+    if (!el) return;
+    var html = 'build · front <b>' + esc(V3_BUILD) + '</b>';
+    if (typeof backendBuild !== 'undefined') {
+      if (!backendBuild) {
+        html += ' · servidor <span class="warn">sem versão (PHP antigo — suba o v3-meta-insights.php)</span>';
+      } else {
+        html += ' · servidor <b>' + esc(backendBuild) + '</b>';
+        if (backendBuild !== V3_BUILD) html += ' <span class="warn">(versões diferentes — limpe o cache/suba os 2 arquivos)</span>';
+      }
+    }
+    el.innerHTML = html;
+  }
+
   /* ── fluxo ────────────────────────────────────────────────────────────── */
   async function loadAccounts() {
     showLogin(false);
@@ -200,12 +300,16 @@
         goToLogin();   // não está logado → vai direto pra tela de login do sistema
         return;
       }
+      // Tira o "Carregando…" do seletor para não dar a impressão de travado.
+      var selErr = document.getElementById('v3-acc');
+      if (selErr) selErr.innerHTML = '<option value="">(erro ao carregar)</option>';
       if (data.code === 'NOT_CONFIGURED') { msg('A API da Meta ainda não foi configurada no servidor. Veja <b>relatorio/DEPLOY-V3.md</b>.', 'err'); return; }
-      msg(data.error || 'Falha ao carregar contas.', 'err');
+      msg('Falha ao carregar contas: ' + errLine(data) + '<br><span style="opacity:.8">Use <b>baixar diagnóstico (debug)</b> abaixo e mande pro suporte.</span>', 'err');
       return;
     }
     csrf = data.csrf || '';
     accountsLoaded = true;
+    setBuildInfo(data.build || null);   // confirma a versão do PHP que respondeu
     var sel = document.getElementById('v3-acc');
     var accts = data.accounts || [];
     if (!accts.length) {
@@ -241,7 +345,7 @@
       var data = await callApi({ method: 'POST', body: { account: account, since: since, until: until, t: t } });
       if (!data.ok) {
         if (data.code === 'AUTH' || data.code === 'SESSION_EXPIRED' || data._http === 401) { goToLogin(); return; }
-        msg(data.error || 'Não foi possível gerar o relatório.', 'err');
+        msg('Não foi possível gerar o relatório: ' + errLine(data) + '<br><span style="opacity:.8">Use <b>baixar diagnóstico (debug)</b> e mande pro suporte.</span>', 'err');
         return;
       }
       if (typeof XLSX === 'undefined' || !window.__render) { msg('O motor do relatório não carregou. Recarregue a página.', 'err'); return; }
@@ -267,20 +371,34 @@
      amostras das linhas cruas) para mandar pro Claude analisar discrepâncias. */
   async function downloadDebug() {
     var sel = document.getElementById('v3-acc');
-    var account = sel.value;
-    var opt = sel.options[sel.selectedIndex];
+    var account = sel ? sel.value : '';
+    var opt = sel && sel.options[sel.selectedIndex];
     var t = opt ? Number(opt.getAttribute('data-t') || 0) : 0;
     var since = document.getElementById('v3-since').value;
     var until = document.getElementById('v3-until').value;
-    if (!account || !since || !until) { msg('Escolha o cliente e o período primeiro.', 'err'); return; }
+
+    // Sem cliente/período (ex.: as contas nem chegaram a carregar) → exporta o
+    // último request/resposta capturado, que é justamente o que mostra o erro.
+    if (!account || !since || !until) {
+      if (lastDiag) {
+        downloadJson({ tipo: 'diagnostico-v3', gerado_em: new Date().toISOString(), navegador: navigator.userAgent, ultimo_request: lastDiag }, 'v3-diagnostico-' + Date.now() + '.json');
+        msg('✓ Diagnóstico baixado (sem cliente/período selecionado) — manda pro suporte.', 'ok');
+      } else {
+        msg('Ainda não há nada para diagnosticar. Tente carregar as contas ou gerar um relatório primeiro.', 'err');
+      }
+      return;
+    }
+
     msg('<span class="v3-spin"></span>Baixando dados de debug…');
     var data = await callApi({ method: 'POST', body: { account: account, since: since, until: until, t: t, debug: 2 } });
     if (!data.ok) {
-      if (data._http === 401) { goToLogin(); return; }
-      msg(data.error || 'Falha ao baixar o debug.', 'err');
+      if (data.code === 'AUTH' || data.code === 'SESSION_EXPIRED' || data._http === 401) { goToLogin(); return; }
+      // Mesmo no erro, entrega o diagnóstico capturado para análise.
+      downloadJson({ tipo: 'diagnostico-v3', gerado_em: new Date().toISOString(), navegador: navigator.userAgent, erro: data, ultimo_request: lastDiag }, 'v3-erro-' + account + '-' + since + '_' + until + '.json');
+      msg('Falha ao baixar o debug: ' + errLine(data) + ' — o diagnóstico do erro foi baixado mesmo assim.', 'err');
       return;
     }
-    downloadJson(data, 'v3-debug-' + account + '-' + month + '.json');
+    downloadJson(data, 'v3-debug-' + account + '-' + since + '_' + until + '.json');
     msg('✓ Arquivo de debug baixado — manda pro Claude analisar.', 'ok');
   }
 
@@ -299,6 +417,7 @@
 
   /* ── inicialização ────────────────────────────────────────────────────── */
   function init() {
+    try { console.log('%c[V3] frontend build ' + V3_BUILD, 'color:#32cdcd;font-weight:700'); } catch (e) {}
     var ss = document.getElementById('start-screen'); // esconde o upload da V2
     if (ss) { ss.classList.add('hidden'); ss.style.display = 'none'; }
     buildOverlay();

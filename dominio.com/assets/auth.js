@@ -6,6 +6,24 @@ let pendingActivation = null;
 let sessionExpires = 0, sessionWarnAt = 0, sessionWarnShown = false;
 let userRole = 'user';
 
+/* Após autenticar, volta para a página interna indicada em ?next= (ex.: a V3 do
+   relatório manda o usuário pra cá e quer voltar). Só aceita caminhos do próprio
+   site — começando com uma única "/" e sem "://" — para nunca virar um
+   open-redirect para um site externo. */
+function safeNextTarget(){
+  try{
+    const n = new URLSearchParams(location.search).get('next');
+    if(!n) return null;
+    if(n[0] !== '/' || n[1] === '/' || n.includes('://')) return null;
+    return n;
+  }catch(e){ return null; }
+}
+function redirectAfterAuthIfNeeded(){
+  const n = safeNextTarget();
+  if(n){ location.replace(n); return true; }
+  return false;
+}
+
 async function doLogin(){
   const u = document.getElementById('lu').value.trim();
   const p = document.getElementById('lp').value;
@@ -30,6 +48,7 @@ async function doLogin(){
   try{
     const r = await api('login', payload, 'POST');
     if(r.ok){
+      if(redirectAfterAuthIfNeeded()) return;   // veio de outra página (ex.: V3) → volta pra lá
       if(r.last_base) await selectBase(r.last_base, r);
       else showBaseSelector(r);
     } else {
@@ -258,6 +277,7 @@ async function checkSessionOnLoad(){
     if(r.csrf) CSRF_TOKEN = r.csrf;
     if(r.ok && r.authenticated){
       if(loader) loader.style.display = 'none';
+      if(redirectAfterAuthIfNeeded()) return;   // já logado e veio com ?next= → vai direto pro destino
       if(r.base){
         try {
           const rb = await api('get_bases');

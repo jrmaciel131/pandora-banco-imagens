@@ -544,8 +544,21 @@ if ($action === 'login') {
         ]);
     } else {
         try { DB::recordFail($blockKey); } catch (Throwable $e) {}
-        http_response_code(401);
-        echo json_encode(['ok'=>false,'error'=>'Usuário ou senha incorretos.']);
+        /*
+         * Falha de autenticação é um resultado ESPERADO do login, então a
+         * resposta é HTTP 200 com ok:false — assim o front exibe a mensagem
+         * específica. (Um 401 aqui faria o cliente api() lançar exceção e o
+         * doLogin cair no catch genérico de "erro de conexão com o servidor".)
+         *
+         * Distingue usuário inexistente de senha errada para uma mensagem mais
+         * clara, a pedido do produto. O rate limit por (usuário+dispositivo)
+         * acima continua sendo a proteção contra enumeração/força bruta.
+         */
+        if ($uData) {
+            echo json_encode(['ok'=>false,'error'=>'Senha inválida.','code'=>'BAD_PASS']);
+        } else {
+            echo json_encode(['ok'=>false,'error'=>'Usuário e senha inválidos.','code'=>'BAD_USER']);
+        }
     }
     exit;
 }

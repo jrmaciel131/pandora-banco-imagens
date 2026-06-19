@@ -21,10 +21,79 @@
 
 header('Content-Type: application/json; charset=utf-8');
 
-/* Qualquer crash vira JSON (nunca uma página 500 muda), no mesmo espírito do handler.php. */
+/* Carimbo de versão do backend. BATA ESTE VALOR com o V3_BUILD do
+   js/meta-api-v3.js a cada release: a tela do V3 mostra os dois lado a lado e
+   avisa se divergirem — é assim que se confirma que o deploy realmente subiu. */
+define('V3_BUILD', 'v3.5 · 2026-06-18');
+
+/* ── Probe de NÍVEL 0 (?probe=1) ──────────────────────────────────────────
+   Responde IMEDIATAMENTE, antes de carregar config, sessão, token ou Meta —
+   zero dependências. É o primeiro "bloco" do teste em etapas:
+     • se ?probe=1 já dá 502 → o servidor não consegue nem executar este PHP
+       (PHP-FPM/handler/.htaccess, ou o arquivo subiu corrompido) — não tem a
+       ver com login, datas nem Meta;
+     • se responde JSON → o PHP roda este arquivo e a versão (build) confirma
+       que o deploy subiu. Aí o problema está num bloco posterior (ver ?ping=1). */
+if (isset($_GET['probe'])) {
+    echo json_encode(['ok' => true, 'probe' => true, 'build' => V3_BUILD, 'php' => PHP_VERSION, 'time' => date('c')], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+/* Breadcrumb de etapa + cronômetro: toda resposta de erro carrega em QUE bloco
+   quebrou (step) e em quantos ms — é o "request em blocos" pedido, embutido em
+   cada falha, para ver exatamente onde trava. */
+$GLOBALS['v3_step'] = 'boot';
+$GLOBALS['v3_t0']   = microtime(true);
+function v3_step($s) { $GLOBALS['v3_step'] = $s; }
+function v3_ms() { return (int) round((microtime(true) - ($GLOBALS['v3_t0'] ?? microtime(true))) * 1000); }
+
+/* Diagnóstico robusto: TODO erro precisa virar um JSON com mensagem, tipo e
+   origem (arquivo:linha) — nunca uma página 500/502 em branco que o navegador
+   só consegue ler como "resposta inválida". Para isso:
+     - display_errors OFF, para warnings/notices não corromperem o corpo JSON;
+     - ob_start(), para segurar a saída e poder descartá-la se ocorrer um fatal;
+     - set_exception_handler para exceções;
+     - register_shutdown_function para erros FATAIS (que o handler de exceção
+       não pega: parse, memória, tempo esgotado) — a causa típica de um 502. */
+error_reporting(E_ALL);
+ini_set('display_errors', '0');
+ob_start();
+
 set_exception_handler(function (Throwable $e) {
-    if (!headers_sent()) http_response_code(500);
-    echo json_encode(['ok' => false, 'error' => $e->getMessage(), 'code' => 'EXCEPTION'], JSON_UNESCAPED_UNICODE);
+    if (function_exists('ob_get_length') && ob_get_length()) { ob_clean(); }
+    // 200 (não 500) para o Cloudflare não trocar o corpo pela página de erro dele.
+    if (!headers_sent()) http_response_code(200);
+    echo json_encode([
+        'ok'           => false,
+        'error'        => $e->getMessage(),
+        'code'         => 'EXCEPTION',
+        'http_hint'    => 500,
+        'error_tipo'   => get_class($e),
+        'error_origem' => basename($e->getFile()) . ':' . $e->getLine(),
+        'step'         => $GLOBALS['v3_step'] ?? null,
+        'ms'           => function_exists('v3_ms') ? v3_ms() : null,
+    ], JSON_UNESCAPED_UNICODE);
+});
+
+register_shutdown_function(function () {
+    $e = error_get_last();
+    $fatal = $e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true);
+    if ($fatal) {
+        if (function_exists('ob_get_length') && ob_get_length()) { ob_clean(); }
+        // 200 (não 500) para o Cloudflare não trocar o corpo pela página de erro dele.
+        if (!headers_sent()) { http_response_code(200); header('Content-Type: application/json; charset=utf-8'); }
+        echo json_encode([
+            'ok'           => false,
+            'error'        => 'Falha interna no servidor: ' . $e['message'],
+            'code'         => 'FATAL',
+            'http_hint'    => 500,
+            'error_tipo'   => 'FatalError',
+            'error_origem' => basename($e['file']) . ':' . $e['line'],
+            'step'         => $GLOBALS['v3_step'] ?? null,
+            'ms'           => function_exists('v3_ms') ? v3_ms() : null,
+        ], JSON_UNESCAPED_UNICODE);
+    }
+    if (ob_get_level() > 0) { @ob_end_flush(); }   // entrega a saída normal
 });
 
 /* ── 1) Localiza e carrega a config privada ───────────────────────────────
@@ -38,11 +107,12 @@ for ($i = 0; $i < 6; $i++) {
     $dir = dirname($dir);
 }
 if (!$cfgPath) {
-    http_response_code(500);
-    echo json_encode(['ok' => false, 'error' => 'Configuração do servidor não encontrada.', 'code' => 'NO_CONFIG'], JSON_UNESCAPED_UNICODE);
+    http_response_code(200);   // 200 p/ o Cloudflare não mascarar o corpo (ver fail())
+    echo json_encode(['ok' => false, 'error' => 'Configuração do servidor não encontrada.', 'code' => 'NO_CONFIG', 'http_hint' => 500], JSON_UNESCAPED_UNICODE);
     exit;
 }
 require_once $cfgPath;
+v3_step('config_loaded');
 
 /* ── 2) Sessão idêntica ao handler.php → compartilha o login do sistema ──── */
 $sessionDir = PRIVATE_CONFIG_PATH . '/sessions';
@@ -60,14 +130,26 @@ session_set_cookie_params([
 ]);
 session_name('bi_session');
 session_start();
+v3_step('session');
 
 /* Garante um token CSRF na sessão (igual ao handler.php) para validar o POST. */
 if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(32));
 
-/** Responde um erro em JSON e encerra. */
-function fail($code, $msg, $http = 400) {
-    http_response_code($http);
-    echo json_encode(['ok' => false, 'error' => $msg, 'code' => $code], JSON_UNESCAPED_UNICODE);
+/** Responde um erro em JSON e encerra. $extra acrescenta campos de diagnóstico
+    (ex.: error_tipo, error_origem) que o frontend exibe junto da mensagem. */
+function fail($code, $msg, $http = 400, array $extra = []) {
+    // IMPORTANTE: o Cloudflare SUBSTITUI o corpo de respostas 5xx do origin pela
+    // própria página "Bad gateway", engolindo nosso JSON — foi por isso que erros
+    // reais (token inválido etc.) apareciam como um 502 sem explicação. Por isso
+    // erro de APLICAÇÃO nunca sai como 5xx: rebaixa para 200 (com ok:false +
+    // code), e o status pretendido vai em http_hint só para referência. O cliente
+    // sempre lê ok/code do CORPO, não do status HTTP.
+    $hint = $http;
+    if ($http >= 500) $http = 200;
+    if (!headers_sent()) http_response_code($http);
+    $base = ['ok' => false, 'error' => $msg, 'code' => $code, 'http_hint' => $hint,
+             'step' => $GLOBALS['v3_step'] ?? null, 'ms' => function_exists('v3_ms') ? v3_ms() : null];
+    echo json_encode(array_merge($base, $extra), JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -79,6 +161,7 @@ if (empty($_SESSION['user'])) {
 if (isset($_SESSION['login_time']) && (time() - $_SESSION['login_time']) > SESSION_LIFETIME) {
     fail('SESSION_EXPIRED', 'Sua sessão expirou. Faça login novamente.', 401);
 }
+v3_step('auth_ok');
 
 /* ── 4) Método + CSRF (mesma proteção do handler.php para POST) ──────────── */
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -114,9 +197,146 @@ if (defined('META_TOKENS') && is_array(META_TOKENS)) {
 if (!$tokens && defined('META_ACCESS_TOKEN') && META_ACCESS_TOKEN !== '') {
     $tokens[] = ['label' => 'Meta', 'token' => META_ACCESS_TOKEN];
 }
+
+/* ── Diagnóstico rápido (?ping=1) ─────────────────────────────────────────
+   Confirma que o endpoint EXECUTA e responde JSON SEM tocar na Meta. Se o
+   ping responde mas a listagem normal dá 502, a falha está na chamada à Graph
+   API (timeout do gateway/PHP-FPM esperando a Meta), não no PHP em si. Exige
+   login (já validado acima). Abra direto no navegador, logado:
+       /relatorio/api/v3-meta-insights.php?ping=1                               */
+if (isset($_GET['ping'])) {
+    echo json_encode([
+        'ok'          => true,
+        'ping'        => true,
+        'build'       => V3_BUILD,
+        'file_mtime'  => date('c', (int) @filemtime(__FILE__)),  // data real do .php no servidor
+        'php'         => PHP_VERSION,
+        'curl'        => function_exists('curl_init'),
+        'api_version' => defined('META_API_VERSION') ? META_API_VERSION : null,
+        'tokens'      => count($tokens),
+        'curated'     => defined('META_ACCOUNTS') && is_array(META_ACCOUNTS) && count(META_ACCOUNTS) > 0,
+        'user'        => $_SESSION['user'],
+        'time'        => date('c'),
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+/* ── Self-test de rede (?selftest=1) ──────────────────────────────────────
+   É o BLOCO 2 (chamada à Meta) instrumentado: faz a MESMA requisição da
+   listagem (me/adaccounts), mas com timeout curto e trace completo (DNS,
+   connect, TLS, HTTP, errno) e SEMPRE devolve JSON — nunca derruba o worker.
+   Se a listagem normal dá 502 mas isto responde, o JSON mostra exatamente
+   onde a rede falha. Se isto também der 502, o cURL está crashando o PHP
+   (ver log do PHP-FPM / dmesg por "segfault"). */
+if (isset($_GET['selftest'])) {
+    v3_step('selftest');
+    /*
+     * Validação POR CAMADA, em modos isolados (rode um por vez, cada um num
+     * request separado). Um crash do worker (segfault) é INCAPTURÁVEL por
+     * try/catch — então a forma de "validar se é o cURL e que tipo" é ver QUAL
+     * modo devolve JSON e qual derruba (502). Cada operação está num try/catch
+     * para reportar o que FOR capturável (exceção/erro de tipo) com o tipo.
+     *
+     *   ?selftest=dns     → resolve DNS em PHP puro (sem cURL)
+     *   ?selftest=socket  → conecta TCP+TLS em PHP puro (sem cURL) → isola "é o cURL?"
+     *   ?selftest=connect → cURL só handshake (CONNECT_ONLY), blindado
+     *   ?selftest=h2      → cURL request completo com HTTP/2 e IPv6 no PADRÃO (o suspeito)
+     *   ?selftest=full|1  → cURL request completo BLINDADO (1.1 + IPv4 + NOSIGNAL)
+     *
+     * Leitura: se 'socket' funciona mas 'h2' derruba e 'full' funciona → era o
+     * cURL com HTTP/2/IPv6 (a blindagem resolve). Se 'socket' já derruba/falha →
+     * rede/TLS/firewall do host (não é o cURL). Se TUDO que usa cURL derruba até
+     * 'connect' → cURL crashando: ver log do PHP-FPM/dmesg por "segfault".
+     */
+    $mode = strtolower((string) $_GET['selftest']);
+    if ($mode === '1' || $mode === '') $mode = 'full';
+    $host = 'graph.facebook.com';
+    $ver  = defined('META_API_VERSION') ? META_API_VERSION : 'v21.0';
+    $tok  = $tokens[0]['token'] ?? '';
+    $out  = ['ok' => false, 'selftest' => true, 'mode' => $mode, 'build' => V3_BUILD, 'step' => 'selftest:' . $mode];
+
+    if (function_exists('curl_version')) {
+        $cv = curl_version();
+        $out['curl_version'] = $cv['version'] ?? null;
+        $out['ssl_version']  = $cv['ssl_version'] ?? null;
+        $out['http2']        = defined('CURL_VERSION_HTTP2') ? (bool) (($cv['features'] ?? 0) & CURL_VERSION_HTTP2) : null;
+    } else {
+        $out['curl_version'] = null;
+    }
+
+    try {
+        if ($mode === 'dns') {
+            $t0  = microtime(true);
+            $ips = @gethostbynamel($host);
+            $out['ok']  = is_array($ips) && count($ips) > 0;
+            $out['ips'] = $ips ?: [];
+            $out['ms']  = (int) round((microtime(true) - $t0) * 1000);
+        } elseif ($mode === 'socket') {
+            // TCP+TLS via PHP puro (SEM cURL): se ISTO funciona e o cURL não, o
+            // problema é o cURL; se ISTO falha, é rede/TLS/firewall do servidor.
+            $t0 = microtime(true); $en = 0; $es = '';
+            $ctx = stream_context_create(['ssl' => ['verify_peer' => true, 'verify_peer_name' => true]]);
+            $fp  = @stream_socket_client('ssl://' . $host . ':443', $en, $es, 6, STREAM_CLIENT_CONNECT, $ctx);
+            $out['ok']     = (bool) $fp;
+            $out['errno']  = $en;
+            $out['errstr'] = $es;
+            $out['ms']     = (int) round((microtime(true) - $t0) * 1000);
+            if ($fp) fclose($fp);
+        } else {
+            if (!function_exists('curl_init')) {
+                $out['error'] = 'cURL ausente no PHP'; echo json_encode($out, JSON_UNESCAPED_UNICODE); exit;
+            }
+            $vlog = fopen('php://temp', 'w+');
+            $u    = 'https://' . $host . '/' . $ver . '/me/adaccounts?' . http_build_query(['fields' => 'account_id,name', 'limit' => 5]);
+            $opts = [
+                CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 8, CURLOPT_CONNECTTIMEOUT => 6,
+                CURLOPT_NOSIGNAL => true, CURLOPT_VERBOSE => true, CURLOPT_STDERR => $vlog,
+                CURLOPT_HTTPHEADER => ['Accept: application/json', 'Authorization: Bearer ' . $tok],
+            ];
+            if ($mode === 'connect') {
+                $opts[CURLOPT_CONNECT_ONLY] = true;                      // só TCP+TLS, sem request
+                $opts[CURLOPT_HTTP_VERSION] = CURL_HTTP_VERSION_1_1;
+                $opts[CURLOPT_IPRESOLVE]    = CURL_IPRESOLVE_V4;
+            } elseif ($mode === 'h2') {
+                // de propósito: HTTP/2 e IPv6 no padrão — para flagrar se é isso que derruba
+            } else { // full
+                $opts[CURLOPT_HTTP_VERSION] = CURL_HTTP_VERSION_1_1;
+                $opts[CURLOPT_IPRESOLVE]    = CURL_IPRESOLVE_V4;
+            }
+            $ch  = curl_init($u); curl_setopt_array($ch, $opts);
+            $raw = curl_exec($ch); $errno = curl_errno($ch); $cerr = curl_error($ch); $info = curl_getinfo($ch);
+            curl_close($ch);
+            rewind($vlog); $vt = stream_get_contents($vlog); fclose($vlog);
+            $vt = preg_replace('/(Bearer|access_token=)\s*\S+/i', '$1 ***', (string) $vt);  // nunca vaza o token
+            $out['ok']         = $errno === 0;
+            $out['errno']      = $errno;
+            $out['curl_error'] = $cerr;
+            $out['http_code']  = $info['http_code'] ?? null;
+            $out['primary_ip'] = $info['primary_ip'] ?? null;
+            $out['timing_s']   = [
+                'dns'     => $info['namelookup_time'] ?? null,
+                'connect' => $info['connect_time'] ?? null,
+                'tls'     => $info['appconnect_time'] ?? null,
+                'total'   => $info['total_time'] ?? null,
+            ];
+            if ($mode !== 'connect') $out['response_head'] = mb_substr((string) $raw, 0, 300);
+            $out['verbose'] = array_slice(array_filter(explode("\n", trim((string) $vt))), -40);
+        }
+    } catch (Throwable $e) {
+        // Captura o que FOR capturável (exceção/erro de tipo) com o tipo exato.
+        $out['ok'] = false;
+        $out['error']        = $e->getMessage();
+        $out['error_tipo']   = get_class($e);
+        $out['error_origem'] = basename($e->getFile()) . ':' . $e->getLine();
+    }
+    echo json_encode($out, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 if (!$tokens) {
     fail('NOT_CONFIGURED', 'A API da Meta ainda não foi configurada no servidor (nenhum token). Veja relatorio/DEPLOY-V3.md.', 503);
 }
+v3_step('tokens');
 
 $accounts = defined('META_ACCOUNTS') ? META_ACCOUNTS : [];
 $normAccts = array_values(array_filter(array_map(function ($a) {
@@ -140,6 +360,7 @@ if ($accountId === '') {
         }
     } else {
         foreach ($tokens as $ti => $tk) {
+            v3_step('meta:me/adaccounts t=' . $ti);   // se travar, o erro diz qual BM
             foreach (metaFetchAccounts($tk['token']) as $acc) {
                 $acc['t'] = $ti; $acc['bm'] = $tk['label'];
                 $list[] = $acc;
@@ -147,7 +368,7 @@ if ($accountId === '') {
         }
         usort($list, function ($a, $b) { return strcasecmp($a['label'], $b['label']); });
     }
-    echo json_encode(['ok' => true, 'accounts' => $list, 'auto' => !$curated, 'multi' => count($tokens) > 1, 'csrf' => $_SESSION['csrf']], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['ok' => true, 'build' => V3_BUILD, 'ms' => v3_ms(), 'accounts' => $list, 'auto' => !$curated, 'multi' => count($tokens) > 1, 'csrf' => $_SESSION['csrf']], JSON_UNESCAPED_UNICODE);
     exit;
 }
 // Período: aceita intervalo since/until (AAAA-MM-DD) OU um mês (AAAA-MM, compat).
@@ -181,7 +402,7 @@ if ($curated) {
    quando META_ACCOUNTS está vazio). Adicionar um cliente passa a ser só fazer a
    parceria/atribuição na Meta — sem editar arquivo no servidor. */
 function metaFetchAccounts($token) {
-    $rows = metaGet('me/adaccounts', ['fields' => 'account_id,name', 'limit' => 200], $token);
+    $rows = metaGet('me/adaccounts', ['fields' => 'account_id,name', 'limit' => 200], $token, 12);
     $out = [];
     foreach ($rows as $r) {
         $id = preg_replace('/[^0-9]/', '', (string)($r['account_id'] ?? ''));
@@ -194,33 +415,58 @@ function metaFetchAccounts($token) {
 
 /* ── 8) Chamada genérica à Graph API (cURL + paginação) ───────────────────
    O token vai no header Authorization (não na URL, para não vazar em logs). */
-function metaGet($path, array $params, $token) {
+function metaGet($path, array $params, $token, $timeout = 45) {
+    if (!function_exists('curl_init')) {
+        fail('NO_CURL', 'A extensão cURL do PHP não está habilitada no servidor — sem ela não dá para falar com a Meta.', 500,
+            ['error_tipo' => 'MissingExtension', 'error_origem' => 'metaGet(' . $path . ')']);
+    }
     $base = 'https://graph.facebook.com/' . META_API_VERSION . '/' . ltrim($path, '/');
     $url  = $base . '?' . http_build_query($params);
     $out  = [];
     $guard = 0;
     while ($url && $guard++ < 60) {
+        v3_step('curl:' . $path);   // se o worker morrer aqui, o step aponta a chamada
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 90,
-            CURLOPT_CONNECTTIMEOUT => 20,
+            // Timeout abaixo do timeout típico do gateway (proxy_read_timeout
+            // ~60s); assim, se a Meta travar, o PHP devolve um erro JSON em vez
+            // de a requisição morrer como um 502 em branco do servidor. A
+            // listagem de contas usa um limite mais curto (deveria ser rápida).
+            CURLOPT_TIMEOUT        => $timeout,
+            CURLOPT_CONNECTTIMEOUT => 15,
+            // Blindagem contra crash do worker PHP-FPM no cURL/TLS (causa de 502
+            // sem retorno): NOSIGNAL evita o uso de SIGALRM (crash em ambiente
+            // com threads); HTTP/1.1 evita bugs de multiplexação do HTTP/2; IPv4
+            // evita travar/crashar quando o IPv6 da máquina não tem rota.
+            CURLOPT_NOSIGNAL       => true,
+            CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
+            CURLOPT_IPRESOLVE      => CURL_IPRESOLVE_V4,
             CURLOPT_HTTPHEADER     => ['Accept: application/json', 'Authorization: Bearer ' . $token],
         ]);
         $raw   = curl_exec($ch);
         $errno = curl_errno($ch);
         $cerr  = curl_error($ch);
+        $http  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
-        if ($errno) fail('NETWORK', 'Não consegui falar com a Meta (rede): ' . $cerr, 502);
+        if ($errno) {
+            fail('NETWORK', 'Não consegui falar com a Meta (rede): ' . $cerr, 502,
+                ['error_tipo' => 'cURL#' . $errno, 'error_origem' => 'metaGet(' . $path . ')']);
+        }
 
         $j = json_decode($raw, true);
-        if (!is_array($j)) fail('BAD_RESPONSE', 'Resposta inesperada da Meta.', 502);
+        if (!is_array($j)) {
+            fail('BAD_RESPONSE', 'Resposta inesperada da Meta (HTTP ' . $http . ').', 502,
+                ['error_tipo' => 'NonJSON', 'error_origem' => 'metaGet(' . $path . ')',
+                 'error_detalhe' => mb_substr((string) $raw, 0, 300)]);
+        }
 
         if (isset($j['error'])) {
             $m    = $j['error']['message'] ?? 'erro desconhecido';
             $code = (int)($j['error']['code'] ?? 0);
             if (in_array($code, [190, 102, 463, 467], true)) {
-                fail('TOKEN', 'O token da Meta está inválido ou expirou. Gere um novo (passo a passo no DEPLOY-V3.md).', 502);
+                fail('TOKEN', 'O token/App da Meta está inválido ou expirou (a Meta respondeu: "' . $m . '"). Gere um novo App + Usuário do Sistema + token — passo a passo no DEPLOY-V3.md.', 502,
+                    ['error_tipo' => 'OAuthException#' . $code, 'error_origem' => 'metaGet(' . $path . ')']);
             }
             if (in_array($code, [10, 200, 272, 803], true)) {
                 fail('PERMISSION', 'Sem permissão para ler esta conta. Confira se a parceria/atribuição da conta ao Usuário do Sistema está ativa.', 502);
@@ -228,7 +474,8 @@ function metaGet($path, array $params, $token) {
             if ($code === 17 || $code === 4 || $code === 80000) {
                 fail('RATE_LIMIT', 'A Meta está limitando as consultas no momento. Espere alguns minutos e tente de novo.', 429);
             }
-            fail('META_API', 'Meta: ' . $m, 502);
+            fail('META_API', 'Meta: ' . $m, 502,
+                ['error_tipo' => 'MetaError#' . $code, 'error_origem' => 'metaGet(' . $path . ')']);
         }
 
         if (isset($j['data']) && is_array($j['data'])) $out = array_merge($out, $j['data']);
@@ -241,9 +488,11 @@ function metaGet($path, array $params, $token) {
    (não interrompe o relatório). Usada para os extras opcionais (foto, thumbs). */
 function metaGetSoft($path, array $params, $token) {
     $url = 'https://graph.facebook.com/' . META_API_VERSION . '/' . ltrim($path, '/') . '?' . http_build_query($params);
+    if (!function_exists('curl_init')) return null;
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30, CURLOPT_CONNECTTIMEOUT => 15,
+        CURLOPT_NOSIGNAL => true, CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1, CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
         CURLOPT_HTTPHEADER => ['Accept: application/json', 'Authorization: Bearer ' . $token],
     ]);
     $raw = curl_exec($ch); $errno = curl_errno($ch); curl_close($ch);
