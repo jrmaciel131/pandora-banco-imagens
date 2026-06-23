@@ -54,9 +54,37 @@
   // Versão do código (mostrada no menu). Bump a cada deploy — se o número no
   // menu não mudar depois de subir os arquivos, o navegador/servidor está
   // servindo JS de cache (atualize com Ctrl+F5).
-  const APP_VERSION = '2026.06.08-4';
+  const APP_VERSION = '2026.06.23-1';
 
-  let DISCOVERED = null, CONFIG = null, editing = true, PLATFORM_DATA = null;
+  let DISCOVERED = null, CONFIG = null, editing = true, PLATFORM_DATA = null, REACH_DATA = null;
+
+  // CSS da página de evolução (injetado uma vez; vale p/ V2 e V3 — ambas .v2deck).
+  (function injectEvoStyle() {
+    if (typeof document === 'undefined' || document.getElementById('v2-evo-style')) return;
+    const s = document.createElement('style'); s.id = 'v2-evo-style';
+    s.textContent =
+      '.v2deck .evo-body{position:absolute;top:430px;left:88px;right:88px;bottom:74px;display:flex;flex-direction:column;gap:14px}' +
+      '.v2deck .evo-hero{flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:13px 20px;background:linear-gradient(90deg,#eafaf3,#f4fbf8);border:1px solid #bce8d4;border-left:5px solid #1fae74;border-radius:10px;font:600 16px "Open Sans",sans-serif;color:#16633f}' +
+      '.v2deck .evo-hero-ic{font-size:20px;line-height:1}' +
+      '.v2deck .evo-hero b{font-weight:800;color:#0f4f31}' +
+      '.v2deck .evo-grid{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:minmax(300px,360px);align-content:start;gap:22px 30px}' +
+      '.v2deck .evo-card{position:relative;display:flex;flex-direction:column;min-height:0;background:#fff;border:1px solid var(--vrule);border-top:3px solid var(--accent,#1fae74);border-radius:10px;padding:13px 18px 12px;box-shadow:0 1px 4px rgba(0,0,0,.06)}' +
+      '.v2deck .evo-card-h{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:2px}' +
+      '.v2deck .evo-card-id{display:flex;flex-direction:column;gap:1px;min-width:0}' +
+      '.v2deck .evo-card-t{font:700 14px "Open Sans",sans-serif;letter-spacing:.02em;text-transform:uppercase;color:var(--vink-2,#666)}' +
+      '.v2deck .evo-card-total{font:800 28px "Open Sans",sans-serif;line-height:1.04;color:var(--vink,#1f1f1f)}' +
+      '.v2deck .evo-pill{flex:0 0 auto;font:700 13px "Open Sans",sans-serif;padding:4px 11px;border-radius:999px;white-space:nowrap}' +
+      '.v2deck .evo-pill.up{background:#e7f7ef;color:#1a8a57}' +
+      '.v2deck .evo-pill.down{background:#fdeaea;color:#c0392b}' +
+      '.v2deck .evo-pill.flat{background:#eee;color:#777}' +
+      '.v2deck .evo-card .chart-host.evo-host{flex:1;min-height:0;height:auto;border-bottom:0;margin-top:2px}' +
+      '.v2deck .evo-insight{flex:0 0 auto;margin-top:5px;font:600 12.5px "Open Sans",sans-serif;line-height:1.35;color:var(--vink-3,#777)}' +
+      '.v2deck .evo-del{position:absolute;top:8px;right:10px;width:23px;height:23px;border:0;border-radius:50%;background:rgba(0,0,0,.06);color:#444;font-size:16px;line-height:1;cursor:pointer;padding:0;z-index:2}' +
+      '.v2deck .evo-del:hover{background:#e0463a;color:#fff}' +
+      '.v2deck .evo-note{flex:0 0 auto;padding:9px 14px;background:#fff7e6;border:1px solid #ffd591;border-radius:8px;font:600 13.5px "Open Sans",sans-serif;color:#8a5a00}' +
+      '@media print{.v2deck .evo-del{display:none!important}}';
+    (document.head || document.documentElement).appendChild(s);
+  })();
 
   // ── ícones reutilizáveis ──────────────────────────────────────────
   // Logo do rodapé (canto inferior direito). Para TROCAR de logo: suba o novo PNG
@@ -124,11 +152,20 @@
     PLATFORM_DATA.campaigns.forEach((c) => c.adsets.forEach((a) => { if (names.indexOf(a.name) >= 0) (a.platform || []).forEach((o) => { const g = m.get(o.key) || { spend: 0, results: 0, reach: 0 }; g.spend += o.spend; g.results += o.results; g.reach += o.reach; m.set(o.key, g); }); }));
     return [...m.entries()].map(([key, v]) => ({ key, spend: v.spend, results: v.results, reach: v.reach })).sort((x, y) => y.spend - x.spend);
   }
-  function platformForAd(adName) {
+  // Dados de plataforma de um anúncio, ESCOPADOS aos conjuntos da página. O mesmo
+  // criativo (mesmo nome) costuma rodar em vários conjuntos/campanhas — casar só
+  // pelo nome pegava o 1º (conjunto/campanha errado) e o gasto/resultado por
+  // plataforma não batia com a visão geral. Soma os conjuntos do escopo (se houver).
+  function platformForAd(adName, adsetNames) {
     if (!PLATFORM_DATA) return [];
-    let found = null;
-    PLATFORM_DATA.campaigns.some((c) => c.adsets.some((a) => { const ad = (a.ads || []).find((x) => x.name === adName); if (ad) { found = ad.platform; return true; } return false; }));
-    return found || [];
+    const scope = (adsetNames && adsetNames.length) ? adsetNames : null;
+    const m = new Map();
+    PLATFORM_DATA.campaigns.forEach((c) => c.adsets.forEach((a) => {
+      if (scope && scope.indexOf(a.name) < 0) return;
+      const ad = (a.ads || []).find((x) => x.name === adName);
+      if (ad) (ad.platform || []).forEach((o) => { const g = m.get(o.key) || { spend: 0, results: 0, reach: 0 }; g.spend += o.spend; g.results += o.results; g.reach += o.reach; m.set(o.key, g); });
+    }));
+    return [...m.entries()].map(([key, v]) => ({ key, spend: v.spend, results: v.results, reach: v.reach })).sort((x, y) => y.spend - x.spend);
   }
   function platformOverall() {
     if (!PLATFORM_DATA) return [];
@@ -136,6 +173,27 @@
     PLATFORM_DATA.campaigns.forEach((c) => (c.platform || []).forEach((o) => { const g = m.get(o.key) || { spend: 0, results: 0, reach: 0 }; g.spend += o.spend; g.results += o.results; g.reach += o.reach; m.set(o.key, g); }));
     return [...m.entries()].map(([key, v]) => ({ key, spend: v.spend, results: v.results, reach: v.reach })).sort((x, y) => y.spend - x.spend);
   }
+  // Alcance CORRETO de um escopo, vindo do Relatório 3 (Alcance, sem breakpoints).
+  // O alcance somado dos arquivos com breakpoint (idade/gênero/plataforma × dia)
+  // infla muito (mesma pessoa contada em cada recorte e cada dia); este vem do
+  // arquivo sem recortes. null = sem Relatório 3 → mantém o comportamento atual.
+  function reachScope(campName, adsetNames, adName) {
+    if (!REACH_DATA) return null;
+    const c = REACH_DATA.campaigns.find((x) => x.name === campName);
+    if (!c) return null;
+    if (adName) {
+      let r = 0, any = false;
+      c.adsets.forEach((a) => { if (adsetNames && adsetNames.length && adsetNames.indexOf(a.name) < 0) return; const ad = (a.ads || []).find((x) => x.name === adName); if (ad) { r += ad.metrics.reach; any = true; } });
+      return any ? r : null;
+    }
+    if (adsetNames && adsetNames.length) {
+      let r = 0, any = false;
+      c.adsets.forEach((a) => { if (adsetNames.indexOf(a.name) >= 0) { r += a.metrics.reach; any = true; } });
+      return any ? r : null;
+    }
+    return c.metrics.reach;
+  }
+  function reachOverall() { return REACH_DATA ? REACH_DATA.campaigns.reduce((s, c) => s + (c.metrics.reach || 0), 0) : null; }
 
   // ── foto do profissional (skeleton quando vazia; sobe 1x e propaga) ──
   const CAM_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9a2 2 0 0 1 2-2h2l1.5-2.2h7L19 7h0a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="12.5" r="3.4"/></svg>';
@@ -206,9 +264,15 @@
     const row = (label, color, g) => { const o = t[g] || { results: 0, spend: 0 }; const pct = tot ? Math.round(o.results / tot * 100) : 0; return '<div><b style="color:' + color + '">■</b> ' + label + '<br>' + pct + '% (' + Math.round(o.results) + ')<br>Custo por resultado: ' + fmtCur(div(o.spend, o.results)) + '</div>'; };
     return '<div class="det-legend">' + row('Homens', 'var(--purple)', 'male') + row('Mulheres', 'var(--teal)', 'female') + '</div>';
   }
-  function platBlock(id, plat) {
+  function platBlock(id, plat, correctReach) {
     const hasPlat = plat && plat.length;
-    const np = hasPlat ? normPlat(plat) : [];
+    let np = hasPlat ? normPlat(plat) : [];
+    // Corrige o ALCANCE pelo Relatório 3 (sem breakpoints): mantém a distribuição
+    // entre plataformas, mas escala para o total certo (em vez do somatório inflado).
+    if (hasPlat && typeof correctReach === 'number' && isFinite(correctReach) && correctReach > 0) {
+      const sum = np.reduce((a, p) => a + (p.reach || 0), 0);
+      if (sum > 0) { const k = correctReach / sum; np = np.map((p) => Object.assign({}, p, { reach: p.reach * k })); }
+    }
     const left = hasPlat
       ? '<div class="chart-host chart-h4"><canvas id="' + id + '" data-chart="grouped-bar-dual" data-labels="' +
           j(np.map((p) => p.key)) + '" data-series="' +
@@ -230,9 +294,13 @@
       '<div class="col-r"><div class="sec-lbl" style="margin:0">Valor gasto por plataforma</div>' + rows + '</div></div>';
   }
   // bloco compacto de plataforma usado na agenda (prévia explicativa)
-  function agPlatBlock(plat) {
+  function agPlatBlock(plat, correctReach) {
     const hasPlat = plat && plat.length;
-    const np = hasPlat ? normPlat(plat) : [];
+    let np = hasPlat ? normPlat(plat) : [];
+    if (hasPlat && typeof correctReach === 'number' && isFinite(correctReach) && correctReach > 0) {
+      const sum = np.reduce((a, p) => a + (p.reach || 0), 0);
+      if (sum > 0) { const k = correctReach / sum; np = np.map((p) => Object.assign({}, p, { reach: p.reach * k })); }
+    }
     const left = hasPlat
       ? '<div class="chart-host"><canvas data-chart="grouped-bar-mute" data-labels="' + j(np.map((p) => p.key)) + '" data-series="' +
           j([{ name: 'Alcance', values: np.map((p) => Math.round(p.reach)) }, { name: 'Resultados', values: np.map((p) => Math.round(p.results)) }]) + '"></canvas></div>'
@@ -290,9 +358,239 @@
       '<div class="ag-demo"><div class="sec-lbl">Distribuição por gênero e idade</div>' + demoMini +
       '<div class="bubble tl ag-bubble-2">Dados e Informações Demográficas extraídas do público dos anúncios.</div>' +
       '<div class="bubble tl ag-bubble-3">Percentual Gênero × Custo</div></div>' +
-      agPlatBlock(platAll) +
+      agPlatBlock(platAll, reachOverall()) +
       '</div>' +
       '<div class="ag-foot">* Anúncios exibidos considerando o valor consumido no período, do maior consumo de orçamento para o menor.</div>' + VO + '</section>');
+  }
+
+  // ── 03 · Evolução (comparativo opcional) ──────────────────────────
+  // Indicadores oferecidos, na ordem. `field` = chave na série semanal do parser.
+  // agg: 'sum' (acumula), 'snapshot' (último valor, ex.: seguidores), 'cpr'
+  // (gasto÷resultados). goodDown = quando CAIR é bom (custo). Cada card é removível.
+  // Registro ÚNICO de indicadores. Cada um pode vir do relatório principal (main)
+  // e/ou dos CSVs do Business Suite (csv); a fonte é escolhida POR INDICADOR.
+  // main.field aponta a chave na série semanal do parser (res → 'results').
+  const EVO_ALL = [
+    { key: 'msg',          title: 'Mensagens iniciadas', unit: 'int', main: { field: 'msg',       agg: 'sum' } },
+    { key: 'visits',       title: 'Visitas ao perfil',   unit: 'int', main: { field: 'visits',    agg: 'sum' }, csv: { field: 'visits', agg: 'sum' } },
+    { key: 'conv',         title: 'Conversões',          unit: 'int', main: { field: 'conv',      agg: 'sum' } },
+    { key: 'res',          title: 'Resultados',          unit: 'int', main: { field: 'results',   agg: 'sum' } },
+    { key: 'cpr',          title: 'Custo por resultado', unit: 'cur', main: { field: 'cpr',       agg: 'cpr', goodDown: true } },
+    { key: 'impr',         title: 'Impressões',          unit: 'int', main: { field: 'impr',      agg: 'sum' } },
+    { key: 'reach',        title: 'Alcance',             unit: 'int', main: { field: 'reach',     agg: 'sum' }, csv: { field: 'reach', agg: 'sum' } },
+    { key: 'views',        title: 'Visualizações',       unit: 'int', main: { field: 'views',     agg: 'sum' }, csv: { field: 'views', agg: 'sum' } },
+    { key: 'followers',    title: 'Seguidores',          unit: 'int', main: { field: 'followers', agg: 'snapshot' }, csv: { field: 'followers', agg: 'sum', title: 'Novos seguidores' } },
+    { key: 'interactions', title: 'Interações',          unit: 'int', csv: { field: 'interactions', agg: 'sum' } },
+    { key: 'clicks',       title: 'Cliques no link',     unit: 'int', csv: { field: 'clicks', agg: 'sum' } },
+  ];
+  const CSV_KEYS = EVO_ALL.filter((m) => m.csv).map((m) => m.key); // métricas que os CSVs trazem
+  const EVO_PER_PAGE = 6; // máx. de gráficos por página (auto-pagina acima disso)
+  const evoFmt = (n, unit) => (unit === 'cur' ? fmtCur(n) : fmtInt(n));
+
+  // ── leitura dos CSVs do Business Suite ────────────────────────────
+  // Formato (verificado): UTF-16, linha "sep=,", título, cabeçalho "Data","Primary",
+  // depois linhas "YYYY-MM-DDT00:00:00","valor". 1 arquivo = 1 métrica (pelo nome).
+  const EVO_AB = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+  const evoEpToKey = (ep) => { const d = new Date(ep); return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0'); };
+  const evoSpan = (a, b) => { const x = a.split('-').map(Number), y = b.split('-').map(Number); if (a === b) return x[2] + ' ' + EVO_AB[x[1] - 1]; if (x[1] === y[1]) return x[2] + '–' + y[2] + ' ' + EVO_AB[y[1] - 1]; return x[2] + ' ' + EVO_AB[x[1] - 1] + '–' + y[2] + ' ' + EVO_AB[y[1] - 1]; };
+  function csvMetricKey(name) {
+    const s = String(name || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    if (/seguidor/.test(s)) return 'followers';
+    if (/alcance/.test(s)) return 'reach';
+    if (/clique/.test(s)) return 'clicks';
+    if (/interac/.test(s)) return 'interactions';
+    if (/visita/.test(s)) return 'visits';
+    if (/visualiza|reproduc/.test(s)) return 'views';
+    return null;
+  }
+  function csvDecode(buf) {
+    const b = new Uint8Array(buf);
+    let enc = 'utf-8';
+    if (b.length >= 2 && b[0] === 0xFF && b[1] === 0xFE) enc = 'utf-16le';
+    else if (b.length >= 2 && b[0] === 0xFE && b[1] === 0xFF) enc = 'utf-16be';
+    let t = new TextDecoder(enc).decode(buf);
+    if (t.charCodeAt(0) === 0xFEFF) t = t.slice(1);
+    return t;
+  }
+  function csvParseSeries(text) {
+    const out = {};
+    text.split(/\r?\n/).forEach((line) => {
+      const m = line.match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (!m) return; // pula sep=, título e cabeçalho (sem data)
+      const parts = line.split(',');
+      let val = null;
+      for (let i = 0; i < parts.length; i++) {
+        if (/(\d{4})-(\d{2})-(\d{2})/.test(parts[i])) { const n = parseInt(String(parts[i + 1] || '').replace(/[^\d-]/g, ''), 10); val = isFinite(n) ? n : 0; break; }
+      }
+      if (val == null) return;
+      const k = m[1] + '-' + m[2] + '-' + m[3];
+      out[k] = (out[k] || 0) + val;
+    });
+    return out;
+  }
+  function readEvoCsv(file) {
+    return new Promise((resolve) => {
+      const key = csvMetricKey(file && file.name);
+      if (!key) { resolve(null); return; }
+      const fr = new FileReader();
+      fr.onload = () => { try { resolve({ key, daily: csvParseSeries(csvDecode(fr.result)) }); } catch (e) { resolve(null); } };
+      fr.onerror = () => resolve(null);
+      fr.readAsArrayBuffer(file);
+    });
+  }
+  // Monta o objeto de evolução (semanas ancoradas no último dia) a partir dos CSVs
+  // já carregados: CONFIG.evolution.csv = { metricKey: { 'YYYY-MM-DD': valor } }.
+  function csvEvolution(csv) {
+    if (!csv) return null;
+    const keys = CSV_KEYS;
+    const dates = new Set();
+    keys.forEach((k) => { const mp = csv[k]; if (mp) Object.keys(mp).forEach((d) => dates.add(d)); });
+    const dayKeys = [...dates].sort();
+    if (!dayKeys.length) return null;
+    const toEp = (s) => { const p = s.split('-').map(Number); return Date.UTC(p[0], p[1] - 1, p[2]); };
+    const DAY = 86400000, lastEp = toEp(dayKeys[dayKeys.length - 1]);
+    const buckets = new Map();
+    dayKeys.forEach((dk) => {
+      const endKey = evoEpToKey(lastEp - Math.floor((lastEp - toEp(dk)) / (7 * DAY)) * 7 * DAY);
+      let B = buckets.get(endKey);
+      if (!B) { B = { end: endKey, min: dk, max: dk }; keys.forEach((k) => { B[k] = 0; }); buckets.set(endKey, B); }
+      keys.forEach((k) => { const v = csv[k] && csv[k][dk]; if (typeof v === 'number') B[k] += v; });
+      if (dk < B.min) B.min = dk;
+      if (dk > B.max) B.max = dk;
+    });
+    const weeks = [...buckets.values()].sort((a, b) => (a.end < b.end ? -1 : 1)).map((B) => { const o = { key: B.end, label: evoSpan(B.min, B.max) }; keys.forEach((k) => { o[k] = B[k]; }); return o; });
+    const anyPos = (sel) => weeks.some((w) => sel(w) > 0);
+    const available = {};
+    keys.forEach((k) => { available[k] = !!(csv[k] && Object.keys(csv[k]).length) && anyPos((w) => w[k]); });
+    return { weeks, months: new Set(dayKeys.map((d) => d.slice(0, 7))).size, available };
+  }
+  // Quantas métricas de CSV já foram carregadas (para o painel de Configurações).
+  function csvLoadedCount(csv) { return csv ? CSV_KEYS.filter((k) => csv[k] && Object.keys(csv[k]).length).length : 0; }
+  // Estatística de um indicador ao longo das semanas: série p/ o gráfico, total
+  // acumulado (conforme agg), 1ª/última e a variação % desde a 1ª semana com dado.
+  function evoStat(mt, weeks) {
+    const raw = weeks.map((w) => { const v = w[mt.field]; return isFinite(v) ? v : 0; });
+    const chart = raw.map((v) => (mt.unit === 'cur' ? Math.round(v * 100) / 100 : Math.round(v)));
+    const fNZ = raw.findIndex((v) => v > 0);
+    const first = fNZ >= 0 ? raw[fNZ] : 0;
+    const last = raw.length ? raw[raw.length - 1] : 0;
+    let total;
+    if (mt.agg === 'snapshot') total = last;
+    else if (mt.agg === 'cpr') { const sp = weeks.reduce((a, w) => a + (w.spend || 0), 0), rs = weeks.reduce((a, w) => a + (w.results || 0), 0); total = rs ? sp / rs : NaN; }
+    else total = raw.reduce((a, v) => a + v, 0);
+    const pct = (first > 0 && weeks.length > 1) ? Math.round((last - first) / first * 100) : null;
+    return { chart, total, first, last, net: last - first, pct, firstLabel: (fNZ >= 0 ? weeks[fNZ] : weeks[0] || {}).label || '' };
+  }
+  // Fontes de evolução disponíveis (cada uma com weeks/available).
+  function evoSources() {
+    return { main: (DISCOVERED && DISCOVERED.evolution) || null, csv: csvEvolution(CONFIG.evolution && CONFIG.evolution.csv) };
+  }
+  // De quais fontes o indicador tem dado.
+  function evoAvail(md, srcs) {
+    return { main: !!(md.main && srcs.main && srcs.main.available[md.key]), csv: !!(md.csv && srcs.csv && srcs.csv.available[md.key]) };
+  }
+  // Fonte efetiva do indicador: escolha do usuário (CONFIG.evolution.src[key]) se
+  // válida; senão o CSV SUBSTITUI quando existe; senão a única com dado. null = sem dado.
+  function evoSrcOf(md, srcs) {
+    const av = evoAvail(md, srcs);
+    if (!av.main && !av.csv) return null;
+    const chosen = CONFIG.evolution && CONFIG.evolution.src && CONFIG.evolution.src[md.key];
+    if (chosen === 'csv' && av.csv) return 'csv';
+    if (chosen === 'main' && av.main) return 'main';
+    return av.csv ? 'csv' : 'main';
+  }
+  // Indicadores com dado em alguma fonte, na ordem do usuário (depois a padrão).
+  function evoOrderedAll(srcs) {
+    const has = (md) => !!evoSrcOf(md, srcs);
+    const order = (CONFIG.evolution && CONFIG.evolution.order) || [];
+    const byKey = {}; EVO_ALL.forEach((m) => { byKey[m.key] = m; });
+    const seen = {}, out = [];
+    order.forEach((k) => { if (byKey[k] && has(byKey[k]) && !seen[k]) { out.push(byKey[k]); seen[k] = 1; } });
+    EVO_ALL.forEach((m) => { if (has(m) && !seen[m.key]) { out.push(m); seen[m.key] = 1; } });
+    return out;
+  }
+  // "Indicador efetivo" p/ render/stat: título + field + agg da fonte escolhida.
+  function evoEffective(md, src) {
+    const sm = md[src] || {};
+    return { key: md.key, title: sm.title || md.title, field: sm.field, agg: sm.agg, unit: md.unit, goodDown: !!sm.goodDown };
+  }
+  // Move um indicador na ordem (dir −1 sobe, +1 desce), gravando a ordem atual.
+  function evoReorder(key, dir) {
+    if (!CONFIG.evolution) return;
+    const cur = evoOrderedAll(evoSources()).map((m) => m.key);
+    const i = cur.indexOf(key), ni = i + dir;
+    if (i < 0 || ni < 0 || ni >= cur.length) return;
+    const t = cur[ni]; cur[ni] = cur[i]; cur[i] = t;
+    CONFIG.evolution.order = cur;
+  }
+  // Texto da legenda em linguagem de cliente (sem jargão). showDelta inclui a
+  // comparação com o começo do período.
+  function evoInsight(mt, st, showDelta) {
+    const tot = evoFmt(st.total, mt.unit);
+    if (mt.agg === 'snapshot') {
+      if (!showDelta || st.pct == null) return 'Total de ' + tot + ' ao fim do período.';
+      return (st.net >= 0 ? 'Ganhou ' : 'Perdeu ') + fmtInt(Math.abs(st.net)) + ' no período, chegando a ' + tot + '.';
+    }
+    if (mt.agg === 'cpr') {
+      if (!showDelta || st.pct == null || st.pct === 0) return 'Custo médio de ' + tot + ' por resultado.';
+      return 'Custo médio de ' + tot + ' por resultado, ' + Math.abs(st.pct) + '% ' + (st.pct < 0 ? 'mais barato' : 'mais caro') + ' que no começo.';
+    }
+    if (!showDelta || st.pct == null) return 'Foram ' + tot + ' no período.';
+    return 'Foram ' + tot + ' no período, ' + Math.abs(st.pct) + '% ' + (st.pct >= 0 ? 'a mais' : 'a menos') + ' que no começo.';
+  }
+  // Constrói UMA OU MAIS páginas de evolução (auto-pagina se houver muitos gráficos).
+  // Cada indicador usa a fonte escolhida por ele (Excel/CSV) e o próprio eixo de tempo.
+  function buildEvolutionPages() {
+    const srcs = evoSources();
+    const hidden = (CONFIG.evolution && CONFIG.evolution.hiddenMetrics) || [];
+    const deltaOff = (CONFIG.evolution && CONFIG.evolution.deltaOff) || [];
+    const globalDelta = !CONFIG.evolution || CONFIG.evolution.showDelta !== false;
+    const shown = evoOrderedAll(srcs).filter((md) => hidden.indexOf(md.key) < 0);
+    if (!shown.length) return [];
+    const entries = shown.map((md) => {
+      const src = evoSrcOf(md, srcs), ev = srcs[src], em = evoEffective(md, src);
+      return { md: md, em: em, src: src, st: evoStat(em, ev.weeks), labels: j(ev.weeks.map((w) => w.label)), showDelta: globalDelta && deltaOff.indexOf(md.key) < 0 };
+    });
+
+    // Destaque (faixa): maior crescimento positivo entre os que mostram variação.
+    let hero = null;
+    entries.forEach((e) => { if (e.showDelta && e.em.agg !== 'cpr' && e.st.pct != null && e.st.pct > 0 && (!hero || e.st.pct > hero.st.pct)) hero = e; });
+    const heroHtml = hero ? '<div class="evo-hero"><span class="evo-hero-ic">📈</span><span><b>Destaque:</b> ' + esc(hero.em.title) + ' ' + (hero.em.agg === 'snapshot' ? 'ganhou ' : 'cresceu ') + hero.st.pct + '% no período.</span></div>' : '';
+
+    function cardHtml(e) {
+      const em = e.em, st = e.st;
+      let pill = '';
+      if (e.showDelta && st.pct != null) {
+        const arrow = st.pct > 0 ? '▲' : (st.pct < 0 ? '▼' : '–');
+        const good = em.goodDown ? (st.pct < 0) : (st.pct > 0);
+        const cls = st.pct === 0 ? 'flat' : (good ? 'up' : 'down');
+        pill = '<span class="evo-pill ' + cls + '">' + arrow + ' ' + Math.abs(st.pct) + '%</span>';
+      }
+      const canvas = '<div class="chart-host evo-host"><canvas data-chart="line" data-labels="' + e.labels + '" data-values="' + j(st.chart) + '"' + (em.unit === 'cur' ? ' data-suffix="R$ "' : '') + ' data-label="' + esc(em.title) + '"></canvas></div>';
+      return '<div class="evo-card" data-metric="' + em.key + '">' +
+        '<button class="evo-del" data-evo-del="' + em.key + '" title="Remover este gráfico" type="button">×</button>' +
+        '<div class="evo-card-h"><div class="evo-card-id"><span class="evo-card-t">' + esc(em.title) + '</span>' +
+        '<span class="evo-card-total">' + evoFmt(st.total, em.unit) + '</span></div>' + pill + '</div>' +
+        canvas +
+        '<div class="evo-insight">' + esc(evoInsight(em, st, e.showDelta)) + '</div></div>';
+    }
+
+    // Paginação balanceada: distribui os gráficos por igual entre as páginas.
+    const n = entries.length, pages = Math.max(1, Math.ceil(n / EVO_PER_PAGE)), per = Math.ceil(n / pages);
+    const usingCsv = entries.some((e) => e.src === 'csv');
+    const sub = usingCsv
+      ? 'Acompanhe a evolução do perfil ao longo do período de trabalho.'
+      : 'Acompanhe como os principais resultados evoluíram ao longo das semanas do período.';
+    const out = [];
+    for (let p = 0; p < pages; p++) {
+      const slice = entries.slice(p * per, (p + 1) * per);
+      if (!slice.length) break;
+      const label = '03 Evolução' + (pages > 1 ? ' (' + (p + 1) + '/' + pages + ')' : '');
+      out.push(el('<section data-screen-label="' + label + '" data-kind="evolution">' + headHtml('Evolução' + (pages > 1 ? ' ' + (p + 1) + '/' + pages : '')) +
+        '<div class="det-sub ed">' + sub + '</div>' +
+        '<div class="evo-body">' + (p === 0 ? heroHtml : '') + '<div class="evo-grid">' + slice.map(cardHtml).join('') + '</div></div>' + VO + '</section>'));
+    }
+    return out;
   }
 
   // ── 03 · Campanha ─────────────────────────────────────────────────
@@ -306,7 +604,7 @@
       '<div class="kpi-row">' + kpiCard(rt, fmtInt(m.results), 'resultados') + kpiCard('Custo por resultado', fmtCur(m.cpr), 'custo_resultado') + kpiCard('Valor gasto', fmtCur(m.spend), 'valor') + '</div>' +
       '<div class="sec-lbl" style="margin-top:8px">' + esc(rt) + '</div>' + lineCanvas('v2c' + ci + '-line', cc.ref.daily, 'results', '', rt) + '</div></div>' +
       '<div class="det-demo"><div class="sec-lbl">Distribuição por gênero e idade <span class="sec-sub">— barras = nº de resultados (' + esc(rt) + ')</span></div>' + demoCanvas('v2c' + ci + '-demo', cc.ref.ageGender) + demoLegend(cc.ref.ageGender) + '</div>' +
-      platBlock('v2c' + ci + '-plat', platformForCampaign(cc.ref.name)) + VO + '</section>');
+      platBlock('v2c' + ci + '-plat', platformForCampaign(cc.ref.name), reachScope(cc.ref.name)) + VO + '</section>');
   }
 
   // ── 04 · Conjunto ─────────────────────────────────────────────────
@@ -322,7 +620,7 @@
       '<div class="kpi-row">' + kpiCard(rt, fmtInt(m.metrics.results), 'resultados') + kpiCard('Custo por resultado', fmtCur(m.metrics.cpr), 'custo_resultado') + kpiCard('Valor gasto', fmtCur(m.metrics.spend), 'valor') + '</div>' +
       '<div class="sec-lbl" style="margin-top:8px">' + esc(rt) + '</div>' + lineCanvas(id + '-line', m.daily, 'results', '', rt) + '</div></div>' +
       '<div class="det-demo"><div class="sec-lbl">Distribuição por gênero e idade <span class="sec-sub">— barras = nº de resultados (' + esc(rt) + ')</span></div>' + demoCanvas(id + '-demo', m.ageGender) + demoLegend(m.ageGender) + '</div>' +
-      platBlock(id + '-plat', platformForAdsets(cj.refs.map((r) => r.name))) + VO + '</section>');
+      platBlock(id + '-plat', platformForAdsets(cj.refs.map((r) => r.name)), reachScope(cc.ref.name, cj.refs.map((r) => r.name))) + VO + '</section>');
   }
 
   // ── 05+ · Anúncio (1 página por anúncio do Top) ───────────────────
@@ -334,12 +632,12 @@
     return el('<section data-screen-label="Anúncio ' + esc(adName) + '">' + headHtml('Anúncio') + del +
       '<div class="det-title ed" style="font-size:' + titleFs + 'px">' + esc(adName) + '</div>' +
       '<div class="det-sub ed">Anúncio <b>' + esc(adName) + '</b>. A seguir: métricas individuais (' + esc(rt) + ', custo por resultado e valor gasto), evolução diária, público por gênero e idade e desempenho por plataforma.</div>' +
-      '<div class="det-top"><div class="ad-thumb"><image-slot id="' + idp + '" data-ad="' + esc(det.name) + '" placeholder="thumb"></image-slot></div>' +
+      '<div class="det-top"><div class="ad-thumb"><image-slot id="' + idp + '" data-ad="' + esc(det.name) + '" fit="contain" placeholder="thumb"></image-slot></div>' +
       '<div class="det-overview"><div class="sec-lbl">Visão geral do desempenho</div>' +
       '<div class="kpi-row">' + kpiCard(rt, fmtInt(m.results), 'resultados') + kpiCard('Custo por resultado', fmtCur(m.cpr), 'custo_resultado') + kpiCard('Valor gasto', fmtCur(m.spend), 'valor') + '</div>' +
       '<div class="sec-lbl" style="margin-top:8px">' + esc(rt) + '</div>' + lineCanvas(idp + '-line', det.daily, 'results', '', rt) + '</div></div>' +
       '<div class="det-demo"><div class="sec-lbl">Distribuição por gênero e idade <span class="sec-sub">— barras = nº de resultados (' + esc(rt) + ')</span></div>' + demoCanvas(idp + '-demo', det.ageGender) + demoLegend(det.ageGender) + '</div>' +
-      platBlock(idp + '-plat', platformForAd(det.name)) + VO + '</section>');
+      platBlock(idp + '-plat', platformForAd(det.name, cj.refs.map((r) => r.name)), reachScope(cc.ref.name, cj.refs.map((r) => r.name), det.name)) + VO + '</section>');
   }
 
   // ── config inicial ────────────────────────────────────────────────
@@ -349,6 +647,7 @@
       profilePhoto: null,
       hidden: [], hiddenKinds: [],
       fullConjNames: false, // false = nome do conjunto resumido (padrão); true = nome inteiro
+      evolution: { enabled: false, hiddenMetrics: [], showDelta: true, order: [], src: {}, deltaOff: [], csv: null }, // página de comparativo (opcional)
       campaigns: d.campaigns.map((c) => ({
         ref: c, label: labelCampaign(c.name), include: true,
         conjuntos: c.adsets.map((a) => ({ refs: [a], label: labelConj(a.name), labelAuto: true, include: true })),
@@ -365,7 +664,7 @@
     return {
       v: 1, kind: 'v2',
       cover: cfg.cover, fullConjNames: cfg.fullConjNames,
-      hidden: cfg.hidden, hiddenKinds: cfg.hiddenKinds,
+      hidden: cfg.hidden, hiddenKinds: cfg.hiddenKinds, evolution: cfg.evolution,
       campaigns: (cfg.campaigns || []).map((cc) => ({
         name: cc.ref.name, label: cc.label, include: cc.include,
         conjuntos: (cc.conjuntos || []).map((cj) => ({
@@ -382,6 +681,15 @@
     if ('fullConjNames' in snap) base.fullConjNames = !!snap.fullConjNames;
     if (Array.isArray(snap.hidden)) base.hidden = snap.hidden.slice();
     if (Array.isArray(snap.hiddenKinds)) base.hiddenKinds = snap.hiddenKinds.slice();
+    if (snap.evolution) base.evolution = {
+      enabled: !!snap.evolution.enabled,
+      hiddenMetrics: Array.isArray(snap.evolution.hiddenMetrics) ? snap.evolution.hiddenMetrics.slice() : [],
+      showDelta: snap.evolution.showDelta !== false,
+      order: Array.isArray(snap.evolution.order) ? snap.evolution.order.slice() : [],
+      src: (snap.evolution.src && typeof snap.evolution.src === 'object') ? snap.evolution.src : {},
+      deltaOff: Array.isArray(snap.evolution.deltaOff) ? snap.evolution.deltaOff.slice() : [],
+      csv: (snap.evolution.csv && typeof snap.evolution.csv === 'object') ? snap.evolution.csv : null,
+    };
     const byName = new Map(base.campaigns.map((c) => [c.ref.name, c]));
     const used = new Set(), ordered = [];
     (snap.campaigns || []).forEach((sc) => {
@@ -477,6 +785,7 @@
     const secs = [];
     const push = (sec, group) => { if (sec) { sec.dataset.group = group; secs.push(sec); } };
     push(buildCover(), 'Geral'); push(buildAgenda(), 'Geral');
+    if (CONFIG.evolution && CONFIG.evolution.enabled) buildEvolutionPages().forEach(function (s) { push(s, 'Geral'); });
     CONFIG.campaigns.forEach((cc, ci) => {
       if (!cc.include) return;
       const g = 'Campanha · ' + cc.label;
@@ -655,6 +964,16 @@
     if (cj) { cj.exclAds = cj.exclAds || []; if (cj.exclAds.indexOf(b.dataset.exa) < 0) cj.exclAds.push(b.dataset.exa); render(); }
   }, true);
 
+  // remover um gráfico da página de evolução (×) → guarda em hiddenMetrics
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('[data-evo-del]');
+    if (!b || !CONFIG || !CONFIG.evolution) return;
+    e.preventDefault(); e.stopPropagation();
+    const k = b.getAttribute('data-evo-del'), arr = CONFIG.evolution.hiddenMetrics || (CONFIG.evolution.hiddenMetrics = []);
+    if (arr.indexOf(k) < 0) arr.push(k);
+    render();
+  }, true);
+
   // ── restaurar tudo que foi removido/ocultado ──────────────────────
   // Limpa: anúncios excluídos (×), top-5 manual, campanhas/conjuntos
   // desmarcados em Configurações e tipos de dado ocultos. Volta ao estado
@@ -672,6 +991,7 @@
     });
     if (CONFIG.hiddenKinds && CONFIG.hiddenKinds.length) { n += CONFIG.hiddenKinds.length; CONFIG.hiddenKinds = []; }
     if (CONFIG.hidden && CONFIG.hidden.length) { CONFIG.hidden = []; }
+    if (CONFIG.evolution && CONFIG.evolution.hiddenMetrics && CONFIG.evolution.hiddenMetrics.length) { n += CONFIG.evolution.hiddenMetrics.length; CONFIG.evolution.hiddenMetrics = []; }
     render();
     const st = document.getElementById('rt-status');
     if (st) st.textContent = n ? ('Restaurado: ' + n + ' item(ns) que estavam removidos/ocultos voltaram.') : 'Nada para restaurar — nenhum campo estava removido.';
@@ -780,7 +1100,10 @@
           window.__slotNS = (file.name || 'rep') + '|' + (file.size || 0) + '|' + (file.lastModified || 0);
           CONFIG = (await maybeRestoreConfig(DISCOVERED)) || buildConfig(DISCOVERED);
           render();
-          if (window.__slotsReload) window.__slotsReload(window.__slotNS);
+          // Reidrata os slots de imagem e, só quando isso termina, sinaliza que
+          // estão prontos — a V3 aplica as thumbs nesse momento, sem corrida.
+          const reload = window.__slotsReload ? window.__slotsReload(window.__slotNS) : Promise.resolve();
+          Promise.resolve(reload).then(() => document.dispatchEvent(new CustomEvent('report:slots-ready')));
           if (window.__imgPersist) window.__imgPersist.getKV('profilePhoto').then((u) => { if (u && CONFIG) { CONFIG.profilePhoto = u; applyPhoto(); } });
           const nC = CONFIG.campaigns.length, nS = CONFIG.campaigns.reduce((a, c) => a + c.conjuntos.length, 0);
           status.textContent = DISCOVERED.period.month + '/' + DISCOVERED.period.year + ' · ' + nC + ' campanha(s), ' + nS + ' conjunto(s).';
@@ -812,7 +1135,13 @@
   function validatePlatform(P) {
     const w = [], D = DISCOVERED;
     const pct = (a, b) => (b ? Math.abs(a - b) / b : (a ? 1 : 0));
-    if (P.period.month !== D.period.month || P.period.year !== D.period.year) w.push('Período diferente: principal ' + D.period.month + '/' + D.period.year + ' × plataforma ' + P.period.month + '/' + P.period.year);
+    // Compara a FAIXA de datas, não o "mês predominante" — dois arquivos do mesmo
+    // período (ex.: relatório de 3 meses) têm contagem de linhas diferente por mês,
+    // o que mudava o mês predominante e disparava um falso "período diferente".
+    const pr = P.range, dr = D.range;
+    if (pr && dr && pr.first && dr.first && (pr.last < dr.first || pr.first > dr.last)) {
+      w.push('Períodos sem sobreposição: principal ' + dr.first + '…' + dr.last + ' × plataforma ' + pr.first + '…' + pr.last);
+    }
     if (pct(P.overall.spend, D.overall.spend) > 0.05) w.push('Investimento total difere ' + (pct(P.overall.spend, D.overall.spend) * 100).toFixed(0) + '%');
     if (pct(P.overall.impressions, D.overall.impressions) > 0.05) w.push('Impressões diferem ' + (pct(P.overall.impressions, D.overall.impressions) * 100).toFixed(0) + '%');
     if (pct(P.overall.results, D.overall.results) > 0.05) w.push('Resultados diferem ' + (pct(P.overall.results, D.overall.results) * 100).toFixed(0) + '%');
@@ -855,6 +1184,40 @@
     } catch (err) { setMsg('Erro ao ler Relatório 2: ' + err.message, true); }
   }
 
+  // ── 3º Excel (Alcance, sem breakpoints) ───────────────────────────
+  // Mesmas métricas do principal, mas detalhado SÓ por campanha/conjunto/anúncio
+  // (sem idade/gênero/plataforma/dia) → o Alcance não vem inflado pela soma dos
+  // recortes. Vira a fonte do alcance nos gráficos de plataforma.
+  function validateReach(R) {
+    const w = [], D = DISCOVERED;
+    if (!R.campaigns.length) return ['Sem campanhas no arquivo.'];
+    const dNames = new Set(D.campaigns.map((c) => c.name));
+    if (R.campaigns.filter((c) => dNames.has(c.name)).length === 0) w.push('Nenhuma campanha em comum com o principal (nomes não batem).');
+    const rr = R.range, dr = D.range;
+    if (rr && dr && rr.first && dr.first && (rr.last < dr.first || rr.first > dr.last)) w.push('Período sem sobreposição: principal ' + dr.first + '…' + dr.last + ' × alcance ' + rr.first + '…' + rr.last);
+    return w;
+  }
+  async function onReachFile(file, status) {
+    const setMsg = (t, err) => { if (status) status.textContent = t; const pm = document.getElementById('ss-reach-msg'); if (pm) { pm.textContent = t; pm.classList.toggle('ss-err', !!err); } };
+    if (!DISCOVERED) { setMsg('Suba o Relatório 1 (principal) primeiro.', true); return; }
+    setMsg('Lendo Relatório 3 (alcance): ' + file.name + '…');
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, raw: true });
+      const headers = aoa[0] || [], rows = aoa.slice(1);
+      window.__parser.clearSessionOverrides();
+      const R = window.__parser.discoverV2(headers, rows);
+      if (!R._columns || R._columns.reach.idx < 0) { setMsg('⚠ Este arquivo não tem a coluna Alcance — nada a fazer.', true); return; }
+      const warns = validateReach(R);
+      if (warns.length) { if (!window.confirm('Atenção — o Relatório 3 (alcance) difere do principal:\n\n• ' + warns.join('\n• ') + '\n\nUsar mesmo assim?')) { setMsg('Relatório 3 cancelado.', true); return; } }
+      REACH_DATA = R;
+      render();
+      setMsg('✓ Relatório 3 (alcance) carregado de ' + file.name + ' — o alcance dos gráficos agora vem dele.');
+    } catch (err) { setMsg('Erro ao ler Relatório 3: ' + err.message, true); }
+  }
+
   // ── Assistente de upload (3 passos) — navegação e liberação dos botões ──
   let __wizR1 = false, __wizR2 = false;
   function wizCurrent() { const a = document.querySelector('#start-screen .ss-page.is-active'); return a ? +a.dataset.page : 0; }
@@ -866,7 +1229,7 @@
     ss.querySelectorAll('.ss-step-dot').forEach((d) => { const i = +d.dataset.go; d.classList.toggle('is-active', i === n); d.classList.toggle('is-done', i < n); });
   }
   function wizReport1OK() { __wizR1 = true; const b = document.getElementById('ss-next-1'); if (b) b.disabled = false; }
-  function wizReport2OK() { __wizR2 = true; const g = document.getElementById('ss-go'); if (g) g.disabled = false; }
+  function wizReport2OK() { __wizR2 = true; const g = document.getElementById('ss-next-2'); if (g) g.disabled = false; }
 
   window.__afterRemap = () => {
     const c = window.__parser.getCache && window.__parser.getCache();
@@ -946,6 +1309,47 @@
         const on = (CONFIG.hiddenKinds || []).indexOf(k[0]) >= 0;
         return '<label><input type="checkbox" data-act="kind" data-kind="' + k[0] + '"' + (on ? ' checked' : '') + '> ' + k[1] + '</label>';
       }).join('') + '</div></div>';
+      // Página de evolução (comparativo) — opcional, antes da 1ª campanha
+      CONFIG.evolution = CONFIG.evolution || { enabled: false, hiddenMetrics: [], showDelta: true, order: [], src: {}, deltaOff: [], csv: null };
+      if (typeof CONFIG.evolution.showDelta === 'undefined') CONFIG.evolution.showDelta = true;
+      if (!Array.isArray(CONFIG.evolution.order)) CONFIG.evolution.order = [];
+      if (!Array.isArray(CONFIG.evolution.deltaOff)) CONFIG.evolution.deltaOff = [];
+      if (!CONFIG.evolution.src || typeof CONFIG.evolution.src !== 'object') CONFIG.evolution.src = {};
+      const evSrcs = evoSources();
+      const evShown = evoOrderedAll(evSrcs);
+      const csvN = csvLoadedCount(CONFIG.evolution.csv);
+      h += '<div class="sec-block" style="border-top:1px solid rgba(255,255,255,.12);margin-top:8px;padding-top:10px">' +
+        '<b>Página de evolução (comparativo)</b>' +
+        '<p style="margin:4px 0 8px;font-size:12px;color:var(--ink-soft)">Página opcional, antes da 1ª campanha. Excel e CSV se complementam — cada indicador escolhe a fonte. Gráficos demais paginam sozinhos.</p>' +
+        '<label style="display:block;margin:2px 0 8px"><input type="checkbox" data-act="evoen"' + (CONFIG.evolution.enabled ? ' checked' : '') + '> Mostrar a página de evolução</label>';
+      if (CONFIG.evolution.enabled) {
+        h += '<label class="rt-btn" style="display:inline-block;margin:2px 0 4px;font-size:12px">⬆ Enviar CSVs do Business Suite' +
+          '<input type="file" accept=".csv" multiple data-act="evocsv" hidden></label>' +
+          '<div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:8px">' + (csvN ? csvN + ' de 6 CSV(s) carregado(s).' : 'Nenhum CSV carregado. Cada CSV vira um gráfico novo ou substitui o do Excel (você decide a fonte por indicador).') + '</div>' +
+          '<label style="display:block;margin:2px 0 8px"><input type="checkbox" data-act="evodelta"' + (CONFIG.evolution.showDelta ? ' checked' : '') + '> Mostrar variação % (chave geral)</label>';
+        if (evShown.length) {
+          h += '<p style="margin:2px 0 6px;font-size:12px;color:var(--ink-soft)">Indicadores — ▲▼ ordena · ☑ mostra · Excel/CSV escolhe a fonte · % liga a variação:</p>' +
+            evShown.map((md, i) => {
+              const av = evoAvail(md, evSrcs), src = evoSrcOf(md, evSrcs);
+              const shownM = CONFIG.evolution.hiddenMetrics.indexOf(md.key) < 0;
+              const dOn = CONFIG.evolution.showDelta && CONFIG.evolution.deltaOff.indexOf(md.key) < 0;
+              const srcCtl = (av.main && av.csv)
+                ? '<button class="sec-mini' + (src === 'main' ? ' on' : '') + '" data-act="evosrcm" data-metric="' + md.key + '" data-src="main">Excel</button>' +
+                  '<button class="sec-mini' + (src === 'csv' ? ' on' : '') + '" data-act="evosrcm" data-metric="' + md.key + '" data-src="csv">CSV</button>'
+                : '<small style="color:var(--ink-soft);font-size:11px;align-self:center">' + (src === 'csv' ? 'CSV' : 'Excel') + '</small>';
+              return '<div class="sec-row" style="flex-wrap:wrap">' +
+                '<button class="sec-mini" data-act="evoup" data-metric="' + md.key + '"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
+                '<button class="sec-mini" data-act="evodn" data-metric="' + md.key + '"' + (i === evShown.length - 1 ? ' disabled' : '') + '>▼</button>' +
+                '<label style="flex:1;min-width:120px"><input type="checkbox" data-act="evom" data-metric="' + md.key + '"' + (shownM ? ' checked' : '') + '> ' + esc(evoEffective(md, src).title) + '</label>' +
+                srcCtl +
+                '<button class="sec-mini' + (dOn ? ' on' : '') + '" data-act="evodlt" data-metric="' + md.key + '" title="Mostrar/ocultar a variação % deste gráfico">%</button>' +
+                '</div>';
+            }).join('');
+        } else {
+          h += '<p style="margin:2px 0;font-size:12px;color:#c0392b">Sem indicadores: suba um relatório e/ou envie os CSVs do Business Suite.</p>';
+        }
+      }
+      h += '</div>';
       h += '<div class="sec-block"><b>Seções</b><p style="margin:4px 0 8px;font-size:12px;color:var(--ink-soft)">Reordene (▲▼), renomeie, oculte e marque conjuntos (☑) para mesclar.</p></div>';
       CONFIG.campaigns.forEach((cc, ci) => {
         h += '<div class="sec-camp"><div class="sec-row">' +
@@ -995,6 +1399,10 @@
       } else if (act === 't5j') { const cj = cjs[si]; openTop5(cj, candidatesForConj(cj), mergeAdsetsV2(cj.refs).top5, cj.label, () => paint()); return; }
       else if (act === 'cfgexport') { exportConfig(); return; }
       else if (act === 'cfgimport') { importConfigPrompt(); return; }
+      else if (act === 'evoup') { evoReorder(b.dataset.metric, -1); }
+      else if (act === 'evodn') { evoReorder(b.dataset.metric, 1); }
+      else if (act === 'evosrcm') { CONFIG.evolution.src = CONFIG.evolution.src || {}; CONFIG.evolution.src[b.dataset.metric] = (b.dataset.src === 'csv') ? 'csv' : 'main'; }
+      else if (act === 'evodlt') { const k = b.dataset.metric, arr = CONFIG.evolution.deltaOff || (CONFIG.evolution.deltaOff = []); const i = arr.indexOf(k); if (i < 0) arr.push(k); else arr.splice(i, 1); }
       else return;
       render(); paint();
     });
@@ -1004,6 +1412,19 @@
       if (act === 'cinc') CONFIG.campaigns[ci].include = b.checked;
       else if (act === 'jinc') CONFIG.campaigns[ci].conjuntos[si].include = b.checked;
       else if (act === 'kind') { const k = b.dataset.kind, arr = CONFIG.hiddenKinds, idx = arr.indexOf(k); if (b.checked && idx < 0) arr.push(k); else if (!b.checked && idx >= 0) arr.splice(idx, 1); }
+      else if (act === 'evoen') { CONFIG.evolution.enabled = b.checked; render(); paint(); return; }
+      else if (act === 'evodelta') CONFIG.evolution.showDelta = b.checked;
+      else if (act === 'evom') { const k = b.dataset.metric, arr = CONFIG.evolution.hiddenMetrics, idx = arr.indexOf(k); if (!b.checked && idx < 0) arr.push(k); else if (b.checked && idx >= 0) arr.splice(idx, 1); }
+      else if (act === 'evocsv') {
+        const files = [].slice.call(b.files || []); b.value = '';
+        if (!files.length) return;
+        CONFIG.evolution.csv = CONFIG.evolution.csv || {};
+        Promise.all(files.map(readEvoCsv)).then((res) => {
+          res.forEach((r) => { if (r && r.key) CONFIG.evolution.csv[r.key] = r.daily; });
+          render(); paint(); // métricas do CSV entram sozinhas (novas) ou viram opção de fonte
+        });
+        return;
+      }
       else return;
       render();
     });
@@ -1073,6 +1494,7 @@
     if ($('pg-next')) $('pg-next').addEventListener('click', () => deckGo(CUR + 1));
     hideDeckOverlay(); updatePager();
     if ($('rt-platform')) $('rt-platform').addEventListener('change', (e) => { if (e.target.files[0]) onPlatformFile(e.target.files[0], status); e.target.value = ''; });
+    if ($('rt-reach')) $('rt-reach').addEventListener('change', (e) => { if (e.target.files[0]) onReachFile(e.target.files[0], status); e.target.value = ''; });
     if ($('rt-fab')) $('rt-fab').addEventListener('click', () => document.getElementById('report-toolbar').classList.toggle('open'));
     const goHome = () => { location.href = 'index.html'; };
     if ($('rt-home')) $('rt-home').addEventListener('click', goHome);
@@ -1082,17 +1504,19 @@
     if ($('ss-pick')) $('ss-pick').addEventListener('click', () => $('rt-file').click());
     if ($('ss-testdata')) $('ss-testdata').addEventListener('click', () => loadTestData(status));
     if ($('ss-pick-plat')) $('ss-pick-plat').addEventListener('click', () => $('rt-platform').click());
+    if ($('ss-pick-reach')) $('ss-pick-reach').addEventListener('click', () => $('rt-reach').click());
     if ($('ss-go')) $('ss-go').addEventListener('click', () => { if (!__wizR2) return; const ss = document.getElementById('start-screen'); if (ss) ss.classList.add('hidden'); });
     // assistente de upload: navegação entre os 3 passos
     document.querySelectorAll('#start-screen [data-next]').forEach((b) => b.addEventListener('click', () => wizStep(wizCurrent() + 1)));
     document.querySelectorAll('#start-screen [data-prev]').forEach((b) => b.addEventListener('click', () => wizStep(wizCurrent() - 1)));
-    document.querySelectorAll('#start-screen .ss-step-dot').forEach((d) => d.addEventListener('click', () => { const i = +d.dataset.go; if (i === 2 && !__wizR1) return; wizStep(i); }));
+    document.querySelectorAll('#start-screen .ss-step-dot').forEach((d) => d.addEventListener('click', () => { const i = +d.dataset.go; if (i >= 2 && !__wizR1) return; if (i === 3 && !__wizR2) return; wizStep(i); }));
   }
 
   window.__render = {
     render, get config() { return CONFIG; }, get discovered() { return DISCOVERED; },
     loadFile: (file) => onFile(file, document.getElementById('rt-status') || { textContent: '' }),
     loadPlatformFile: (file) => onPlatformFile(file, document.getElementById('rt-status') || { textContent: '' }),
+    loadReachFile: (file) => onReachFile(file, document.getElementById('rt-status') || { textContent: '' }),
     // Dados vindos da API (V3): nome do cliente, palavra do período e foto.
     applyMeta: (o) => {
       o = o || {};

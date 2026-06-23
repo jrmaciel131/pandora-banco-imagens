@@ -17,7 +17,7 @@
 <script src="vendor/chart.umd.js"></script>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="js/deck-stage.js"></script>
-<script src="js/image-slot.js"></script>
+<script src="js/image-slot.js?v=v3.10"></script>
 
 <style>
   /* ─── tokens da V2 escopados em .v2deck (não vazam pro chrome) ─── */
@@ -207,31 +207,28 @@
 
 <body>
 
-<!-- ════ Menu flutuante (oculto na exportação) ════ -->
+<!-- ════ Menu flutuante (V3 — específico; sem upload de Excel) ════ -->
 <div id="report-toolbar" class="export-hidden">
   <button id="rt-fab" type="button" title="Menu" aria-label="Menu">☰</button>
   <div id="rt-menu">
+    <div class="rt-group">
+      <span class="rt-group-h">Relatório</span>
+      <button class="rt-btn" id="v3-mn-reopen" type="button">↻ Trocar cliente/período</button>
+      <button class="rt-btn" id="v3-mn-refresh" type="button">⤓ Atualizar da Meta (forçar)</button>
+      <button class="rt-btn" id="v3-mn-anom" type="button">🔎 Análise de mudanças</button>
+      <button class="rt-btn" id="v3-mn-profiles" type="button">👥 Gerenciar perfis</button>
+    </div>
     <div class="rt-group">
       <span class="rt-group-h">Navegação</span>
       <button class="rt-btn" id="rt-help" type="button">❓ Ajuda (tutorial)</button>
       <button class="rt-btn" id="rt-home" type="button">🏠 Trocar versão (início)</button>
     </div>
     <div class="rt-group">
-      <span class="rt-group-h">Dados</span>
-      <label class="rt-btn">Subir relatório
-        <input type="file" id="rt-file" accept=".xlsx,.xls,.csv" hidden>
-      </label>
-      <label class="rt-btn">Plataforma (2º Excel)
-        <input type="file" id="rt-platform" accept=".xlsx,.xls,.csv" hidden>
-      </label>
-      <button class="rt-btn" id="rt-config" type="button">Mapear colunas</button>
-      <button class="rt-btn" id="rt-testdata" type="button">Dados de exemplo</button>
-    </div>
-    <div class="rt-group">
       <span class="rt-group-h">Personalizar</span>
       <button class="rt-btn" id="rt-sections" type="button">Configurações</button>
       <button class="rt-btn rt-btn-soft" id="rt-restore" type="button" title="Traz de volta anúncios/seções que foram removidos ou ocultados">↩ Restaurar removidos</button>
-      <label class="rt-btn">Foto do profissional
+      <button class="rt-btn" id="v3-mn-photo-auto" type="button">Foto do profissional (da Página)</button>
+      <label class="rt-btn">Foto do profissional (enviar)
         <input type="file" id="rt-photo" accept="image/*" hidden>
       </label>
       <label class="rt-btn">Imagens dos criativos
@@ -243,7 +240,7 @@
       <span class="rt-group-h">Exportar</span>
       <button class="rt-btn" id="rt-pdf" type="button">Exportar PDF</button>
     </div>
-    <span id="rt-status">Suba o relatório (.xlsx) do Meta Ads.</span>
+    <span id="rt-status">Relatório carregado da Meta.</span>
     <div id="rt-version" title="Versão do código carregado. Se não mudar após subir os arquivos, é cache — atualize com Ctrl+F5.">Versão …</div>
   </div>
 </div>
@@ -499,9 +496,9 @@ window.addEventListener('beforeprint', function () {
 });
 </script>
 
-<script src="js/report-parser.js"></script>
-<script src="js/report-render-v2.js"></script>
-<script src="js/meta-api-v3.js"></script>
+<script src="js/report-parser.js?v=v3.10"></script>
+<script src="js/report-render-v2.js?v=v3.10"></script>
+<script src="js/meta-api-v3.js?v=v3.10"></script>
 <script src="js/image-modal.js"></script>
 <script src="js/help-modal.js"></script>
 <script src="js/login-chip.js"></script>

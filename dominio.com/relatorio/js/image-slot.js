@@ -231,6 +231,12 @@
     ':host{display:inline-block;position:relative;vertical-align:top;' +
     '  font:13px/1.3 system-ui,-apple-system,sans-serif;color:rgba(0,0,0,.55);width:240px;height:160px}' +
     '.frame{position:absolute;inset:0;overflow:hidden;background:rgba(0,0,0,.04)}' +
+    // Fundo ambiente: cópia BORRADA da própria imagem preenchendo o card quando o
+    // modo é "reduzir para caber" (contain) e sobra faixa nas bordas. Assim a
+    // imagem nunca é cortada e o card não muda de tamanho nem fica com buraco.
+    '.frame .backdrop{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;' +
+    '  transform:scale(1.14);filter:blur(20px) saturate(1.3) brightness(.92);' +
+    '  -webkit-user-drag:none;user-select:none;pointer-events:none;display:none}' +
     // .frame img (clipped) and .spill (unclipped ghost + handles) share the
     // same left/top/width/height in frame-%, computed by _applyView(), so the
     // inside-mask crop and the outside-mask spill stay pixel-aligned.
@@ -304,6 +310,7 @@
       root.innerHTML =
         '<style>' + stylesheet + '</style>' +
         '<div class="frame" part="frame">' +
+        '  <img class="backdrop" part="backdrop" alt="" aria-hidden="true" draggable="false">' +
         '  <img part="image" alt="" draggable="false" style="display:none">' +
         '  <div class="empty" part="empty">' + icon +
         '    <div class="cap"></div>' +
@@ -320,7 +327,8 @@
         '<input type="file" accept="' + ACCEPT.join(',') + '" hidden>';
       this._frame = root.querySelector('.frame');
       this._ring = root.querySelector('.ring');
-      this._img = root.querySelector('.frame img');
+      this._backdrop = root.querySelector('.backdrop');
+      this._img = root.querySelector('.frame img[part=image]');
       this._empty = root.querySelector('.empty');
       this._cap = root.querySelector('.cap');
       this._sub = root.querySelector('.sub');
@@ -572,11 +580,20 @@
       setTimeout(() => { if (this._err === d) { d.remove(); this._err = null; } }, 3000);
     }
 
-    // Reframing (pan/resize) is only meaningful for fit=cover — contain/fill
-    // keep the old object-fit path and double-click is a no-op.
+    // Reframing (pan/resize) vale para cover E contain — em contain o padrão é
+    // "reduzir para caber" (imagem inteira, sem corte), mas o duplo-clique ainda
+    // permite ajustar o enquadramento manualmente. Só `fill` fica estático.
     _reframes() {
-      return this.hasAttribute('data-filled') &&
-        (this.getAttribute('fit') || 'cover') === 'cover';
+      if (!this.hasAttribute('data-filled')) return false;
+      const fit = this.getAttribute('fit') || 'cover';
+      return fit === 'cover' || fit === 'contain';
+    }
+
+    // Houve ajuste manual de enquadramento? (view difere da identidade). Em
+    // contain isso decide entre mostrar inteira (padrão) ou o recorte do usuário.
+    _isFramed() {
+      const v = this._view;
+      return Math.abs(v.s - 1) > 0.002 || Math.abs(v.x) > 0.002 || Math.abs(v.y) > 0.002;
     }
 
     // Cover-baseline geometry, shared by clamp/apply/resize. Null until the
@@ -604,16 +621,26 @@
     _applyView() {
       const g = this._geom();
       const fit = this.getAttribute('fit') || 'cover';
-      if (fit !== 'cover' || !g) {
-        // Non-cover, or dimensions not known yet (before img load).
+      // Geometria "cover" (pan/zoom) entra quando: o slot é cover; OU é contain e
+      // o usuário está reenquadrando / já ajustou manualmente. Senão fica no
+      // object-fit (contain = reduzir para caber, sem corte; fill = esticar).
+      const reframing = this.hasAttribute('data-reframe');
+      const useCover = fit === 'cover' || (fit === 'contain' && (reframing || this._isFramed()));
+      if (!useCover || !g) {
+        // object-fit puro (ou dimensões ainda desconhecidas, antes do load).
         this._img.style.width = '100%';
         this._img.style.height = '100%';
         this._img.style.left = '50%';
         this._img.style.top = '50%';
         this._img.style.objectFit = fit;
         this._img.style.objectPosition = this.getAttribute('position') || '50% 50%';
+        // Fundo ambiente só no modo contain com imagem (preenche a faixa que sobra).
+        if (this._backdrop) {
+          this._backdrop.style.display = (fit === 'contain' && this.hasAttribute('data-filled')) ? 'block' : 'none';
+        }
         return;
       }
+      if (this._backdrop) this._backdrop.style.display = 'none';
       // Cover baseline: img fills the frame on its tighter axis at s=1, so
       // pan works immediately on the overflowing axis without zooming first.
       // Width/height and left/top are all frame-% — depends only on the
@@ -691,6 +718,7 @@
         if (this._img.getAttribute('src') !== url) {
           this._img.src = url;
           this._ghost.src = url;
+          if (this._backdrop) this._backdrop.src = url;
         }
         this._img.style.display = 'block';
         this._empty.style.display = 'none';
@@ -701,6 +729,7 @@
         this._img.style.display = 'none';
         this._img.removeAttribute('src');
         this._ghost.removeAttribute('src');
+        if (this._backdrop) { this._backdrop.removeAttribute('src'); this._backdrop.style.display = 'none'; }
         this._empty.style.display = 'flex';
         this.removeAttribute('data-filled');
       }

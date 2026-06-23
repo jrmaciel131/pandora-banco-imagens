@@ -15,7 +15,7 @@
 <script src="vendor/chart.umd.js"></script>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="js/deck-stage.js"></script>
-<script src="js/image-slot.js"></script>
+<script src="js/image-slot.js?v=v3.10"></script>
 
 <style>
   /* ─── tokens da V2 escopados em .v2deck (não vazam pro chrome) ─── */
@@ -222,6 +222,9 @@
       <label class="rt-btn">Plataforma (2º Excel)
         <input type="file" id="rt-platform" accept=".xlsx,.xls,.csv" hidden>
       </label>
+      <label class="rt-btn" title="Relatório só por campanha/conjunto/anúncio (sem idade/gênero/plataforma) — dá o Alcance correto, sem inflar pela soma dos recortes">Alcance (3º Excel)
+        <input type="file" id="rt-reach" accept=".xlsx,.xls,.csv" hidden>
+      </label>
       <button class="rt-btn" id="rt-config" type="button">Mapear colunas</button>
       <button class="rt-btn" id="rt-testdata" type="button">Dados de exemplo</button>
     </div>
@@ -263,6 +266,8 @@
       <div class="ss-step-dot" data-go="1"><b>2</b><span>Relatório 1</span></div>
       <div class="ss-step-line"></div>
       <div class="ss-step-dot" data-go="2"><b>3</b><span>Relatório 2</span></div>
+      <div class="ss-step-line"></div>
+      <div class="ss-step-dot" data-go="3"><b>4</b><span>Alcance</span></div>
     </div>
 
     <!-- PÁGINA 1 — sobre -->
@@ -275,7 +280,7 @@
         <div class="ss-flow-card"><span class="ss-flow-n">2</span><b>Relatório 2</b><small>Plataforma</small></div>
         <div class="ss-flow-card ss-flow-done"><span class="ss-flow-n">✓</span><b>Pronto</b><small>Relatório gerado</small></div>
       </div>
-      <p class="ss-flow-note">São <b>dois</b> arquivos .xlsx do mesmo mês — o assistente guia você em cada um. Leva cerca de 2 minutos.</p>
+      <p class="ss-flow-note">São <b>dois</b> arquivos .xlsx do mesmo período (+ <b>1 opcional</b> de Alcance) — o assistente guia você em cada um. Leva cerca de 2 minutos.</p>
       <div class="ss-nav ss-nav-1">
         <button class="ss-btn" data-next type="button">Começar →</button>
       </div>
@@ -372,7 +377,45 @@
       </div>
       <div class="ss-nav">
         <button class="ss-prev" data-prev type="button">← Voltar</button>
-        <button class="ss-btn" id="ss-go" type="button" disabled>Ver relatório →</button>
+        <button class="ss-btn" id="ss-next-2" data-next type="button" disabled>Próximo →</button>
+      </div>
+    </section>
+
+    <!-- PÁGINA 4 — relatório 3 (Alcance, OPCIONAL) -->
+    <section class="ss-page" data-page="3">
+      <div class="ss-brand">PASSO EXTRA · ALCANCE CORRETO (OPCIONAL)</div>
+      <h1>Relatório 3 — Alcance <span style="font-size:.5em;color:var(--ink-soft);font-weight:700">(opcional)</span></h1>
+      <p>Sem este arquivo o relatório funciona normal, mas o <b>alcance</b> pode vir inflado — a Meta soma o alcance em cada recorte (idade/gênero/plataforma) e cada dia. Com ele, o alcance dos gráficos <b>bate com o gerenciador</b>. <b>Mesmo período e mesmas métricas</b>: muda só o detalhamento — <b>sem</b> Idade/Gênero/Plataforma e <b>sem Dia</b>.</p>
+      <div class="ss-specs">
+        <div class="ss-spec">
+          <div class="ss-spec-h">Detalhamento</div>
+          <ul class="ss-speclist">
+            <li>Nome da campanha</li>
+            <li>Nome do conjunto de anúncios</li>
+            <li>Nome do anúncio</li>
+          </ul>
+        </div>
+        <div class="ss-spec">
+          <div class="ss-spec-h">Métricas <small style="font-weight:600;color:var(--ink-soft)">(as mesmas do Relatório 1)</small></div>
+          <ul class="ss-speclist ss-speclist-2">
+            <li>Valor usado</li>
+            <li>Impressões</li>
+            <li class="hi">Alcance</li>
+            <li>Resultados</li>
+            <li>Custo por resultado</li>
+            <li>Frequência</li>
+            <li>Cliques no link</li>
+            <li>Visualizações</li>
+          </ul>
+        </div>
+      </div>
+      <div class="ss-uprow">
+        <button class="ss-btn2" id="ss-pick-reach" type="button">Selecionar Relatório 3 (.xlsx)</button>
+        <div class="ss-platmsg" id="ss-reach-msg"></div>
+      </div>
+      <div class="ss-nav">
+        <button class="ss-prev" data-prev type="button">← Voltar</button>
+        <button class="ss-btn" id="ss-go" type="button">Ver relatório →</button>
       </div>
     </section>
 
@@ -497,8 +540,8 @@ window.addEventListener('beforeprint', function () {
 });
 </script>
 
-<script src="js/report-parser.js"></script>
-<script src="js/report-render-v2.js"></script>
+<script src="js/report-parser.js?v=v3.10"></script>
+<script src="js/report-render-v2.js?v=v3.10"></script>
 <script src="js/image-modal.js"></script>
 <script src="js/help-modal.js"></script>
 <script src="js/login-chip.js"></script>

@@ -26,6 +26,7 @@
     platform:    { label: 'Plataforma',              aliases: ['plataforma', 'plataforma de veiculacao', 'platform'] },
     placement:   { label: 'Posicionamento',          aliases: ['posicionamento', 'posicionamento de veiculacao', 'placement'] },
     followers:   { label: 'Seguidores no Instagram', aliases: ['seguidores no instagram', 'seguidores', 'instagram followers', 'follows'] },
+    views:       { label: 'Visualizações de vídeo',  aliases: ['visualizacoes de video', 'visualizacoes', 'reproducoes de video', 'reproducoes de video de 3 segundos', 'reproducoes de video de ate 3 segundos', 'video plays', '3-second video plays', 'thruplays', 'reproducoes'] },
   };
 
   // Regras de segmento (por trecho do nome). Editáveis aqui.
@@ -115,7 +116,7 @@
 
   function build(headers, rows) {
     const c = resolveColumns(headers);
-    const missing = Object.keys(COLUMNS).filter((k) => c[k].idx < 0 && !['start', 'age', 'gender', 'platform', 'placement', 'followers', 'result_type'].includes(k));
+    const missing = Object.keys(COLUMNS).filter((k) => c[k].idx < 0 && !['start', 'age', 'gender', 'platform', 'placement', 'followers', 'result_type', 'views'].includes(k));
     const get = (row, key) => (c[key].idx >= 0 ? row[c[key].idx] : '');
 
     const overall = emptyAgg(), eng = emptyAgg(), vis = emptyAgg(), c31 = emptyAgg(), c32 = emptyAgg();
@@ -395,6 +396,28 @@
     const na = parseInt(a, 10), nb = parseInt(b, 10);
     return (isNaN(na) ? Infinity : na) - (isNaN(nb) ? Infinity : nb);
   };
+  // Epoch (UTC, ms) de uma data 'YYYY-MM-DD' e o caminho inverso.
+  const WK_ABBR = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+  const epToKey = (ep) => { const d = new Date(ep); return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0'); };
+  // Rótulo do período pelas datas REAIS da semana (min–max): '12–18 mai',
+  // '29 abr–4 mai' (cruza o mês) ou '12 mai' (um dia só).
+  const spanLabel = (minS, maxS) => {
+    const a = minS.split('-').map(Number), b = maxS.split('-').map(Number);
+    if (minS === maxS) return a[2] + ' ' + WK_ABBR[a[1] - 1];
+    if (a[1] === b[1]) return a[2] + '–' + b[2] + ' ' + WK_ABBR[b[1] - 1];
+    return a[2] + ' ' + WK_ABBR[a[1] - 1] + '–' + b[2] + ' ' + WK_ABBR[b[1] - 1];
+  };
+  // Categoria do "Tipo de resultado" → indicador da evolução. Mensagem casa
+  // 'mensag' ou a palavra 'conversa(s)'; conversão casa conversao/cadastro/lead/
+  // compra/registro (NÃO confundir 'conversao' com 'conversa').
+  const resultCat = (rt) => {
+    const s = norm(rt);
+    if (!s) return null;
+    if (/mensag/.test(s) || /\bconversas?\b/.test(s)) return 'msg';
+    if (/perfil|profile/.test(s)) return 'visits';
+    if (/conversao|conversoes|cadastr|\blead/.test(s) || /compra|purchase|registr|assinatura/.test(s)) return 'conv';
+    return null;
+  };
 
   function discoverV2(headers, rows) {
     const c = resolveColumns(headers);
@@ -403,6 +426,9 @@
     const isEmptyDim = (v) => !v || /^(unknown|desconhecido|n\/a|na)$/i.test(v);
     const dimVals = { age: new Set(), gender: new Set(), platform: new Set() };
     const monthCount = {};
+    // Evolução (página de comparativo): acumula por DIA; as semanas são montadas
+    // depois, ancoradas no ÚLTIMO dia do relatório (evita semana parcial no fim).
+    const evoDays = new Map();
 
     // detalhe acumulado (reutilizado em campanha / conjunto / anúncio)
     const mkD = () => ({ res: 0, spend: 0, impr: 0, reach: 0, clicks: 0, ads: new Map(), daily: new Map(), ag: new Map(), plat: new Map() });
@@ -452,7 +478,17 @@
           addD(A.ads.get(vals.ad), vals, dk, ageK, genK, platK);
         }
       }
-      if (dk) { const k = dk.slice(0, 7); monthCount[k] = (monthCount[k] || 0) + 1; }
+      if (dk) {
+        const k = dk.slice(0, 7); monthCount[k] = (monthCount[k] || 0) + 1;
+        let D = evoDays.get(dk);
+        if (!D) { D = { spend: 0, results: 0, msg: 0, visits: 0, conv: 0, impr: 0, reach: 0, views: 0, fol: 0 }; evoDays.set(dk, D); }
+        D.spend += vals.spend; D.results += vals.results; D.impr += vals.impressions; D.reach += vals.reach;
+        D.views += num(get(row, 'views'));
+        const cat = resultCat(rt);
+        if (cat) D[cat] += vals.results;
+        const fol = num(get(row, 'followers')); // seguidores é snapshot do dia (maior valor)
+        if (fol > D.fol) D.fol = fol;
+      }
     });
 
     let bestKey = null, bestCount = -1;
@@ -527,10 +563,72 @@
         });
       });
 
+    // Monta as semanas a partir dos dias, ANCORADAS no último dia do relatório:
+    // blocos de 7 dias terminando no último dia → a semana mais recente é sempre
+    // completa (não cai no gráfico por causa de uma semana parcial no fim).
+    const DAY_MS = 86400000;
+    const dayKeys = [...evoDays.keys()].sort();
+    let weekArr = [];
+    if (dayKeys.length) {
+      const toEp = (s) => { const p = s.split('-').map(Number); return Date.UTC(p[0], p[1] - 1, p[2]); };
+      const lastEp = toEp(dayKeys[dayKeys.length - 1]);
+      const buckets = new Map();
+      dayKeys.forEach((dk) => {
+        const endEp = lastEp - Math.floor((lastEp - toEp(dk)) / (7 * DAY_MS)) * 7 * DAY_MS;
+        const endKey = epToKey(endEp);
+        let B = buckets.get(endKey);
+        if (!B) { B = { end: endKey, min: dk, max: dk, spend: 0, results: 0, msg: 0, visits: 0, conv: 0, impr: 0, reach: 0, views: 0, folDate: '', fol: 0 }; buckets.set(endKey, B); }
+        const D = evoDays.get(dk);
+        B.spend += D.spend; B.results += D.results; B.msg += D.msg; B.visits += D.visits; B.conv += D.conv; B.impr += D.impr; B.reach += D.reach; B.views += D.views;
+        if (dk < B.min) B.min = dk;
+        if (dk > B.max) B.max = dk;
+        if (D.fol > 0 && dk >= B.folDate) { B.folDate = dk; B.fol = D.fol; }
+      });
+      weekArr = [...buckets.values()].sort((a, b) => (a.end < b.end ? -1 : 1)).map((B) => ({
+        key: B.end, label: spanLabel(B.min, B.max),
+        spend: B.spend, results: B.results, msg: B.msg, visits: B.visits, conv: B.conv,
+        impr: B.impr, reach: B.reach, views: B.views, cpr: div(B.spend, B.results), followers: B.fol,
+      }));
+    }
+    const anyPos = (sel) => weekArr.some((w) => sel(w) > 0);
+    const hasMsg = c.result_type.idx >= 0 && anyPos((w) => w.msg);
+    const hasVisits = c.result_type.idx >= 0 && anyPos((w) => w.visits);
+    const hasConv = c.result_type.idx >= 0 && anyPos((w) => w.conv);
+    const evolution = {
+      weeks: weekArr,
+      months: Object.keys(monthCount).length,
+      available: {
+        msg: hasMsg, visits: hasVisits, conv: hasConv,
+        // "Resultados" genérico só quando o tipo não casa msg/visitas/conversão.
+        res: anyPos((w) => w.results) && !(hasMsg || hasVisits || hasConv),
+        cpr: anyPos((w) => w.results),
+        impr: c.impressions.idx >= 0 && anyPos((w) => w.impr),
+        reach: c.reach.idx >= 0 && anyPos((w) => w.reach),
+        views: c.views.idx >= 0 && anyPos((w) => w.views),
+        followers: c.followers.idx >= 0 && anyPos((w) => w.followers),
+      },
+    };
+
+    // Faixa real de datas (1º → último dia com dado). Usada para comparar dois
+    // arquivos do MESMO período (mesmo que o "mês predominante" difira) e para
+    // rotular relatórios de vários meses sem reduzir a um mês só.
+    const range = dayKeys.length ? { first: dayKeys[0], last: dayKeys[dayKeys.length - 1] } : { first: null, last: null };
+    let periodObj;
+    if (period && Object.keys(monthCount).length > 1 && range.first) {
+      const f = range.first.split('-').map(Number), l = range.last.split('-').map(Number);
+      periodObj = (f[0] === l[0])
+        ? { month: MESES[f[1] - 1] + ' a ' + MESES[l[1] - 1], year: String(f[0]) }
+        : { month: MESES[f[1] - 1] + '/' + f[0] + ' a ' + MESES[l[1] - 1] + '/' + l[0], year: '' };
+    } else {
+      periodObj = period ? { month: MESES[period[1] - 1], year: String(period[0]) } : { month: 'NA', year: 'NA' };
+    }
+
     return {
-      period: period ? { month: MESES[period[1] - 1], year: String(period[0]) } : { month: 'NA', year: 'NA' },
+      period: periodObj,
+      range: range,
       overall: metricsOf(overall),
       campaigns,
+      evolution,
       breakdowns: {
         age: hasCol.age && dimVals.age.size >= 1,
         gender: hasCol.gender && dimVals.gender.size >= 1,
