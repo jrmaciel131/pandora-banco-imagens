@@ -15,6 +15,11 @@
   const fmtK = (n) => (Math.abs(n) >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K' : fmtInt(n));
   const fmtCur = (n) => (isFinite(n) ? 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'NA');
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+  // Caixa baixa só na 1ª letra — usado quando o objetivo aparece EMBUTIDO no meio
+  // de uma frase (ex.: "Campanha de conversas por mensagem iniciadas"), para a
+  // capitalização ficar consistente. Nomes próprios mais à frente (ex.: Instagram)
+  // são preservados, pois só o 1º caractere muda.
+  const lcFirst = (s) => { s = String(s == null ? '' : s); return s ? s.charAt(0).toLowerCase() + s.slice(1) : s; };
   const el = (html) => { const t = document.createElement('template'); t.innerHTML = String(html).trim(); return t.content.firstElementChild; };
   const j = (o) => esc(JSON.stringify(o)); // JSON seguro p/ atributo data-* (aspas duplas; não quebra com apóstrofo)
   const ageCmp = (a, b) => { const na = parseInt(a, 10), nb = parseInt(b, 10); return (isNaN(na) ? Infinity : na) - (isNaN(nb) ? Infinity : nb); };
@@ -56,14 +61,17 @@
   // servindo JS de cache (atualize com Ctrl+F5).
   const APP_VERSION = '2026.06.23-1';
 
-  let DISCOVERED = null, CONFIG = null, editing = true, PLATFORM_DATA = null, REACH_DATA = null;
+  let DISCOVERED = null, CONFIG = null, editing = true, PLATFORM_DATA = null, REACH = null;
 
   // CSS da página de evolução (injetado uma vez; vale p/ V2 e V3 — ambas .v2deck).
   (function injectEvoStyle() {
     if (typeof document === 'undefined' || document.getElementById('v2-evo-style')) return;
     const s = document.createElement('style'); s.id = 'v2-evo-style';
     s.textContent =
+      '.v2deck section[data-kind="evolution"] .head .date{display:none}' +
       '.v2deck .evo-body{position:absolute;top:430px;left:88px;right:88px;bottom:74px;display:flex;flex-direction:column;gap:14px}' +
+      '.v2deck .evo-title{top:282px;right:610px;font-size:48px}' +
+      '.v2deck .evo-period{position:absolute;top:303px;right:88px;width:500px;text-align:right;font-family:var(--vfont);font-size:14px;font-weight:700;line-height:1.35;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
       '.v2deck .evo-hero{flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:13px 20px;background:linear-gradient(90deg,#eafaf3,#f4fbf8);border:1px solid #bce8d4;border-left:5px solid #1fae74;border-radius:10px;font:600 16px "Open Sans",sans-serif;color:#16633f}' +
       '.v2deck .evo-hero-ic{font-size:20px;line-height:1}' +
       '.v2deck .evo-hero b{font-weight:800;color:#0f4f31}' +
@@ -173,27 +181,54 @@
     PLATFORM_DATA.campaigns.forEach((c) => (c.platform || []).forEach((o) => { const g = m.get(o.key) || { spend: 0, results: 0, reach: 0 }; g.spend += o.spend; g.results += o.results; g.reach += o.reach; m.set(o.key, g); }));
     return [...m.entries()].map(([key, v]) => ({ key, spend: v.spend, results: v.results, reach: v.reach })).sort((x, y) => y.spend - x.spend);
   }
-  // Alcance CORRETO de um escopo, vindo do Relatório 3 (Alcance, sem breakpoints).
-  // O alcance somado dos arquivos com breakpoint (idade/gênero/plataforma × dia)
-  // infla muito (mesma pessoa contada em cada recorte e cada dia); este vem do
-  // arquivo sem recortes. null = sem Relatório 3 → mantém o comportamento atual.
+  // Alcance CORRETO (deduplicado por nível). O alcance somado dos arquivos com
+  // breakpoint (idade/gênero/plataforma × dia) infla muito — a mesma pessoa é
+  // contada em cada recorte e cada dia. Modelo NORMALIZADO `REACH` em mapas por
+  // nome, preenchido pela V2 (3º Excel → reachFromDiscovered) OU pela V3 (API →
+  // applyReach, exato em todos os níveis). null = sem dado → mantém o somado.
+  const RSEP = '';
   function reachScope(campName, adsetNames, adName) {
-    if (!REACH_DATA) return null;
-    const c = REACH_DATA.campaigns.find((x) => x.name === campName);
-    if (!c) return null;
+    if (!REACH) return null;
     if (adName) {
       let r = 0, any = false;
-      c.adsets.forEach((a) => { if (adsetNames && adsetNames.length && adsetNames.indexOf(a.name) < 0) return; const ad = (a.ads || []).find((x) => x.name === adName); if (ad) { r += ad.metrics.reach; any = true; } });
+      (adsetNames && adsetNames.length ? adsetNames : ['']).forEach((an) => {
+        const k = campName + RSEP + an + RSEP + adName;
+        if (Object.prototype.hasOwnProperty.call(REACH.ad, k)) { r += REACH.ad[k]; any = true; }
+      });
       return any ? r : null;
     }
     if (adsetNames && adsetNames.length) {
       let r = 0, any = false;
-      c.adsets.forEach((a) => { if (adsetNames.indexOf(a.name) >= 0) { r += a.metrics.reach; any = true; } });
+      adsetNames.forEach((an) => { const k = campName + RSEP + an; if (Object.prototype.hasOwnProperty.call(REACH.adset, k)) { r += REACH.adset[k]; any = true; } });
       return any ? r : null;
     }
-    return c.metrics.reach;
+    return Object.prototype.hasOwnProperty.call(REACH.camp, campName) ? REACH.camp[campName] : null;
   }
-  function reachOverall() { return REACH_DATA ? REACH_DATA.campaigns.reduce((s, c) => s + (c.metrics.reach || 0), 0) : null; }
+  function reachOverall() { return REACH && typeof REACH.overall === 'number' ? REACH.overall : null; }
+  // V2 (3º Excel): exato no nível em que o arquivo foi exportado; nos demais vira
+  // soma (comportamento conhecido). V3 substitui por valores exatos via applyReach.
+  function reachFromDiscovered(D) {
+    const R = { camp: {}, adset: {}, ad: {}, overall: 0 };
+    (D.campaigns || []).forEach((c) => {
+      R.camp[c.name] = c.metrics.reach; R.overall += (c.metrics.reach || 0);
+      (c.adsets || []).forEach((a) => {
+        R.adset[c.name + RSEP + a.name] = a.metrics.reach;
+        (a.ads || []).forEach((ad) => { R.ad[c.name + RSEP + a.name + RSEP + ad.name] = ad.metrics.reach; });
+      });
+    });
+    return R;
+  }
+  // V3 (API): alcance deduplicado EXATO por nível (campanha/conjunto/anúncio).
+  function applyReachData(obj) {
+    if (!obj) { REACH = null; if (CONFIG) render(); return; }
+    const R = { camp: {}, adset: {}, ad: {}, overall: (typeof obj.overall === 'number' && obj.overall > 0 ? obj.overall : null) };
+    (obj.campaigns || []).forEach((c) => { R.camp[String(c.name)] = +c.reach || 0; });
+    (obj.adsets || []).forEach((a) => { R.adset[String(a.campaign) + RSEP + String(a.name)] = +a.reach || 0; });
+    (obj.ads || []).forEach((a) => { R.ad[String(a.campaign) + RSEP + String(a.adset) + RSEP + String(a.name)] = +a.reach || 0; });
+    if (R.overall == null) R.overall = (obj.campaigns || []).reduce((s, c) => s + (+c.reach || 0), 0);
+    REACH = R;
+    if (CONFIG) render();
+  }
 
   // ── foto do profissional (skeleton quando vazia; sobe 1x e propaga) ──
   const CAM_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9a2 2 0 0 1 2-2h2l1.5-2.2h7L19 7h0a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="12.5" r="3.4"/></svg>';
@@ -549,7 +584,19 @@
     if (!shown.length) return [];
     const entries = shown.map((md) => {
       const src = evoSrcOf(md, srcs), ev = srcs[src], em = evoEffective(md, src);
-      return { md: md, em: em, src: src, st: evoStat(em, ev.weeks), labels: j(ev.weeks.map((w) => w.label)), showDelta: globalDelta && deltaOff.indexOf(md.key) < 0 };
+      let weeks = ev.weeks;
+      // O Alcance da fonte Excel/main é SOMA dos recortes (idade/gênero × dia) →
+      // inflado. Reescala para o total DEDUPLICADO (REACH da API / 3º Excel), p/
+      // bater com o Gerenciador da Meta, mantendo a forma semana a semana.
+      if (md.key === 'reach' && src === 'main') {
+        const dedup = reachOverall();
+        const summed = weeks.reduce((a, w) => a + (+w.reach || 0), 0);
+        if (dedup != null && dedup > 0 && summed > 0 && Math.abs(dedup - summed) > 1) {
+          const f = dedup / summed;
+          weeks = weeks.map((w) => Object.assign({}, w, { reach: (+w.reach || 0) * f }));
+        }
+      }
+      return { md: md, em: em, src: src, st: evoStat(em, weeks), labels: j(weeks.map((w) => w.label)), showDelta: globalDelta && deltaOff.indexOf(md.key) < 0 };
     });
 
     // Destaque (faixa): maior crescimento positivo entre os que mostram variação.
@@ -578,6 +625,11 @@
     // Paginação balanceada: distribui os gráficos por igual entre as páginas.
     const n = entries.length, pages = Math.max(1, Math.ceil(n / EVO_PER_PAGE)), per = Math.ceil(n / pages);
     const usingCsv = entries.some((e) => e.src === 'csv');
+    const weeks = (entries[0] && srcs[entries[0].src] && srcs[entries[0].src].weeks) || [];
+    const firstYear = weeks[0] && String(weeks[0].key || '').slice(0, 4);
+    const lastYear = weeks.length && String(weeks[weeks.length - 1].key || '').slice(0, 4);
+    const yearText = (/^\d{4}$/.test(firstYear) && /^\d{4}$/.test(lastYear)) ? (firstYear === lastYear ? ' de ' + lastYear : ' de ' + firstYear + ' a ' + lastYear) : '';
+    const periodText = weeks.length ? (weeks[0].label + (weeks.length > 1 ? ' a ' + weeks[weeks.length - 1].label : '') + yearText) : 'Periodo atual';
     const sub = usingCsv
       ? 'Acompanhe a evolução do perfil ao longo do período de trabalho.'
       : 'Acompanhe como os principais resultados evoluíram ao longo das semanas do período.';
@@ -587,6 +639,8 @@
       if (!slice.length) break;
       const label = '03 Evolução' + (pages > 1 ? ' (' + (p + 1) + '/' + pages + ')' : '');
       out.push(el('<section data-screen-label="' + label + '" data-kind="evolution">' + headHtml('Evolução' + (pages > 1 ? ' ' + (p + 1) + '/' + pages : '')) +
+        '<div class="det-title evo-title ed">Panorama da evolu&ccedil;&atilde;o</div>' +
+        '<div class="evo-period ed">Per&iacute;odo analisado: ' + esc(periodText) + '</div>' +
         '<div class="det-sub ed">' + sub + '</div>' +
         '<div class="evo-body">' + (p === 0 ? heroHtml : '') + '<div class="evo-grid">' + slice.map(cardHtml).join('') + '</div></div>' + VO + '</section>'));
     }
@@ -598,12 +652,12 @@
     const m = cc.ref.metrics, rt = cc.ref.resultType || 'Resultados';
     return el('<section data-screen-label="Campanha ' + esc(cc.label) + '">' + headHtml('Campanha') +
       '<div class="det-title ed">' + esc(cc.label) + '</div>' +
-      '<div class="det-sub ed">Campanha <b>' + esc(cc.label) + '</b> — objetivo de <b>' + esc(rt) + '</b>. A seguir: visão geral (resultados, custo por resultado e valor gasto), evolução diária dos resultados, público por gênero e idade e desempenho por plataforma.</div>' +
-      '<div class="det-top"><div class="det-card-thumb">' + MEGAPHONE + '<div class="cap ed">Campanha de<br>' + esc(rt) + '</div></div>' +
+      '<div class="det-sub ed">Campanha <b>' + esc(cc.label) + '</b> — objetivo de <b>' + esc(lcFirst(rt)) + '</b>. A seguir: visão geral (resultados, custo por resultado e valor gasto), evolução diária dos resultados, público por gênero e idade e desempenho por plataforma.</div>' +
+      '<div class="det-top"><div class="det-card-thumb">' + MEGAPHONE + '<div class="cap ed">Campanha de<br>' + esc(lcFirst(rt)) + '</div></div>' +
       '<div class="det-overview"><div class="sec-lbl">Visão geral do desempenho</div>' +
       '<div class="kpi-row">' + kpiCard(rt, fmtInt(m.results), 'resultados') + kpiCard('Custo por resultado', fmtCur(m.cpr), 'custo_resultado') + kpiCard('Valor gasto', fmtCur(m.spend), 'valor') + '</div>' +
       '<div class="sec-lbl" style="margin-top:8px">' + esc(rt) + '</div>' + lineCanvas('v2c' + ci + '-line', cc.ref.daily, 'results', '', rt) + '</div></div>' +
-      '<div class="det-demo"><div class="sec-lbl">Distribuição por gênero e idade <span class="sec-sub">— barras = nº de resultados (' + esc(rt) + ')</span></div>' + demoCanvas('v2c' + ci + '-demo', cc.ref.ageGender) + demoLegend(cc.ref.ageGender) + '</div>' +
+      '<div class="det-demo"><div class="sec-lbl">Distribuição por gênero e idade <span class="sec-sub">— barras = nº de resultados (' + esc(lcFirst(rt)) + ')</span></div>' + demoCanvas('v2c' + ci + '-demo', cc.ref.ageGender) + demoLegend(cc.ref.ageGender) + '</div>' +
       platBlock('v2c' + ci + '-plat', platformForCampaign(cc.ref.name), reachScope(cc.ref.name)) + VO + '</section>');
   }
 
@@ -614,12 +668,12 @@
     const disp = dispConj(cc, cj); // "TAG-CAMPANHA | NOME DO CONJUNTO"
     return el('<section data-screen-label="' + esc(disp) + '">' + headHtml('Conjunto') +
       '<div class="det-title ed">' + esc(disp) + '</div>' +
-      '<div class="det-sub ed">Conjunto <b>' + esc(cj.label) + '</b> da campanha ' + esc(cc.label) + '. A seguir: principais métricas (' + esc(rt) + ', custo por resultado e valor gasto), evolução diária, público por gênero e idade e desempenho por plataforma.</div>' +
+      '<div class="det-sub ed">Conjunto <b>' + esc(cj.label) + '</b> da campanha ' + esc(cc.label) + '. A seguir: principais métricas (' + esc(lcFirst(rt)) + ', custo por resultado e valor gasto), evolução diária, público por gênero e idade e desempenho por plataforma.</div>' +
       '<div class="det-top"><div class="det-card-thumb">' + MEGAPHONE + '<div class="cap ed">Conjunto</div></div>' +
       '<div class="det-overview"><div class="sec-lbl">Visão geral do desempenho</div>' +
       '<div class="kpi-row">' + kpiCard(rt, fmtInt(m.metrics.results), 'resultados') + kpiCard('Custo por resultado', fmtCur(m.metrics.cpr), 'custo_resultado') + kpiCard('Valor gasto', fmtCur(m.metrics.spend), 'valor') + '</div>' +
       '<div class="sec-lbl" style="margin-top:8px">' + esc(rt) + '</div>' + lineCanvas(id + '-line', m.daily, 'results', '', rt) + '</div></div>' +
-      '<div class="det-demo"><div class="sec-lbl">Distribuição por gênero e idade <span class="sec-sub">— barras = nº de resultados (' + esc(rt) + ')</span></div>' + demoCanvas(id + '-demo', m.ageGender) + demoLegend(m.ageGender) + '</div>' +
+      '<div class="det-demo"><div class="sec-lbl">Distribuição por gênero e idade <span class="sec-sub">— barras = nº de resultados (' + esc(lcFirst(rt)) + ')</span></div>' + demoCanvas(id + '-demo', m.ageGender) + demoLegend(m.ageGender) + '</div>' +
       platBlock(id + '-plat', platformForAdsets(cj.refs.map((r) => r.name)), reachScope(cc.ref.name, cj.refs.map((r) => r.name))) + VO + '</section>');
   }
 
@@ -631,12 +685,12 @@
     const del = '<button class="ad-del" data-exa="' + esc(det.name) + '" data-ci="' + scope.ci + '" data-si="' + scope.si + '" title="Remover este anúncio" type="button">×</button>';
     return el('<section data-screen-label="Anúncio ' + esc(adName) + '">' + headHtml('Anúncio') + del +
       '<div class="det-title ed" style="font-size:' + titleFs + 'px">' + esc(adName) + '</div>' +
-      '<div class="det-sub ed">Anúncio <b>' + esc(adName) + '</b>. A seguir: métricas individuais (' + esc(rt) + ', custo por resultado e valor gasto), evolução diária, público por gênero e idade e desempenho por plataforma.</div>' +
+      '<div class="det-sub ed">Anúncio <b>' + esc(adName) + '</b>. A seguir: métricas individuais (' + esc(lcFirst(rt)) + ', custo por resultado e valor gasto), evolução diária, público por gênero e idade e desempenho por plataforma.</div>' +
       '<div class="det-top"><div class="ad-thumb"><image-slot id="' + idp + '" data-ad="' + esc(det.name) + '" fit="contain" placeholder="thumb"></image-slot></div>' +
       '<div class="det-overview"><div class="sec-lbl">Visão geral do desempenho</div>' +
       '<div class="kpi-row">' + kpiCard(rt, fmtInt(m.results), 'resultados') + kpiCard('Custo por resultado', fmtCur(m.cpr), 'custo_resultado') + kpiCard('Valor gasto', fmtCur(m.spend), 'valor') + '</div>' +
       '<div class="sec-lbl" style="margin-top:8px">' + esc(rt) + '</div>' + lineCanvas(idp + '-line', det.daily, 'results', '', rt) + '</div></div>' +
-      '<div class="det-demo"><div class="sec-lbl">Distribuição por gênero e idade <span class="sec-sub">— barras = nº de resultados (' + esc(rt) + ')</span></div>' + demoCanvas(idp + '-demo', det.ageGender) + demoLegend(det.ageGender) + '</div>' +
+      '<div class="det-demo"><div class="sec-lbl">Distribuição por gênero e idade <span class="sec-sub">— barras = nº de resultados (' + esc(lcFirst(rt)) + ')</span></div>' + demoCanvas(idp + '-demo', det.ageGender) + demoLegend(det.ageGender) + '</div>' +
       platBlock(idp + '-plat', platformForAd(det.name, cj.refs.map((r) => r.name)), reachScope(cc.ref.name, cj.refs.map((r) => r.name), det.name)) + VO + '</section>');
   }
 
@@ -669,7 +723,7 @@
         name: cc.ref.name, label: cc.label, include: cc.include,
         conjuntos: (cc.conjuntos || []).map((cj) => ({
           adsets: cj.refs.map((r) => r.name), label: cj.label, labelAuto: cj.labelAuto, include: cj.include,
-          top5Override: cj.top5Override || null, exclAds: cj.exclAds || null,
+          top5Override: cj.top5Override || null, exclAds: cj.exclAds || null, adMode: cj.adMode || null,
         })),
       })),
     };
@@ -705,6 +759,7 @@
         refs.forEach((r) => usedAdsets.add(r.name));
         const cj = { refs, label: sj.label, labelAuto: sj.labelAuto !== false, include: sj.include !== false };
         if (sj.top5Override) cj.top5Override = sj.top5Override;
+        if (sj.adMode) cj.adMode = sj.adMode;
         if (sj.exclAds) cj.exclAds = sj.exclAds;
         conjuntos.push(cj);
       });
@@ -769,10 +824,18 @@
     inp.click();
   }
 
+  // Quais anúncios viram página neste conjunto. Modos (cj.adMode): 'top3' · 'top5'
+  // (padrão) · 'all' (todos) · 'custom' (escolha manual em cj.top5Override, sem
+  // teto). Os atalhos top3/top5/all são só uma fatia do ranking por resultados.
   function topForConj(cj, m) {
     const ex = cj.exclAds || [];
-    const base = cj.top5Override || m.adsAll || m.top5 || [];
-    return base.filter((a) => ex.indexOf(a.name) < 0).slice(0, 5);
+    const all = (m.adsAll || m.top5 || []).filter((a) => ex.indexOf(a.name) < 0);
+    if (cj.top5Override && cj.top5Override.length) {            // personalizado: exatamente os escolhidos (na ordem), sem teto
+      return cj.top5Override.filter((a) => ex.indexOf(a.name) < 0);
+    }
+    const mode = cj.adMode || 'top5';
+    if (mode === 'all') return all;
+    return all.slice(0, mode === 'top3' ? 3 : 5);
   }
   function adFallback(ad) { return { name: ad.name, metrics: { results: ad.results, spend: NaN, cpr: NaN }, daily: [], ageGender: { ages: [], series: [], totals: {} }, platform: [] }; }
 
@@ -987,6 +1050,7 @@
         if (cj.include === false) { cj.include = true; n++; }
         if (cj.exclAds && cj.exclAds.length) { n += cj.exclAds.length; delete cj.exclAds; }
         if (cj.top5Override) { delete cj.top5Override; n++; }
+        if (cj.adMode && cj.adMode !== 'top5') { delete cj.adMode; n++; }
       });
     });
     if (CONFIG.hiddenKinds && CONFIG.hiddenKinds.length) { n += CONFIG.hiddenKinds.length; CONFIG.hiddenKinds = []; }
@@ -1212,7 +1276,7 @@
       if (!R._columns || R._columns.reach.idx < 0) { setMsg('⚠ Este arquivo não tem a coluna Alcance — nada a fazer.', true); return; }
       const warns = validateReach(R);
       if (warns.length) { if (!window.confirm('Atenção — o Relatório 3 (alcance) difere do principal:\n\n• ' + warns.join('\n• ') + '\n\nUsar mesmo assim?')) { setMsg('Relatório 3 cancelado.', true); return; } }
-      REACH_DATA = R;
+      REACH = reachFromDiscovered(R);
       render();
       setMsg('✓ Relatório 3 (alcance) carregado de ' + file.name + ' — o alcance dos gráficos agora vem dele.');
     } catch (err) { setMsg('Erro ao ler Relatório 3: ' + err.message, true); }
@@ -1358,14 +1422,18 @@
           '<input class="sec-lbl" data-act="clbl" data-ci="' + ci + '" value="' + esc(cc.label) + '">' +
           '<label><input type="checkbox" data-act="cinc" data-ci="' + ci + '" ' + (cc.include ? 'checked' : '') + '> incluir</label></div>';
         cc.conjuntos.forEach((cj, si) => {
+          const mode = (cj.top5Override && cj.top5Override.length) ? 'custom' : (cj.adMode || 'top5');
+          const modeBtn = (m, lbl) => '<button class="sec-mini' + (mode === m ? ' on' : '') + '" data-act="adn" data-ci="' + ci + '" data-si="' + si + '" data-n="' + m + '">' + lbl + '</button>';
           h += '<div class="sec-row sec-conj">' +
             '<input type="checkbox" class="msel" data-ci="' + ci + '" data-si="' + si + '" title="marcar para mesclar">' +
             '<button class="sec-mini" data-act="jup" data-ci="' + ci + '" data-si="' + si + '">▲</button>' +
             '<button class="sec-mini" data-act="jdn" data-ci="' + ci + '" data-si="' + si + '">▼</button>' +
             '<input class="sec-lbl" data-act="jlbl" data-ci="' + ci + '" data-si="' + si + '" value="' + esc(cj.label) + '">' +
             '<label><input type="checkbox" data-act="jinc" data-ci="' + ci + '" data-si="' + si + '" ' + (cj.include ? 'checked' : '') + '> incluir</label>' +
-            '<button class="sec-mini" data-act="t5j" data-ci="' + ci + '" data-si="' + si + '">Top 5' + (cj.top5Override ? ' ✎' : '') + '</button>' +
-            (cj.refs.length > 1 ? '<button class="sec-mini" data-act="jsplit" data-ci="' + ci + '" data-si="' + si + '">desmesclar</button>' : '') + '</div>';
+            (cj.refs.length > 1 ? '<button class="sec-mini" data-act="jsplit" data-ci="' + ci + '" data-si="' + si + '">desmesclar</button>' : '') + '</div>' +
+            '<div class="sec-row sec-conj sec-adn"><span style="font-size:11px;color:var(--ink-soft);align-self:center;margin-right:2px">Anúncios:</span>' +
+            modeBtn('top3', 'Top 3') + modeBtn('top5', 'Top 5') + modeBtn('all', 'Todos') +
+            '<button class="sec-mini' + (mode === 'custom' ? ' on' : '') + '" data-act="t5j" data-ci="' + ci + '" data-si="' + si + '">Personalizado' + (mode === 'custom' ? ' ✎' : '') + '</button></div>';
         });
         h += '<button class="rt-btn sec-merge" data-act="merge" data-ci="' + ci + '">Mesclar marcados</button></div>';
       });
@@ -1396,7 +1464,8 @@
         const label = 'CONJUNTO ' + idxs.map((k) => cjs[k].label.replace(/^CONJUNTO\s*/i, '')).join(' + ');
         for (let k = idxs.length - 1; k >= 1; k--) cjs.splice(idxs[k], 1);
         cjs[idxs[0]] = { refs, label, include: true };
-      } else if (act === 't5j') { const cj = cjs[si]; openTop5(cj, candidatesForConj(cj), mergeAdsetsV2(cj.refs).top5, cj.label, () => paint()); return; }
+      } else if (act === 'adn') { const cj = cjs[si]; cj.adMode = b.dataset.n; delete cj.top5Override; }   // atalho: Top 3/5/Todos (limpa a escolha manual)
+      else if (act === 't5j') { const cj = cjs[si]; openTop5(cj, candidatesForConj(cj), mergeAdsetsV2(cj.refs).top5, cj.label, () => paint()); return; }
       else if (act === 'cfgexport') { exportConfig(); return; }
       else if (act === 'cfgimport') { importConfigPrompt(); return; }
       else if (act === 'evoup') { evoReorder(b.dataset.metric, -1); }
@@ -1451,13 +1520,14 @@
     host.addEventListener('click', (e) => { if (e.target === host) host.remove(); });
     const card = host.querySelector('#t5-card');
     function paintT() {
-      let h = '<h3>Top 5 — ' + esc(label) + '</h3><p>Marque até 5 anúncios e ordene com ▲▼. Cada anúncio marcado vira uma página.</p>';
+      const nSel = work.filter((w) => w.sel).length;
+      let h = '<h3>Anúncios personalizados — ' + esc(label) + '</h3><p>Marque os anúncios que devem virar página e ordene com ▲▼. Sem limite de quantidade. <b>' + nSel + '</b> marcado(s).</p>';
       work.forEach((w, i) => { h += '<div class="sec-row"><input type="checkbox" data-i="' + i + '" ' + (w.sel ? 'checked' : '') + '><button class="sec-mini" data-up="' + i + '">▲</button><button class="sec-mini" data-dn="' + i + '">▼</button><span class="t5-name">' + esc(w.name) + '</span><span class="t5-res">' + w.results + '</span></div>'; });
-      h += '<div class="cfg-actions"><button id="t5-apply" class="rt-btn">Aplicar</button><button id="t5-auto" class="rt-btn" style="background:#444;color:#fff">Automático</button><button id="t5-close" class="rt-btn" style="background:#444;color:#fff">Fechar</button></div>';
+      h += '<div class="cfg-actions"><button id="t5-apply" class="rt-btn">Aplicar</button><button id="t5-auto" class="rt-btn" style="background:#444;color:#fff">Automático (Top 5)</button><button id="t5-close" class="rt-btn" style="background:#444;color:#fff">Fechar</button></div>';
       card.innerHTML = h;
       card.querySelector('#t5-close').onclick = () => host.remove();
-      card.querySelector('#t5-auto').onclick = () => { delete node.top5Override; delete node.exclAds; host.remove(); render(); if (after) after(); };
-      card.querySelector('#t5-apply').onclick = () => { const chosen = work.filter((w) => w.sel).slice(0, 5).map((w) => ({ name: w.name, results: w.results })); if (chosen.length) node.top5Override = chosen; else delete node.top5Override; host.remove(); render(); if (after) after(); };
+      card.querySelector('#t5-auto').onclick = () => { delete node.top5Override; delete node.exclAds; node.adMode = 'top5'; host.remove(); render(); if (after) after(); };
+      card.querySelector('#t5-apply').onclick = () => { const chosen = work.filter((w) => w.sel).map((w) => ({ name: w.name, results: w.results })); if (chosen.length) { node.top5Override = chosen; node.adMode = 'custom'; } else { delete node.top5Override; node.adMode = 'top5'; } host.remove(); render(); if (after) after(); };
     }
     card.addEventListener('click', (e) => {
       const up = e.target.closest('[data-up]'), dn = e.target.closest('[data-dn]');
@@ -1517,6 +1587,7 @@
     loadFile: (file) => onFile(file, document.getElementById('rt-status') || { textContent: '' }),
     loadPlatformFile: (file) => onPlatformFile(file, document.getElementById('rt-status') || { textContent: '' }),
     loadReachFile: (file) => onReachFile(file, document.getElementById('rt-status') || { textContent: '' }),
+    applyReach: (obj) => applyReachData(obj),    // V3: alcance deduplicado da API (campanha/conjunto/anúncio)
     // Dados vindos da API (V3): nome do cliente, palavra do período e foto.
     applyMeta: (o) => {
       o = o || {};

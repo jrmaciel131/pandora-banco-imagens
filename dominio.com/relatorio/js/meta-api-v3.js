@@ -22,12 +22,13 @@
   // Carimbo de versão do FRONTEND. BATA com o V3_BUILD do backend
   // (api/v3-meta-insights.php) a cada release: a tela mostra os dois e avisa se
   // divergirem — é assim que se confirma que o deploy (JS + PHP) realmente subiu.
-  var V3_BUILD = 'v3.10 · 2026-06-22';
+  var V3_BUILD = 'v3.12 · 2026-06-24';
   var csrf = '';
   var accountsLoaded = false;
   var periodType = 'mensal';            // mensal · quinzenal · custom
   var pendingThumbs = null;             // mapa nome→url aplicado quando os slots ficam prontos
   var thumbsFallbackTimer = null;
+  var lastGen = null;                   // { account, t, since, until, label } da última geração — usado pelo "recarregar imagens"
 
   var MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
@@ -294,6 +295,24 @@
       + '#v3-pm .v3-pm-gallery figure{margin:0}'
       + '#v3-pm .v3-pm-gallery img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;background:#08171f}'
       + '#v3-pm .v3-pm-gallery figcaption{font-size:10px;color:#6f8a93;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+      // busca + editor de perfil (nome/máscara + foto)
+      + '#v3-pm .v3-pm-search{width:100%;box-sizing:border-box;background:#08171f;color:#eaf4f6;border:1px solid rgba(255,255,255,.16);border-radius:10px;padding:11px 14px;font-size:14px;margin-bottom:16px}'
+      + '#v3-pm .v3-pm-search:focus{outline:none;border-color:rgba(50,205,205,.55)}'
+      + '#v3-pm .v3-pm-search::placeholder{color:#6f8a93}'
+      + '#v3-pm .v3-pm-empty-search{color:#6f8a93;font-size:13px;padding:10px 0}'
+      + '#v3-pm .v3-pm-edit{margin-top:12px;padding:14px;background:#08171f;border:1px solid rgba(255,255,255,.1);border-radius:10px}'
+      + '#v3-pm .v3-pm-edit label{display:block;font-size:12px;font-weight:600;color:#9fc1c9;margin:0 0 6px}'
+      + '#v3-pm .v3-pm-edit .v3-pm-namerow{display:flex;gap:8px;align-items:stretch}'
+      + '#v3-pm .v3-pm-edit input[type=text]{flex:1;min-width:0;box-sizing:border-box;background:#0e2330;color:#eaf4f6;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:9px 12px;font-size:14px}'
+      + '#v3-pm .v3-pm-edit input[type=text]:focus{outline:none;border-color:rgba(50,205,205,.55)}'
+      + '#v3-pm .v3-pm-edit .v3-pm-save{flex:none;background:#32cdcd;color:#06222a;border:0;border-radius:8px;padding:0 16px;font:700 13px "Open Sans",sans-serif;cursor:pointer}'
+      + '#v3-pm .v3-pm-edit .v3-pm-save:hover{filter:brightness(1.07)}'
+      + '#v3-pm .v3-pm-edit .v3-pm-hint{font-size:11.5px;color:#6f8a93;margin-top:6px;line-height:1.4}'
+      + '#v3-pm .v3-pm-edit .v3-pm-photo-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}'
+      + '#v3-pm .v3-pm-edit .v3-pm-photo-row .v3-pm-fbtn{background:#0e2330;color:#9fc1c9;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:8px 12px;font:600 12px "Open Sans",sans-serif;cursor:pointer}'
+      + '#v3-pm .v3-pm-edit .v3-pm-photo-row .v3-pm-fbtn:hover{color:#32cdcd;border-color:rgba(50,205,205,.5)}'
+      + '#v3-pm .v3-pm-edit .v3-pm-save-msg{font-size:12px;margin-top:8px;min-height:14px}'
+      + '#v3-pm .v3-pm-edit .v3-pm-save-msg.ok{color:#7fe3c0}#v3-pm .v3-pm-edit .v3-pm-save-msg.err{color:#ff9a9a}'
       // modal de anomalias (só o usuário vê; nunca entra no PDF)
       + '#v3-anom{position:fixed;inset:0;z-index:9600;display:none;align-items:center;justify-content:center;background:rgba(4,12,18,.72);font-family:"Open Sans",system-ui,sans-serif;padding:24px}'
       + '#v3-anom .v3-anom-card{width:min(560px,94vw);max-height:88vh;overflow:auto;background:#0e2330;border:1px solid rgba(255,180,84,.35);border-radius:16px;color:#eaf4f6;box-shadow:0 24px 60px rgba(0,0,0,.5);padding:26px 28px}'
@@ -455,7 +474,7 @@
     var sel = document.getElementById('v3-acc');
     if (!sel || !sel.value) return null;
     var opt = sel.options[sel.selectedIndex];
-    return { account: sel.value, t: Number(opt.getAttribute('data-t') || 0), label: opt.getAttribute('data-label') || '' };
+    return { account: sel.value, t: Number(opt.getAttribute('data-t') || 0), label: opt.getAttribute('data-label') || '', mask: opt.getAttribute('data-mask') || '' };
   }
 
   /* ── fluxo ────────────────────────────────────────────────────────────── */
@@ -489,8 +508,9 @@
     }
     var multi = !!data.multi;   // mais de uma BM → mostra de qual cada conta veio
     sel.innerHTML = accts.map(function (a) {
-      var lbl = (a.has_photo ? '📷 ' : '') + esc(a.label) + (multi && a.bm ? ' · ' + esc(a.bm) : '');
-      return '<option value="' + esc(a.act_id) + '" data-t="' + (a.t || 0) + '" data-label="' + esc(a.label) + '">' + lbl + '</option>';
+      var nome = (a.mask && a.mask.trim()) ? a.mask : a.label;   // máscara (nome de exibição) quando definida
+      var lbl = (a.has_photo ? '📷 ' : '') + esc(nome) + (multi && a.bm ? ' · ' + esc(a.bm) : '');
+      return '<option value="' + esc(a.act_id) + '" data-t="' + (a.t || 0) + '" data-label="' + esc(a.label) + '" data-mask="' + esc(a.mask || '') + '">' + lbl + '</option>';
     }).join('');
     document.getElementById('v3-go').disabled = false;
     var src = data.origin === 'cache' ? 'da lista salva' : (data.auto ? 'lista automática da Meta' : 'lista configurada');
@@ -504,6 +524,7 @@
     var per = currentPeriod();
     if (!per || !per.since || !per.until) { msg('Escolha o período.', 'err'); return; }
     if (per.since > per.until) { msg('A data inicial está depois da final.', 'err'); return; }
+    lastGen = { account: c.account, t: c.t, since: per.since, until: per.until, label: c.label };
 
     var btn = document.getElementById('v3-go');
     btn.disabled = true;
@@ -524,9 +545,13 @@
       if (data.platform && data.platform.length > 1) {
         await window.__render.loadPlatformFile(aoaToFile(data.platform, 'meta-' + per.since + '-plat.xlsx'));
       }
+      if (data.reach && window.__render.applyReach) window.__render.applyReach(data.reach);   // alcance correto (deduplicado por nível)
       setStage('Desenhando os gráficos…', 98);
       var ex = data.extras || {};
-      if (window.__render.applyMeta) window.__render.applyMeta({ client: ex.pageName || c.label, periodWord: periodWord(per.since, per.until), photo: ex.photo || null });
+      // Nome do cliente no relatório: máscara (nome de exibição) definida pelo usuário
+      // vence; senão o nome da Página da Meta; senão o rótulo da conta.
+      var clientName = (c.mask && c.mask.trim()) ? c.mask : (ex.pageName || c.label);
+      if (window.__render.applyMeta) window.__render.applyMeta({ client: clientName, periodWord: periodWord(per.since, per.until), photo: ex.photo || null });
 
       renderUsage(data.usage);
       var rows = (data.meta && data.meta.rows_main) || 0;
@@ -542,12 +567,17 @@
         var nomes = (tm.low_quality_names || []).slice(0, 8).join(', ');
         alert('⚠ ' + tm.low_quality + ' imagem(ns) vieram em BAIXA resolução (a Meta limitou a busca em alta no momento).\n\n'
           + (nomes ? 'Anúncios: ' + nomes + (tm.low_quality_names.length > 8 ? '…' : '') + '\n\n' : '')
-          + 'Elas NÃO foram salvas no cache — gere de novo daqui a pouco ou use "Atualizar da Meta (forçar)" para puxar em alta.');
+          + 'Elas NÃO foram salvas no cache. Use o menu ☰ → "🖼 Recarregar imagens" daqui a pouco para tentar de novo SÓ as imagens (sem repuxar os dados).');
       }
       setOriginBadge(data);
       setStatus(originShort(data) + ' · ' + rows + ' linhas' + (warns.length ? ' · ⚠ ' + warns.join(' · ') : ''));
+      // Orientação contextual: foto pelo upload; imagens faltando/baixa qualidade pelo botão de recarregar (só imagens).
+      var imgIssue = tm && ((tm.failed || 0) > 0 || (tm.low_quality || 0) > 0);
+      var guide = [];
+      if (!ex.photo) guide.push('☰ → Foto do profissional');
+      if (imgIssue) guide.push('☰ → 🖼 Recarregar imagens');
       msg('✓ Relatório (' + originShort(data) + ', ' + rows + ' linhas' + (tm ? ', ' + nThumbs + ' criativo(s)' : '') + ').'
-        + (warns.length ? '<br><span style="color:#ffb454">⚠ ' + esc(warns.join(' · ')) + ' — use o menu ☰ → Foto para enviar manualmente</span>' : ''), 'ok');
+        + (warns.length ? '<br><span style="color:#ffb454">⚠ ' + esc(warns.join(' · ')) + (guide.length ? ' — use ' + esc(guide.join(' · ')) : '') + '</span>' : ''), 'ok');
       hideOverlay();
       backfillAndAnomaly(c, per);   // histórico (3 meses) em background + modal de anomalias
     } catch (err) {
@@ -556,6 +586,33 @@
       btn.disabled = false;
       stopProgress();
     }
+  }
+
+  /* Recarrega SÓ as imagens (criativos) faltando ou em baixa resolução do
+     relatório aberto, sem repuxar os dados — pra não estourar o consumo da API.
+     Reusa o período/cliente da última geração. Acionada pelo menu ☰. */
+  async function reloadCreatives() {
+    var g = lastGen;
+    if (!g) {
+      var c = currentClient(), per = currentPeriod();
+      if (c && per && per.since && per.until) g = { account: c.account, t: c.t, since: per.since, until: per.until };
+    }
+    if (!g) { setStatus('Gere um relatório primeiro (Trocar cliente/período) para recarregar as imagens.'); return; }
+    setStatus('🖼 Recarregando imagens faltando/baixa qualidade…');
+    var data = await callApi({ method: 'POST', body: { account: g.account, since: g.since, until: g.until, t: g.t, action: 'reload_creatives' } });
+    if (!data.ok) {
+      if (data.code === 'AUTH' || data.code === 'SESSION_EXPIRED' || data._http === 401) { goToLogin(); return; }
+      setStatus('Não consegui recarregar as imagens: ' + errLine(data));
+      return;
+    }
+    if (data.thumbs) { scheduleThumbs(data.thumbs); applyThumbs(data.thumbs); }
+    renderUsage(data.usage);
+    var tm = (data.meta && data.meta.thumbs) || {};
+    var got = (tm.cached || 0) + (tm.fetched || 0);
+    var parts = [got + ' imagem(ns) aplicada(s)'];
+    if (tm.failed) parts.push(tm.failed + ' ainda sem imagem');
+    if (tm.low_quality) parts.push(tm.low_quality + ' ainda em baixa resolução (a Meta limitou; tente de novo mais tarde)');
+    setStatus('🖼 ' + parts.join(' · '));
   }
 
   /* Re-busca a foto da Página vinculada e salva no perfil; aplica no relatório
@@ -667,6 +724,7 @@
     on('v3-mn-refresh', function () { showOverlay(); generate(true); });
     on('v3-mn-anom', openAnomaly);
     on('v3-mn-profiles', openProfileModal);
+    on('v3-mn-reload-img', reloadCreatives);
     on('v3-mn-photo-auto', refreshPhoto);
     var rp = document.getElementById('rt-photo');
     if (rp) rp.addEventListener('change', persistPhotoFromInput);   // persiste no perfil além do apply local da V2
@@ -702,34 +760,101 @@
   function renderProfiles(body, profiles, usage) {
     var head = usage ? '<div class="v3-pm-usage">Consumo da API Meta hoje: <b>' + (usage.max_buc || 0) + '%</b> · ' + (usage.calls || 0) + ' chamada(s) ao vivo</div>' : '';
     if (!profiles.length) { body.innerHTML = head + '<p class="v3-pm-empty">Nenhum perfil salvo ainda. Gere um relatório para criar o primeiro.</p>'; return; }
-    body.innerHTML = head + profiles.map(function (p) {
+    var search = '<input type="text" id="v3-pm-search" placeholder="🔎 Buscar perfil pelo nome…" autocomplete="off">';
+    body.innerHTML = head + search + '<div id="v3-pm-list">' + profiles.map(function (p) {
+      var nome = (p.mask && p.mask.trim()) ? p.mask : p.label;       // o que é exibido
+      var searchTxt = ((p.mask || '') + ' ' + (p.label || '') + ' ' + (p.bm || '')).toLowerCase();
       var periods = (p.reports || []).map(function (r) {
         return '<span class="v3-pm-period' + (r.is_final ? '' : ' open') + '" title="' + (r.is_final ? 'consolidado' : 'parcial') + ' · salvo ' + esc(fmtWhen(r.fetched_at)) + '">' + esc(r.since) + ' → ' + esc(r.until) + '</span>';
       }).join('');
-      var photo = p.photo ? '<img class="v3-pm-photo" src="' + p.photo + '" alt="">' : '<div class="v3-pm-photo empty">sem<br>foto</div>';
-      return '<div class="v3-pm-item" data-acc="' + esc(p.account_id) + '">'
+      var photo = '<div class="v3-pm-photo empty">' + (p.has_photo ? 'foto<br>salva' : 'sem<br>foto') + '</div>';
+      // Editor inline: nome de exibição (máscara) + foto. data-bm garante a chave certa por BM.
+      var maskVal = (p.mask && p.mask.trim()) ? p.mask : '';
+      var editor = '<div class="v3-pm-edit" hidden>'
+        + '<label>Nome de exibição (aparece no relatório e no seletor)</label>'
+        + '<div class="v3-pm-namerow">'
+        + '<input type="text" class="v3-pm-name-in" maxlength="120" placeholder="ex.: ' + esc(p.label) + '" value="' + esc(maskVal) + '">'
+        + '<button class="v3-pm-save" data-act="savename" type="button">Salvar</button>'
+        + '</div>'
+        + '<div class="v3-pm-hint">Conta na Meta: <b>' + esc(p.label) + '</b>' + (p.bm ? ' · BM: ' + esc(p.bm) : '') + '. Deixe em branco para usar o nome da Página da Meta.</div>'
+        + '<div class="v3-pm-photo-row">'
+        + '<button class="v3-pm-fbtn" data-act="photo" type="button">📷 ' + (p.has_photo ? 'Trocar foto' : 'Enviar foto') + '</button>'
+        + (p.has_photo ? '<button class="v3-pm-fbtn" data-act="rmphoto" type="button">Remover foto</button>' : '')
+        + '<input type="file" class="v3-pm-photo-in" accept="image/*" hidden>'
+        + '</div>'
+        + '<div class="v3-pm-save-msg"></div>'
+        + '</div>';
+      return '<div class="v3-pm-item" data-acc="' + esc(p.account_id) + '" data-bm="' + esc(p.bm || '') + '" data-search="' + esc(searchTxt) + '">'
         + photo
         + '<div class="v3-pm-info">'
-        + '<div class="v3-pm-name">' + esc(p.label) + (p.bm ? ' <span class="v3-pm-bm">· ' + esc(p.bm) + '</span>' : '') + '</div>'
+        + '<div class="v3-pm-name">' + esc(nome) + (p.bm ? ' <span class="v3-pm-bm">· ' + esc(p.bm) + '</span>' : '') + '</div>'
         + '<div class="v3-pm-meta">' + p.reports_count + ' relatório(s) em cache · ' + p.creatives_count + ' criativo(s)'
         + (p.photo_source ? ' · foto: ' + esc(p.photo_source) : ' · sem foto') + '</div>'
         + '<div class="v3-pm-periods">' + (periods || '<span class="v3-pm-none">nenhum período em cache</span>') + '</div>'
         + '<div class="v3-pm-actions">'
-        + '<button data-act="thumbs">Ver criativos (' + p.creatives_count + ')</button>'
-        + '<button data-act="clear">Limpar cache</button>'
-        + (p.has_photo ? '<button data-act="rmphoto">Remover foto</button>' : '')
+        + '<button data-act="edit" type="button">✎ Editar perfil</button>'
+        + '<button data-act="thumbs" type="button">Ver criativos (' + p.creatives_count + ')</button>'
+        + '<button data-act="clear" type="button">Limpar cache</button>'
         + '</div>'
+        + editor
         + '<div class="v3-pm-gallery" hidden></div>'
         + '</div></div>';
-    }).join('');
+    }).join('') + '</div>';
     body.querySelectorAll('.v3-pm-item').forEach(function (item) {
       var acc = item.getAttribute('data-acc');
+      var bm = item.getAttribute('data-bm') || '';
       item.querySelectorAll('button[data-act]').forEach(function (b) {
-        b.addEventListener('click', function () { profileAction(b.getAttribute('data-act'), acc, item); });
+        b.addEventListener('click', function () { profileAction(b.getAttribute('data-act'), acc, item, bm); });
       });
+      var fin = item.querySelector('.v3-pm-photo-in');
+      if (fin) fin.addEventListener('change', function (e) { uploadProfilePhoto(e, acc, bm, item); });
+    });
+    // Busca: filtra os itens conforme o texto digitado.
+    var si = document.getElementById('v3-pm-search');
+    if (si) si.addEventListener('input', function () {
+      var q = si.value.trim().toLowerCase();
+      var any = false;
+      body.querySelectorAll('.v3-pm-item').forEach(function (item) {
+        var hit = !q || (item.getAttribute('data-search') || '').indexOf(q) >= 0;
+        item.style.display = hit ? '' : 'none';
+        if (hit) any = true;
+      });
+      var empty = document.getElementById('v3-pm-empty-search');
+      if (!any && !empty) { var d = document.createElement('div'); d.id = 'v3-pm-empty-search'; d.className = 'v3-pm-empty-search'; d.textContent = 'Nenhum perfil encontrado para “' + si.value + '”.'; document.getElementById('v3-pm-list').appendChild(d); }
+      else if (any && empty) empty.remove();
     });
   }
-  async function profileAction(act, account, item) {
+  async function profileAction(act, account, item, bm) {
+    if (act === 'edit') {
+      var ed = item.querySelector('.v3-pm-edit');
+      if (ed) { ed.hidden = !ed.hidden; if (!ed.hidden) { var inp = ed.querySelector('.v3-pm-name-in'); if (inp) inp.focus(); } }
+      return;
+    }
+    if (act === 'savename') {
+      var ed2 = item.querySelector('.v3-pm-edit');
+      var inp2 = ed2 && ed2.querySelector('.v3-pm-name-in');
+      var msg2 = ed2 && ed2.querySelector('.v3-pm-save-msg');
+      var val = inp2 ? inp2.value.trim() : '';
+      if (msg2) { msg2.className = 'v3-pm-save-msg'; msg2.textContent = 'Salvando…'; }
+      var r = await callApi({ method: 'POST', body: { account: account, bm: bm, action: 'set_display_name', display_name: val } });
+      if (r && r.ok) {
+        if (msg2) { msg2.className = 'v3-pm-save-msg ok'; msg2.textContent = '✓ Nome salvo.'; }
+        var nameEl = item.querySelector('.v3-pm-name');
+        if (nameEl) nameEl.innerHTML = esc(val || (item.getAttribute('data-search') || '').split(' ')[0]) + (bm ? ' <span class="v3-pm-bm">· ' + esc(bm) + '</span>' : '');
+        // Atualiza o seletor da tela inicial sem recarregar tudo.
+        var sel = document.getElementById('v3-acc');
+        if (sel) for (var i = 0; i < sel.options.length; i++) {
+          var o = sel.options[i];
+          if (o.value === account) { o.setAttribute('data-mask', val); var lbl = o.getAttribute('data-label') || ''; o.textContent = (val || lbl); break; }
+        }
+      } else if (msg2) { msg2.className = 'v3-pm-save-msg err'; msg2.textContent = 'Falha ao salvar: ' + errLine(r); }
+      return;
+    }
+    if (act === 'photo') {
+      var fin2 = item.querySelector('.v3-pm-photo-in');
+      if (fin2) fin2.click();
+      return;
+    }
     if (act === 'thumbs') {
       var gal = item.querySelector('.v3-pm-gallery');
       if (!gal.hidden) { gal.hidden = true; return; }
@@ -742,19 +867,35 @@
       return;
     }
     if (act === 'clear') {
-      if (!confirm('Apagar os relatórios e criativos em cache deste perfil? A foto é mantida.')) return;
+      if (!confirm('Apagar os relatórios e criativos em cache deste perfil? A foto e o nome são mantidos.')) return;
       await callApi({ method: 'POST', body: { account: account, action: 'clear_profile' } });
       openProfileModal();
       return;
     }
     if (act === 'rmphoto') {
       if (!confirm('Remover a foto do profissional deste perfil?')) return;
-      var t = 0, sel = document.getElementById('v3-acc');
-      if (sel) for (var i = 0; i < sel.options.length; i++) { if (sel.options[i].value === account) { t = Number(sel.options[i].getAttribute('data-t') || 0); break; } }
-      await callApi({ method: 'POST', body: { account: account, t: t, action: 'remove_photo' } });
+      await callApi({ method: 'POST', body: { account: account, bm: bm, action: 'remove_photo' } });
       openProfileModal();
       return;
     }
+  }
+  /* Lê a imagem escolhida no editor de perfil e salva no perfil (set_photo). */
+  function uploadProfilePhoto(e, account, bm, item) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    var msg = item.querySelector('.v3-pm-save-msg');
+    if (msg) { msg.className = 'v3-pm-save-msg'; msg.textContent = 'Enviando foto…'; }
+    var reader = new FileReader();
+    reader.onload = async function () {
+      var r = await callApi({ method: 'POST', body: { account: account, bm: bm, action: 'set_photo', photo: reader.result } });
+      if (r && r.ok) {
+        if (msg) { msg.className = 'v3-pm-save-msg ok'; msg.textContent = '✓ Foto salva no perfil.'; }
+        var av = item.querySelector('.v3-pm-photo');
+        if (av) { av.classList.remove('empty'); av.innerHTML = ''; av.style.background = 'url(' + r.photo + ') center/cover no-repeat'; }
+      } else if (msg) { msg.className = 'v3-pm-save-msg err'; msg.textContent = 'Falha ao salvar a foto: ' + errLine(r); }
+      e.target.value = '';
+    };
+    reader.readAsDataURL(file);
   }
 
   /* ── histórico (3 meses) + anomalias ──────────────────────────────────── */

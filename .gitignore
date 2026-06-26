@@ -45,10 +45,12 @@ private-config/distance_overrides.json
 
 # ── Relatório V3 (/relatorio): saídas e lixo de teste — NÃO versionar ─────
 # uploads/ guarda PDFs e imagens reais de clientes; _phptest e old são
-# rascunhos. Nada disso deve ir para o Git (nem no privado nem no público).
+# rascunhos. token/ guarda o token da Meta (Graph API) em texto — segredo.
+# Nada disso deve ir para o Git (nem no privado nem no público).
 dominio.com/relatorio/uploads/
 dominio.com/relatorio/_phptest/
 dominio.com/relatorio/old/
+dominio.com/relatorio/token/
 
 # ── Arquivos do Windows / Mac / Linux ─────────────────────
 desktop.ini

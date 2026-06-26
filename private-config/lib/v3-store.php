@@ -170,6 +170,35 @@ class V3Store {
         } catch (Throwable $e) {}
     }
 
+    /** Nome de exibição (máscara) do perfil — o que o usuário definiu para mostrar
+        no relatório/seletor. Devolve null quando não há máscara: vazio OU igual ao
+        nome da conta na Meta (auto-semeado), casos em que o nome volta a vir da
+        Página da Meta. Não muta o banco. */
+    public static function getDisplayName(string $account, string $bm): ?string {
+        $db = self::db();
+        if (!$db) return null;
+        try {
+            $st = $db->prepare("SELECT display_name,label FROM v3_profile WHERE account_id=? AND bm=?");
+            $st->execute([$account, $bm]);
+            $r = $st->fetch();
+            if (!$r) return null;
+            $dn = trim((string) $r['display_name']);
+            return ($dn !== '' && $dn !== trim((string) $r['label'])) ? $dn : null;
+        } catch (Throwable $e) { return null; }
+    }
+
+    /** Define (ou limpa, com string vazia) o nome de exibição/máscara do perfil. */
+    public static function setDisplayName(string $account, string $bm, string $displayName): void {
+        $db = self::db();
+        if (!$db || $account === '') return;
+        try {
+            $db->prepare("INSERT INTO v3_profile (account_id,bm,label,display_name,last_seen_at,updated_at)
+                          VALUES (?,?,?,?,NOW(),NOW())
+                          ON DUPLICATE KEY UPDATE display_name=VALUES(display_name),updated_at=NOW()")
+               ->execute([$account, $bm, '', $displayName]);
+        } catch (Throwable $e) {}
+    }
+
     /** Foto do perfil pronta como data URL, ou null. */
     public static function getProfilePhoto(string $account, string $bm): ?string {
         $db = self::db();
@@ -351,8 +380,12 @@ class V3Store {
             $out = [];
             foreach ($profs as $p) {
                 $a = $p['account_id'];
+                $dn = trim((string) $p['display_name']);
+                $mask = ($dn !== '' && $dn !== trim((string) $p['label'])) ? $dn : '';   // '' = sem máscara
                 $out[] = [
-                    'account_id' => $a, 'bm' => $p['bm'], 'label' => $p['label'] ?: $p['display_name'],
+                    'account_id' => $a, 'bm' => $p['bm'],
+                    'label' => $p['label'] ?: $p['display_name'],   // nome da conta na Meta
+                    'mask' => $mask,                                 // nome de exibição definido pelo usuário
                     'has_photo' => (bool) $p['has_photo'], 'photo_source' => $p['photo_source'],
                     'photo_updated_at' => $p['photo_updated_at'], 'last_seen_at' => $p['last_seen_at'],
                     'reports_count' => $repCounts[$a] ?? 0, 'creatives_count' => $creCounts[$a] ?? 0,

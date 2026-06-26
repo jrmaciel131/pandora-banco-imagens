@@ -28,13 +28,13 @@ header('Content-Type: application/json; charset=utf-8');
 /* Carimbo de versão do backend. BATA ESTE VALOR com o V3_BUILD do
    js/meta-api-v3.js a cada release: a tela do V3 mostra os dois lado a lado e
    avisa se divergirem — é assim que se confirma que o deploy realmente subiu. */
-define('V3_BUILD', 'v3.10 · 2026-06-22');
+define('V3_BUILD', 'v3.12 · 2026-06-24');
 
 /* Versão da LÓGICA DE CÁLCULO (resultado/criativos). Bumpe sempre que mudar como
    o "Resultado" é escolhido ou como os criativos são buscados: relatórios e
    criativos salvos com uma versão diferente são ignorados (recalculados sozinhos),
    sem precisar limpar o cache na mão. */
-define('V3_CALC', '2026-06-22a');
+define('V3_CALC', '2026-06-24b');
 
 /* Abaixo desta largura (px) a imagem é considerada de BAIXA qualidade (ex.: a Meta
    devolveu o thumbnail de 64px porque estrangulou a busca em alta) — não é salva
@@ -198,6 +198,17 @@ function fail($code, $msg, $http = 400, array $extra = []) {
              'step' => $GLOBALS['v3_step'] ?? null, 'ms' => function_exists('v3_ms') ? v3_ms() : null];
     echo json_encode(array_merge($base, $extra), JSON_UNESCAPED_UNICODE);
     exit;
+}
+
+/** Chave da BM para as ações de perfil: usa o `bm` explícito (enviado pelo
+    gerenciador de perfis, que já conhece a BM de cada perfil) e, na falta dele,
+    resolve pelo índice `t` do token (caminho do menu interno). */
+function v3_bm_key(array $body, array $tokens): string {
+    $bm = trim((string)($body['bm'] ?? ''));
+    if ($bm !== '') return $bm;
+    $ti = (int)($body['t'] ?? 0);
+    if ($ti < 0 || $ti >= count($tokens)) $ti = 0;
+    return (string)($tokens[$ti]['label'] ?? '');
 }
 
 /* ── 3) Exige login do sistema ────────────────────────────────────────────
@@ -408,9 +419,17 @@ if ($action === 'clear_profile') {
     exit;
 }
 if ($action === 'remove_photo') {
-    $ti = (int)($body['t'] ?? 0); if ($ti < 0 || $ti >= count($tokens)) $ti = 0;
-    if ($V3_HAS_STORE) V3Store::removePhoto($accountId, $tokens[$ti]['label']);
+    if ($V3_HAS_STORE) V3Store::removePhoto($accountId, v3_bm_key($body, $tokens));
     echo json_encode(['ok' => true], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+/* Define o nome de exibição (máscara) do perfil — string vazia limpa a máscara. */
+if ($action === 'set_display_name') {
+    if (!$V3_HAS_STORE) fail('NO_STORE', 'Persistência indisponível no servidor — não dá para salvar o nome agora.', 503);
+    $dn = trim((string)($body['display_name'] ?? ''));
+    if (mb_strlen($dn) > 120) $dn = mb_substr($dn, 0, 120);
+    V3Store::setDisplayName($accountId, v3_bm_key($body, $tokens), $dn);
+    echo json_encode(['ok' => true, 'display_name' => $dn], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -459,9 +478,12 @@ if ($accountId === '') {
         $list = $cachedList;
         if ($V3_HAS_STORE) V3Store::logCall($usuario, '', 'accounts', v3_ms(), 200, 0, true);
     }
-    // Marca quais perfis já têm foto salva, para o seletor indicar.
+    // Marca quais perfis já têm foto salva e a máscara (nome de exibição), p/ o seletor.
     if ($V3_HAS_STORE) {
-        foreach ($list as &$a) { $a['has_photo'] = V3Store::hasPhoto($a['act_id'], $a['bm'] ?? ''); }
+        foreach ($list as &$a) {
+            $a['has_photo'] = V3Store::hasPhoto($a['act_id'], $a['bm'] ?? '');
+            $a['mask']      = V3Store::getDisplayName($a['act_id'], $a['bm'] ?? '') ?? '';
+        }
         unset($a);
     }
     echo json_encode([
@@ -487,7 +509,7 @@ if ($action === 'set_photo' || $action === 'refresh_photo') {
         }
         $bytes = base64_decode($m[2], true);
         if ($bytes === false || strlen($bytes) > 3000000) fail('BAD_PHOTO', 'Imagem inválida ou grande demais (máx. ~3 MB).');
-        V3Store::setProfilePhoto($accountId, $tokens[$tIdx]['label'], $clientLabel, base64_encode($bytes), $m[1], 'manual');
+        V3Store::setProfilePhoto($accountId, v3_bm_key($body, $tokens), $clientLabel, base64_encode($bytes), $m[1], 'manual');
         echo json_encode(['ok' => true, 'photo' => 'data:' . $m[1] . ';base64,' . base64_encode($bytes), 'source' => 'manual'], JSON_UNESCAPED_UNICODE);
         exit;
     }
@@ -551,6 +573,28 @@ if ($curated) {
     if (!$allowed) fail('ACCOUNT_NOT_ALLOWED', 'Essa conta não está na lista META_ACCOUNTS. Apague a lista para liberar todas as contas dos tokens, ou inclua esta conta.', 403);
 }
 
+/* Recarregar SÓ as imagens (criativos) do período já gerado — sem repuxar os
+   dados. Reusa o relatório do cache para saber os anúncios do Top e busca apenas
+   os criativos faltando/em baixa resolução (os bons cacheados são reaproveitados).
+   `force` repuxa todos os do Top (para tentar subir a resolução à força). */
+if ($action === 'reload_creatives') {
+    $rep = $V3_HAS_STORE ? V3Store::getReport($accountId, $since, $until) : null;
+    if (!$rep) {
+        $cov = $V3_HAS_STORE ? V3Store::findCoveringReport($accountId, $since, $until) : null;
+        if ($cov) $rep = ['payload' => $cov['payload']];
+    }
+    if (!$rep) fail('NO_CACHE', 'Gere o relatório deste período primeiro; depois use "Recarregar imagens".', 404);
+    $p      = $rep['payload'];
+    $mainC  = (isset($p['main']) && is_array($p['main'])) ? $p['main'] : [];
+    $adIdsC = (array)($p['meta']['ad_ids'] ?? []);
+    $tm     = ['cached' => 0, 'fetched' => 0, 'failed' => 0, 'low_quality' => 0, 'low_quality_names' => []];
+    $th     = v3_fetch_top_creatives($mainC, $adIdsC, $accountId, $activeToken, !empty($body['force']), $V3_HAS_STORE, $tm);
+    if ($V3_HAS_STORE) V3Store::logCall($usuario, $accountId, 'creatives', v3_ms(), 200, $GLOBALS['v3_buc'], false);
+    echo json_encode(['ok' => true, 'thumbs' => $th ?: (object) [], 'meta' => ['thumbs' => $tm],
+        'usage' => ($V3_HAS_STORE ? V3Store::usageToday() : null)], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 /* ── 7) Relatório salvo: serve do cache quando válido (zero chamada à Meta) ─
    Período consolidado é imutável (cacheia por até RETENTION_DAYS); período
    ainda em andamento usa TTL curto. $refresh e os modos ?debug ignoram o cache. */
@@ -570,6 +614,8 @@ if ($V3_HAS_STORE && !$refresh && $debug === '') {
             if (!isset($p['extras']) || !is_array($p['extras'])) $p['extras'] = [];
             $p['extras']['thumbs'] = $th ?: (object) [];
             if (isset($p['meta']) && is_array($p['meta'])) $p['meta']['thumbs'] = $tm;
+            // alcance: se o cache veio só com dados (backfill), busca agora
+            if (empty($p['reach'])) $p['reach'] = v3_fetch_reach($accountId, json_encode(['since' => $since, 'until' => $until]), $activeToken);
         }
         $p['origin']    = 'cache';
         $p['cached_at'] = $cached['fetched_at'];
@@ -599,6 +645,8 @@ if ($V3_HAS_STORE && !$refresh && $debug === '') {
                 $th = v3_fetch_top_creatives($main2, (array)($cp['meta']['ad_ids'] ?? []), $accountId, $activeToken, false, $V3_HAS_STORE, $tm);
                 if (!isset($d['extras']) || !is_array($d['extras'])) $d['extras'] = [];
                 $d['extras']['thumbs'] = $th ?: (object) [];
+                // alcance é por período → busca para o intervalo derivado (não dá p/ recortar do mês)
+                $d['reach'] = v3_fetch_reach($accountId, json_encode(['since' => $since, 'until' => $until]), $activeToken);
             }
             if (isset($d['meta']) && is_array($d['meta'])) {
                 $d['meta']['since']         = $since;
@@ -637,8 +685,12 @@ function metaFetchAccounts($token) {
 /* ── 8) Chamada genérica à Graph API (cURL + paginação) ───────────────────
    O token vai no header Authorization (não na URL, para não vazar em logs).
    Os headers de resposta são lidos para registrar o uso de cota da Meta. */
-function metaGet($path, array $params, $token, $timeout = 45) {
+function metaGet($path, array $params, $token, $timeout = 45, $soft = false) {
+    // $soft = true: consulta complementar (best-effort) — em qualquer erro devolve
+    // o que já acumulou em vez de derrubar o relatório com fail(). Usado pela
+    // consulta sem breakdown que recupera as visitas ao perfil.
     if (!function_exists('curl_init')) {
+        if ($soft) return [];
         fail('NO_CURL', 'A extensão cURL do PHP não está habilitada no servidor — sem ela não dá para falar com a Meta.', 500,
             ['error_tipo' => 'MissingExtension', 'error_origem' => 'metaGet(' . $path . ')']);
     }
@@ -675,18 +727,21 @@ function metaGet($path, array $params, $token, $timeout = 45) {
         curl_close($ch);
         v3_track_buc($respHeaders);
         if ($errno) {
+            if ($soft) return $out;
             fail('NETWORK', 'Não consegui falar com a Meta (rede): ' . $cerr, 502,
                 ['error_tipo' => 'cURL#' . $errno, 'error_origem' => 'metaGet(' . $path . ')']);
         }
 
         $j = json_decode($raw, true);
         if (!is_array($j)) {
+            if ($soft) return $out;
             fail('BAD_RESPONSE', 'Resposta inesperada da Meta (HTTP ' . $http . ').', 502,
                 ['error_tipo' => 'NonJSON', 'error_origem' => 'metaGet(' . $path . ')',
                  'error_detalhe' => mb_substr((string) $raw, 0, 300)]);
         }
 
         if (isset($j['error'])) {
+            if ($soft) return $out;
             $m    = $j['error']['message'] ?? 'erro desconhecido';
             $code = (int)($j['error']['code'] ?? 0);
             if (in_array($code, [190, 102, 463, 467], true)) {
@@ -936,6 +991,28 @@ function metaFetchHiResThumbs(array $creativeIds, $token) {
     return $out;
 }
 
+/* Alcance DEDUPLICADO por nível (campanha/conjunto/anúncio), SEM breakpoint e SEM
+   série diária. As consultas A/B trazem o alcance somado por recorte e por dia
+   (inflado — a mesma pessoa conta em cada idade/gênero/plataforma e cada dia);
+   estas dão o número que a Meta deduplica em cada nível, batendo com o painel.
+   São leves (poucas linhas, sem breakdown) e ficam no cache do relatório. */
+function v3_fetch_reach($accountId, $timeRange, $token) {
+    $base = ['time_range' => $timeRange, 'limit' => 500];
+    // Nível CONTA: alcance deduplicado do período inteiro (o "Contas Meta" do painel)
+    // — usado como total exato da evolução/visão geral. Soft p/ não derrubar nada.
+    $acct  = metaGet('act_' . $accountId . '/insights', array_merge($base, ['fields' => 'reach']), $token, 45, true) ?: [];
+    $overall = $acct ? (float)($acct[0]['reach'] ?? 0) : 0;
+    $camp  = metaGet('act_' . $accountId . '/insights', array_merge($base, ['level' => 'campaign', 'fields' => 'campaign_name,reach']), $token) ?: [];
+    $adset = metaGet('act_' . $accountId . '/insights', array_merge($base, ['level' => 'adset', 'fields' => 'campaign_name,adset_name,reach']), $token) ?: [];
+    $ad    = metaGet('act_' . $accountId . '/insights', array_merge($base, ['level' => 'ad', 'fields' => 'campaign_name,adset_name,ad_name,reach']), $token) ?: [];
+    return [
+        'overall'   => $overall > 0 ? $overall : null,   // dedup no nível da conta (null = usar a soma das campanhas)
+        'campaigns' => array_map(function ($r) { return ['name' => (string)($r['campaign_name'] ?? ''), 'reach' => (float)($r['reach'] ?? 0)]; }, $camp),
+        'adsets'    => array_map(function ($r) { return ['campaign' => (string)($r['campaign_name'] ?? ''), 'name' => (string)($r['adset_name'] ?? ''), 'reach' => (float)($r['reach'] ?? 0)]; }, $adset),
+        'ads'       => array_map(function ($r) { return ['campaign' => (string)($r['campaign_name'] ?? ''), 'adset' => (string)($r['adset_name'] ?? ''), 'name' => (string)($r['ad_name'] ?? ''), 'reach' => (float)($r['reach'] ?? 0)]; }, $ad),
+    ];
+}
+
 /* Campos comuns às duas consultas. `optimization_goal` (a meta do conjunto) é o
    que a Meta usa para definir o "Resultado" — mais confiável que o objetivo. */
 $fields = 'campaign_name,adset_name,ad_name,ad_id,objective,optimization_goal,spend,impressions,reach,inline_link_clicks,actions';
@@ -1020,34 +1097,38 @@ $RESULT_BY_OBJECTIVE = [
 ];
 /* Usado quando o objetivo não está no mapa ou não houve a ação esperada. */
 $RESULT_FALLBACK = ['onsite_conversion.messaging_conversation_started_7d', 'onsite_conversion.total_messaging_connection', 'link_click', 'landing_page_view', 'lead', 'purchase'];
-/* Rótulo amigável → vira a coluna "Tipo de resultado". */
+/* Máscara dos objetivos: nome técnico da ação (Meta) → rótulo amigável que vira a
+   coluna "Tipo de resultado" e aparece nos campos visuais do relatório ("objetivo
+   de X", card "Campanha de X"). Os textos seguem a nomenclatura NATIVA da Meta
+   (a mesma do export de Excel da V2) para o usuário reconhecer de imediato. É o
+   ponto único para ajustar como cada objetivo é descrito. */
 $ACTION_LABELS = [
-    'onsite_conversion.messaging_conversation_started_7d' => 'Conversas iniciadas',
-    'onsite_conversion.total_messaging_connection'        => 'Conversas iniciadas',
-    'onsite_conversion.messaging_first_reply'             => 'Conversas iniciadas',
+    'onsite_conversion.messaging_conversation_started_7d' => 'Conversas por mensagem iniciadas',
+    'onsite_conversion.total_messaging_connection'        => 'Conversas por mensagem iniciadas',
+    'onsite_conversion.messaging_first_reply'             => 'Conversas por mensagem iniciadas',
     'link_click'                                          => 'Cliques no link',
-    'landing_page_view'                                   => 'Visualizações da página',
-    'onsite_conversion.lead_grouped'                      => 'Cadastros',
-    'leadgen_grouped'                                     => 'Cadastros',
-    'lead'                                                => 'Cadastros',
+    'landing_page_view'                                   => 'Visualizações da página de destino',
+    'onsite_conversion.lead_grouped'                      => 'Leads (formulário)',
+    'leadgen_grouped'                                     => 'Leads (formulário)',
+    'lead'                                                => 'Leads (formulário)',
     'offsite_conversion.fb_pixel_purchase'                => 'Compras',
     'purchase'                                            => 'Compras',
     'offsite_conversion.fb_pixel_complete_registration'   => 'Cadastros',
     'complete_registration'                               => 'Cadastros',
     'offsite_conversion.fb_pixel_lead'                    => 'Cadastros',
     'offsite_conversion.custom.*'                         => 'Conversões',
-    'post_engagement'                                     => 'Engajamentos',
+    'post_engagement'                                     => 'Engajamento com a publicação',
     'video_thruplay_watched_actions'                      => 'ThruPlays',
-    'video_view'                                          => 'Visualizações de vídeo',
+    'video_view'                                          => 'Reproduções de vídeo',
     'onsite_conversion.post_net_like'                     => 'Curtidas',
     'like'                                                => 'Curtidas',
     'onsite_conversion.click_to_call'                     => 'Ligações',
     'click_to_call'                                       => 'Ligações',
     'rsvp'                                                => 'Respostas ao evento',
     'event_responses'                                     => 'Respostas ao evento',
-    'onsite_conversion.ig_profile_visit'                  => 'Visitas ao perfil',
-    'profile_visit'                                       => 'Visitas ao perfil',
-    '*profile_visit*'                                     => 'Visitas ao perfil',
+    'onsite_conversion.ig_profile_visit'                  => 'Visitas ao perfil do Instagram',
+    'profile_visit'                                       => 'Visitas ao perfil do Instagram',
+    '*profile_visit*'                                     => 'Visitas ao perfil do Instagram',
 ];
 
 /** Percorre uma lista de candidatos e devolve [valor, rótulo] do primeiro que
@@ -1105,6 +1186,63 @@ function pickResult(array $row, array $byGoal, array $byObj, array $fallback, ar
     return [0, ''];
 }
 
+/* Resultados SEM breakdown (por anúncio × dia), keados por "ad_id|date_start".
+   Por que existe: algumas ações (notadamente as VISITAS AO PERFIL do Instagram,
+   onsite_conversion.ig_profile_visit) NÃO voltam no array `actions` quando a
+   consulta tem breakdowns (idade/gênero ou plataforma/posicionamento) — então o
+   "Resultado" dessas campanhas vinha 0, mesmo a Meta tendo o número (o export de
+   Excel da V2 o traz). Esta consulta enxuta (sem breakdown) recupera o valor real.
+   Devolve [ key => ['res'=>float, 'rtype'=>string] ]. */
+function v3_fetch_results_nobrk($accountId, $timeRange, $token, $byGoal, $byObj, $fallback, $labels) {
+    $rows = metaGet('act_' . $accountId . '/insights', [
+        'level'          => 'ad',
+        'time_range'     => $timeRange,
+        'time_increment' => 1,
+        'fields'         => 'ad_id,optimization_goal,objective,actions,reach',
+        'limit'          => 500,
+    ], $token, 45, true) ?: [];   // soft: falha aqui não derruba o relatório
+    $map = [];
+    foreach ($rows as $r) {
+        [$res, $rtype] = pickResult($r, $byGoal, $byObj, $fallback, $labels);
+        $key = (string)($r['ad_id'] ?? '') . '|' . (string)($r['date_start'] ?? '');
+        if (!isset($map[$key])) $map[$key] = ['res' => 0.0, 'rtype' => $rtype];
+        $map[$key]['res'] += (float) $res;
+        if ($rtype !== '') $map[$key]['rtype'] = $rtype;
+    }
+    return $map;
+}
+
+/* Sobrepõe o "Resultado" das linhas (col 5) quando o breakdown zerou mas a
+   consulta sem breakdown tem valor (caso das visitas ao perfil). Só age quando o
+   grupo (anúncio × dia) somou 0 no breakdown — não mexe em métricas que já vieram
+   certas. Distribui o total real entre as linhas do grupo proporcional ao gasto
+   (cai para impressões e depois divisão igual); a última linha recebe o resto,
+   garantindo soma exata. $keys[$i] = "ad_id|date_start" da linha i do $aoa. */
+function v3_apply_nobrk_results(array &$aoa, array $keys, array $nobrk) {
+    $groups = [];
+    foreach ($keys as $i => $k) { $groups[$k][] = $i; }
+    foreach ($groups as $k => $idxs) {
+        if (!isset($nobrk[$k])) continue;
+        $true = (float) $nobrk[$k]['res'];
+        if ($true <= 0) continue;
+        $brk = 0.0; $spend = 0.0; $impr = 0.0;
+        foreach ($idxs as $i) { $brk += (float) $aoa[$i][5]; $spend += (float) $aoa[$i][7]; $impr += (float) $aoa[$i][8]; }
+        if ($brk > 0) continue;   // breakdown já trouxe o resultado → respeita
+        $true  = round($true);
+        $rtype = $nobrk[$k]['rtype'] ?? '';
+        $useSpend = $spend > 0; $useImpr = !$useSpend && $impr > 0;
+        $den = $useSpend ? $spend : ($useImpr ? $impr : count($idxs));
+        $assigned = 0; $n = count($idxs);
+        foreach ($idxs as $j => $i) {
+            $w = $useSpend ? (float) $aoa[$i][7] : ($useImpr ? (float) $aoa[$i][8] : 1);
+            $share = ($j === $n - 1) ? ($true - $assigned) : (int) round($true * ($den ? $w / $den : 0));
+            $assigned += $share;
+            $aoa[$i][5] = $share;
+            if (($aoa[$i][6] ?? '') === '' && $rtype !== '') $aoa[$i][6] = $rtype;
+        }
+    }
+}
+
 /* Depuração ?debug=1: tipos de ação + metas de otimização presentes (p/ mapear). */
 if ($debug === '1') {
     $seen = []; $goals = [];
@@ -1118,6 +1256,32 @@ if ($debug === '1') {
     }
     arsort($seen); arsort($goals);
     echo json_encode(['ok' => true, 'debug' => true, 'action_types' => $seen, 'optimization_goals' => $goals, 'rows_main' => count($mainRows), 'rows_platform' => count($platRows)], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+/* Depuração ?debug=nobrk: consulta SEM breakdown (anúncio × dia) — mostra os
+   action_types e o "Resultado" calculado por campanha. Serve para confirmar que
+   ações que somem com breakdown (ex.: onsite_conversion.ig_profile_visit) voltam
+   aqui, validando a correção das visitas ao perfil. */
+if ($debug === 'nobrk' || $debug === 'nb') {
+    $nbRows = metaGet('act_' . $accountId . '/insights', [
+        'level' => 'ad', 'time_range' => $timeRange, 'time_increment' => 1,
+        'fields' => 'campaign_name,ad_id,optimization_goal,objective,actions,reach', 'limit' => 500,
+    ], $activeToken) ?: [];
+    $seen = []; $goals = []; $byCamp = [];
+    foreach ($nbRows as $r) {
+        $g = $r['optimization_goal'] ?? '(vazio)';
+        $goals[$g] = ($goals[$g] ?? 0) + 1;
+        foreach (($r['actions'] ?? []) as $a) { $t = $a['action_type'] ?? ''; if ($t !== '') $seen[$t] = ($seen[$t] ?? 0) + (float)($a['value'] ?? 0); }
+        [$res, $rt] = pickResult($r, $RESULT_BY_OPT_GOAL, $RESULT_BY_OBJECTIVE, $RESULT_FALLBACK, $ACTION_LABELS);
+        $c = (string)($r['campaign_name'] ?? '');
+        if (!isset($byCamp[$c])) $byCamp[$c] = ['resultados' => 0, 'tipo' => $rt, 'goal' => $g];
+        $byCamp[$c]['resultados'] += $res;
+        if ($rt !== '') $byCamp[$c]['tipo'] = $rt;
+    }
+    arsort($seen); arsort($goals);
+    echo json_encode(['ok' => true, 'debug_nobrk' => true, 'rows' => count($nbRows),
+        'optimization_goals' => $goals, 'action_types' => $seen, 'por_campanha' => $byCamp], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
     exit;
 }
 
@@ -1178,6 +1342,7 @@ $HEAD_MAIN = ['Nome da campanha', 'Nome do conjunto de anúncios', 'Nome do anú
 $HEAD_PLAT = ['Nome da campanha', 'Nome do conjunto de anúncios', 'Nome do anúncio', 'Plataforma', 'Posicionamento', 'Resultados', 'Tipo de resultado', 'Valor usado (BRL)', 'Impressões', 'Alcance', 'Cliques no link', 'Início dos relatórios'];
 
 $main = [$HEAD_MAIN];
+$mainKeys = [];     // índice da linha do $main → "ad_id|date_start" (p/ sobrepor resultados sem breakdown)
 $adIdByName = [];   // nome do anúncio → ad_id (primeiro visto), p/ buscar só os criativos que rodaram
 $namesInReport = [];
 foreach ($mainRows as $r) {
@@ -1194,9 +1359,11 @@ foreach ($mainRows as $r) {
         (float)($r['spend'] ?? 0), (int)($r['impressions'] ?? 0), (int)($r['reach'] ?? 0),
         (int)($r['inline_link_clicks'] ?? 0), $r['date_start'] ?? '',
     ];
+    $mainKeys[count($main) - 1] = (string)($r['ad_id'] ?? '') . '|' . (string)($r['date_start'] ?? '');
 }
 
 $platform = [$HEAD_PLAT];
+$platKeys = [];
 foreach ($platRows as $r) {
     [$res, $rtype] = pickResult($r, $RESULT_BY_OPT_GOAL, $RESULT_BY_OBJECTIVE, $RESULT_FALLBACK, $ACTION_LABELS);
     $platform[] = [
@@ -1206,6 +1373,15 @@ foreach ($platRows as $r) {
         (float)($r['spend'] ?? 0), (int)($r['impressions'] ?? 0), (int)($r['reach'] ?? 0),
         (int)($r['inline_link_clicks'] ?? 0), $r['date_start'] ?? '',
     ];
+    $platKeys[count($platform) - 1] = (string)($r['ad_id'] ?? '') . '|' . (string)($r['date_start'] ?? '');
+}
+
+/* Recupera os resultados que a Meta omite sob breakdown (ex.: visitas ao perfil)
+   com UMA consulta enxuta sem breakdown e os aplica nas duas planilhas. */
+$nobrkRes = v3_fetch_results_nobrk($accountId, $timeRange, $activeToken, $RESULT_BY_OPT_GOAL, $RESULT_BY_OBJECTIVE, $RESULT_FALLBACK, $ACTION_LABELS);
+if ($nobrkRes) {
+    v3_apply_nobrk_results($main, $mainKeys, $nobrkRes);
+    v3_apply_nobrk_results($platform, $platKeys, $nobrkRes);
 }
 
 /* Depuração ?debug=2: comparação principal × plataforma (origem de discrepâncias
@@ -1239,11 +1415,13 @@ if ($debug === '2') {
 $thumbsMeta = ['cached' => 0, 'fetched' => 0, 'failed' => 0, 'low_quality' => 0, 'low_quality_names' => []];
 $thumbs = [];
 $photo = null; $photoSource = null; $pageName = null;
+$reachData = null;
 
 /* No PREFETCH (backfill de histórico em background) só guardamos dados — sem
-   criativos nem foto. No modo normal, busca a imagem do TOP 5 e a foto. */
+   criativos, foto nem alcance. No modo normal, busca imagem do TOP 5, foto e alcance. */
 if (!$prefetch) {
     $thumbs = v3_fetch_top_creatives($main, $adIdByName, $accountId, $activeToken, $refresh, $V3_HAS_STORE, $thumbsMeta);
+    $reachData = v3_fetch_reach($accountId, $timeRange, $activeToken);   // alcance correto (deduplicado por nível)
 
     $photo = (!$refresh && $V3_HAS_STORE) ? V3Store::getProfilePhoto($accountId, $bmLabel) : null;
     $photoSource = $photo ? 'profile' : null;
@@ -1276,6 +1454,7 @@ $payload = [
     'ok'       => true,
     'main'     => $main,
     'platform' => count($platform) > 1 ? $platform : null,
+    'reach'    => $reachData,
     'extras'   => $extras,
     'meta'     => [
         'account'       => $accountId,

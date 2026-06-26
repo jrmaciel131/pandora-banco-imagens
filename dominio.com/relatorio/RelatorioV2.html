@@ -385,15 +385,15 @@
     <section class="ss-page" data-page="3">
       <div class="ss-brand">PASSO EXTRA · ALCANCE CORRETO (OPCIONAL)</div>
       <h1>Relatório 3 — Alcance <span style="font-size:.5em;color:var(--ink-soft);font-weight:700">(opcional)</span></h1>
-      <p>Sem este arquivo o relatório funciona normal, mas o <b>alcance</b> pode vir inflado — a Meta soma o alcance em cada recorte (idade/gênero/plataforma) e cada dia. Com ele, o alcance dos gráficos <b>bate com o gerenciador</b>. <b>Mesmo período e mesmas métricas</b>: muda só o detalhamento — <b>sem</b> Idade/Gênero/Plataforma e <b>sem Dia</b>.</p>
+      <p>Sem este arquivo o relatório funciona normal, mas o <b>alcance</b> pode vir inflado (a Meta soma o alcance em cada recorte e cada dia). <b>Para o alcance bater 100% com o gerenciador, detalhe só por “Nome da campanha”</b> — sem conjunto/anúncio, sem idade/gênero/plataforma e sem dia: assim a Meta entrega o alcance já <b>deduplicado</b> da campanha. <b>Mesmo período e mesmas métricas.</b></p>
       <div class="ss-specs">
         <div class="ss-spec">
           <div class="ss-spec-h">Detalhamento</div>
           <ul class="ss-speclist">
-            <li>Nome da campanha</li>
-            <li>Nome do conjunto de anúncios</li>
-            <li>Nome do anúncio</li>
+            <li class="hi">Nome da campanha</li>
+            <li>(só isso — sem conjunto/anúncio)</li>
           </ul>
+          <p style="font-size:12px;color:var(--ink-soft);margin:8px 0 0">Se detalhar por anúncio, o alcance de cada anúncio fica certo, mas o da campanha fica ~15% acima — o alcance não soma entre anúncios.</p>
         </div>
         <div class="ss-spec">
           <div class="ss-spec-h">Métricas <small style="font-weight:600;color:var(--ink-soft)">(as mesmas do Relatório 1)</small></div>
@@ -541,7 +541,7 @@ window.addEventListener('beforeprint', function () {
 </script>
 
 <script src="js/report-parser.js?v=v3.10"></script>
-<script src="js/report-render-v2.js?v=v3.10"></script>
+<script src="js/report-render-v2.js?v=v3.12"></script>
 <script src="js/image-modal.js"></script>
 <script src="js/help-modal.js"></script>
 <script src="js/login-chip.js"></script>
