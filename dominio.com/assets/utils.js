@@ -11,7 +11,7 @@ let CSRF_TOKEN = '';
    cada alteração publicada. O index.php lê este mesmo texto do arquivo no
    servidor e o injeta em window.APP_BUILD_EXPECTED; se o que o navegador
    carregou divergir do que está no servidor, exibimos um aviso de cache. */
-const APP_BUILD = 'v23.07 (2026-06-18)';
+const APP_BUILD = 'v23.09 (2026-07-14)';
 
 (function reportBuild(){
   try {

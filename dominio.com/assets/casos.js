@@ -14,6 +14,7 @@ let _highPriorityIds = new Set();
 let _loadingCount = 0;
 let casos = [], filtered = [], page = 1;
 let mode = 'estado', selUF = '', selCity = '', selProf = '';
+let selProfs = new Set();
 window._presetRecente = false;
 let density = localStorage.getItem('s-density') || 'normal';
 let viewMode = localStorage.getItem('s-view') || 'grid';
@@ -163,7 +164,29 @@ function autoSyncShowFilter(){
   if(_userTouchedShow) return;
   const fshow = document.getElementById('fshow');
   if(!fshow) return;
-  fshow.value = selProf ? 'em_uso' : 'disponivel';
+  const hasIds = !!(document.getElementById('fids')?.value || '').trim();
+  if(hasIds){
+    /* Com IDs colados, todos eles devem aparecer; o status de cada um fica
+       visível nos badges e nos contadores. */
+    fshow.value = 'todos';
+    window._presetRecente = false;
+  } else {
+    fshow.value = (selProf || selProfs.size) ? 'em_uso' : 'disponivel';
+  }
+  syncQuickTabHighlight();
+}
+
+/* Mantém o quick tab ativo coerente com o valor efetivo do "Exibir". */
+function syncQuickTabHighlight(){
+  const preset = window._presetRecente ? 'recente' : document.getElementById('fshow')?.value;
+  document.querySelectorAll('.s-qt-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.preset === preset);
+  });
+}
+
+function onIdsInput(){
+  autoSyncShowFilter();
+  applyFilter();
 }
 
 function onProfSearch(){
@@ -174,15 +197,9 @@ function onProfSearch(){
   /* Debounce 150ms — Levenshtein é O(m*n) e não deve rodar a cada tecla. */
   clearTimeout(_profSearchTimer);
   _profSearchTimer = setTimeout(() => {
-    const m = allProfs.filter(p => norm(p).includes(q)).slice(0, 12);
+    const m = allProfs.filter(p => norm(p).includes(q) && !selProfs.has(p)).slice(0, 12);
     if(m.length){
-      renderFormDD('prodd', m, '', c => {
-        document.getElementById('fpro').value = c;
-        selProf = c;
-        autoSyncShowFilter();
-        document.getElementById('prodd').classList.remove('open');
-        applyFilter();
-      });
+      renderFormDD('prodd', m, '', c => addProfFilter(c));
     } else {
       document.getElementById('prodd').classList.remove('open');
     }
@@ -192,16 +209,61 @@ function onProfSearch(){
 
 function openProfDD(){ onProfSearch(); }
 
+/* O filtro de profissional aceita múltiplos nomes (chips), permitindo ver os
+   casos de dois ou mais clientes ao mesmo tempo. Um nome vira chip quando
+   selecionado no dropdown; o texto ainda digitado continua valendo como busca
+   livre adicional até ser confirmado. */
+function addProfFilter(name){
+  selProfs.add(name);
+  selProf = '';
+  const inp = document.getElementById('fpro');
+  if(inp) inp.value = '';
+  document.getElementById('prodd').classList.remove('open');
+  renderProfFilterChips();
+  autoSyncShowFilter();
+  applyFilter();
+}
+
+function removeProfFilter(name){
+  selProfs.delete(name);
+  renderProfFilterChips();
+  autoSyncShowFilter();
+  applyFilter();
+}
+
+function renderProfFilterChips(){
+  const box = document.getElementById('fpro-chips');
+  if(!box) return;
+  box.innerHTML = [...selProfs].map(p =>
+    `<span class="tag-pill">${esc(p)}<span class="x" onclick="removeProfFilter('${esc(p).replace(/'/g,"\\'")}')" title="Remover profissional do filtro">×</span></span>`
+  ).join('');
+}
+
+/* Consultas ativas do filtro de profissional (chips + texto digitado),
+   já normalizadas para comparação. */
+function profFilterQueries(){
+  const qs = [...selProfs].map(norm);
+  const typed = norm(selProf);
+  if(typed) qs.push(typed);
+  return qs;
+}
+
+function matchesProfFilter(c, qs){
+  return c.clientes.some(p => { const pn = norm(p); return qs.some(q => pn.includes(q)); });
+}
+
 function clearFilters(){
-  selUF = ''; selCity = ''; selProf = ''; selTags.clear();
+  selUF = ''; selCity = ''; selProf = ''; selProfs.clear(); selTags.clear();
   ['fuf','fci','fpro','fids','ftag'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
   renderTagFilterChips();
+  renderProfFilterChips();
   _userTouchedShow = false;
   document.getElementById('fshow').value = 'disponivel';
   document.getElementById('cw').style.display = 'none';
   mode = 'cidade';
   window._presetRecente = false;
   document.getElementById('btn-clf').style.display = 'none';
+  syncQuickTabHighlight();
   applyFilter();
 }
 
@@ -254,45 +316,43 @@ document.addEventListener('click', e => {
     document.querySelectorAll('.dd').forEach(d => d.classList.remove('open'));
 });
 
-/* applyFilter: o filtro por ID é INDEPENDENTE — quando preenchido, mostra
-   apenas esses IDs (ignora estado/prof/exibir); tags ainda refinam a lista. */
+/* parseIdFilter: converte o texto do filtro de IDs num Set normalizado
+   ("244, caso-255; 834" → CASO-244/CASO-255/CASO-834). Null quando não há
+   nenhum ID válido. */
+function parseIdFilter(raw){
+  if(!raw) return null;
+  const set = new Set(
+    raw.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean).map(n => {
+      const clean = n.replace(/^CASO-?/i,'').replace(/\D/g,'');
+      return clean ? `CASO-${clean}` : '';
+    }).filter(Boolean)
+  );
+  return set.size ? set : null;
+}
+
+/* applyFilter: o filtro por ID restringe o universo de casos; os demais
+   filtros (estado/cidade, profissional, tags, exibir) e todos os contadores
+   continuam valendo sobre esse subconjunto. */
 function applyFilter(){
   const show = document.getElementById('fshow').value;
-  const profQ = norm(selProf);
+  const profQs = profFilterQueries();
   const idsRaw = (document.getElementById('fids')?.value || '').trim();
-  const hasStateFilter = !!(selUF || selProf);
+  const idSet = parseIdFilter(idsRaw);
+  const hasStateFilter = !!(selUF || profQs.length);
   const hasTagFilter = selTags.size > 0;
   const hasFilter = !!(hasStateFilter || idsRaw || hasTagFilter);
   document.getElementById('btn-clf').style.display = hasFilter ? 'inline-flex' : 'none';
+  const expBtn = document.getElementById('btn-export-visual');
+  if(expBtn) expBtn.style.display = profQs.length ? 'inline-flex' : 'none';
 
   const matchesTags = c => !hasTagFilter || [...selTags].every(t => (c.tags||[]).includes(t));
 
-  if(idsRaw){
-    const idSet = new Set(
-      idsRaw.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean).map(n => {
-        const clean = n.replace(/^CASO-?/i,'').replace(/\D/g,'');
-        return clean ? `CASO-${clean}` : '';
-      }).filter(Boolean)
-    );
-    if(idSet.size > 0){
-      const list = casos
-        .filter(c => idSet.has(c.id) && matchesTags(c))
-        .map(c => ({...c, emUso: false}));
-      filtered = list; page = 1;
-      document.getElementById('st').textContent = list.length;
-      document.getElementById('sd').textContent = '—';
-      document.getElementById('su').textContent = '—';
-      renderActiveFilterChips();
-      updateQuickTabCounts();
-      renderGrid();
-      return;
-    }
-  }
+  const universe = idSet ? casos.filter(c => idSet.has(c.id)) : casos;
 
-  const allWithStatus = casos.map(c => {
+  const allWithStatus = universe.map(c => {
     let emUso = false;
-    if(profQ){
-      emUso = c.clientes.some(p => norm(p).includes(profQ));
+    if(profQs.length){
+      emUso = matchesProfFilter(c, profQs);
     } else if(selUF){
       if(mode === 'estado') emUso = c.ufs.includes(selUF);
       else                  emUso = selCity ? c.cidades.includes(selCity) : c.ufs.includes(selUF);
@@ -333,10 +393,11 @@ function renderActiveFilterChips(){
   const chips = [];
   if(selUF)   chips.push({ label: 'UF: ' + selUF,           remove: () => { selUF = ''; document.getElementById('fuf').value = ''; }});
   if(selCity) chips.push({ label: 'Cidade: ' + cap(selCity), remove: () => { selCity = ''; document.getElementById('fci').value = ''; }});
+  [...selProfs].forEach(p => chips.push({ label: 'Prof: ' + p, remove: () => { selProfs.delete(p); renderProfFilterChips(); }}));
   if(selProf) chips.push({ label: 'Prof: ' + selProf,        remove: () => { selProf = ''; document.getElementById('fpro').value = ''; }});
   [...selTags].forEach(t => chips.push({ label: 'Tag: ' + t, remove: () => { selTags.delete(t); renderTagFilterChips(); }}));
   const ids = document.getElementById('fids')?.value?.trim();
-  if(ids) chips.push({ label: 'IDs: ' + ids, remove: () => { document.getElementById('fids').value = ''; }});
+  if(ids) chips.push({ label: 'IDs: ' + ids, remove: () => { document.getElementById('fids').value = ''; autoSyncShowFilter(); }});
 
   if(chips.length === 0){ wrap.style.display = 'none'; return; }
   wrap.style.display = 'flex';
@@ -367,10 +428,12 @@ function _getRecentes(arr){
 }
 
 function updateQuickTabCounts(){
-  const profQ = norm(selProf);
-  const withStatus = casos.map(c => {
+  const profQs = profFilterQueries();
+  const idSet = parseIdFilter((document.getElementById('fids')?.value || '').trim());
+  const universe = idSet ? casos.filter(c => idSet.has(c.id)) : casos;
+  const withStatus = universe.map(c => {
     let emUso = false;
-    if(profQ)       emUso = c.clientes.some(p => norm(p).includes(profQ));
+    if(profQs.length) emUso = matchesProfFilter(c, profQs);
     else if(selUF){
       if(mode === 'estado') emUso = c.ufs.includes(selUF);
       else                  emUso = selCity ? c.cidades.includes(selCity) : c.ufs.includes(selUF);
@@ -378,11 +441,11 @@ function updateQuickTabCounts(){
     return {...c, emUso};
   });
   const el = id => document.getElementById(id);
-  if(el('qt-c-todos')) el('qt-c-todos').textContent = casos.length;
+  if(el('qt-c-todos')) el('qt-c-todos').textContent = universe.length;
   if(el('qt-c-disp'))  el('qt-c-disp').textContent  = withStatus.filter(c => !c.emUso && !c.bloqueado).length;
   if(el('qt-c-uso'))   el('qt-c-uso').textContent   = withStatus.filter(c =>  c.emUso && !c.bloqueado).length;
-  if(el('qt-c-bloq'))  el('qt-c-bloq').textContent  = casos.filter(c => !!c.bloqueado).length;
-  if(el('qt-c-rec'))   el('qt-c-rec').textContent   = '+' + _getRecentes(casos).length;
+  if(el('qt-c-bloq'))  el('qt-c-bloq').textContent  = universe.filter(c => !!c.bloqueado).length;
+  if(el('qt-c-rec'))   el('qt-c-rec').textContent   = '+' + _getRecentes(universe).length;
 }
 
 function setFilterPreset(preset){
@@ -421,12 +484,15 @@ function renderEmptyState(){
   const filters = [];
   if(selUF) filters.push(selUF);
   [...selTags].forEach(t => filters.push(t));
+  const idsRaw = document.getElementById('fids')?.value?.trim();
+  if(idsRaw) filters.push('IDs: ' + idsRaw);
   const fshow = document.getElementById('fshow');
   if(fshow && fshow.value !== 'todos') filters.push(fshow.selectedOptions[0].text);
 
   const suggestions = [];
   if(selUF) suggestions.push(`<button class="btn bp" style="font-size:12px;padding:6px 12px" onclick="selUF='';document.getElementById('fuf').value='';applyFilter()">↻ Trocar ${esc(selUF)} por outro estado</button>`);
   [...selTags].forEach(t => suggestions.push(`<button class="btn bs" style="font-size:12px;padding:6px 12px" onclick="selTags.delete('${esc(t)}');renderTagFilterChips();applyFilter()">✕ Remover ${esc(t)}</button>`));
+  if(idsRaw) suggestions.push(`<button class="btn bs" style="font-size:12px;padding:6px 12px" onclick="document.getElementById('fids').value='';onIdsInput()">✕ Limpar IDs</button>`);
   suggestions.push('<button class="btn bs" style="font-size:12px;padding:6px 12px" onclick="clearFilters()">Limpar tudo</button>');
 
   empty.innerHTML = `
@@ -478,7 +544,7 @@ function renderGrid(){
   const slice = filtered.slice((page-1)*PER, page*PER);
   if(!slice.length){ grid.innerHTML = ''; empty.style.display = 'block'; renderPager(0); return; }
   empty.style.display = 'none';
-  const hasFilter = !!(selUF || selProf);
+  const hasFilter = !!(selUF || selProf || selProfs.size);
   pageLoadStart = performance.now();
 
   grid.innerHTML = slice.map(c => {

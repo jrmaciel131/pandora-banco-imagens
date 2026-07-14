@@ -169,6 +169,8 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
                 <div class="dd" id="prodd"></div>
               </div>
             </div>
+            <div id="fpro-chips" style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px"></div>
+            <button class="btn bs" id="btn-export-visual" style="display:none;margin-top:8px;width:100%;justify-content:center" onclick="exportVisualizadorPDF()" title="Gera um PDF em grade com todos os casos em uso pelos profissionais filtrados (todas as versões, formato VNI/QNI ou NA)">📄 Exportar PDF dos casos</button>
           </section>
 
           <section class="s-rail-section" style="display:none">
@@ -197,7 +199,7 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
           <section class="s-rail-section">
             <h3>IDs específicos</h3>
             <div class="fw">
-              <input type="text" id="fids" placeholder="244, 255, 834…" oninput="applyFilter()" autocomplete="off">
+              <input type="text" id="fids" placeholder="244, 255, 834…" oninput="onIdsInput()" autocomplete="off">
             </div>
           </section>
 
@@ -539,7 +541,7 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
         </div>
         <div class="warn-box" id="state-warn"></div>
         <div style="display:flex;gap:8px;margin-top:.5rem;flex-wrap:wrap">
-          <button class="btn bs" type="button" onclick="addPendingUso()" style="padding:8px 14px" title="Adiciona esta linha à lista e limpa o formulário pra você cadastrar mais uma">+ Adicionar mais um</button>
+          <button class="btn bs" type="button" onclick="addPendingUso()" style="padding:8px 14px" title="Adiciona esta linha à lista mantendo estado e profissional preenchidos — troque só a cidade (ou o estado) pra cadastrar o próximo uso">+ Adicionar mais um</button>
           <button class="btn bp" style="flex:1;justify-content:center" id="abtn" onclick="prepareConfirm('add')">Registrar uso</button>
           <button class="btn bs" onclick="cancelAddForm()">Cancelar</button>
         </div>
@@ -712,6 +714,7 @@ window.APP_BUILD_EXPECTED = <?php echo json_encode(jsBuild()); ?>;</script>
 <script src="<?php echo v('assets/utils.js'); ?>"></script>
 <script src="<?php echo v('assets/theme.js'); ?>"></script>
 <script src="<?php echo v('assets/casos.js'); ?>"></script>
+<script src="<?php echo v('assets/visualizador.js'); ?>"></script>
 <script src="<?php echo v('assets/panel.js'); ?>"></script>
 <script src="<?php echo v('assets/bulk.js'); ?>"></script>
 <script src="<?php echo v('assets/admin.js'); ?>"></script>
