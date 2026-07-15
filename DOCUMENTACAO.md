@@ -1,6 +1,6 @@
 # Banco de Imagens — Documentação Técnica
 
-Versão da aplicação: **v21.1** · Última revisão: 2026-05-13
+Versão da aplicação: **v23** · Última revisão: 2026-07-14
 
 Esta documentação descreve a arquitetura, os componentes e os fluxos operacionais do sistema **Banco de Imagens**, uma aplicação web destinada à consulta, marcação e auditoria de uso de casos cadastrados em planilhas do Google Sheets, com as fotos hospedadas no Google Drive.
 
@@ -66,10 +66,9 @@ A pasta privada `private-config/` contém configurações, credenciais e bibliot
 raizdosite/
 ├── DEPLOY.md                              Notas de deploy e hardening do servidor.
 ├── DOCUMENTACAO.md                        Este documento.
-├── UPGRADE-V21.md                         Tutorial dos próximos passos pós-deploy v21.
 │
 ├── seu-dominio.com/   Document root público.
-│   ├── index.html                         Markup principal (HTML + tags <link>/<script>).
+│   ├── index.php                          Markup principal; gera cache busting automático e injeta o build esperado.
 │   ├── ajuda.html                         Documentação interna em formato de tutorial.
 │   ├── 403.html / 404.html / 500.html     Páginas de erro com redirect automático.
 │   ├── assets/                            Bundles modulares de CSS/JS (v21+).
@@ -85,8 +84,9 @@ raizdosite/
 │   │   └── app.js                         Bootstrap (último carregado).
 │   ├── api/
 │   │   ├── handler.php                    Front controller da API JSON.
-│   │   ├── cron.php                       Cache warmer (CLI ou HTTP autenticado).
-│   │   └── .htaccess                      Restrições de acesso.
+│   │   ├── cron.php                       Cache warmer + sync Drive↔planilha (CLI ou HTTP autenticado).
+│   │   ├── gerar-hash.php                 Gerador de hash bcrypt (página admin-only).
+│   │   └── .htaccess                      Restrições de acesso (allowlist de .php).
 │   ├── export/
 │   │   ├── index.html                     Ferramenta de exportação de casos.
 │   │   └── lib/jszip.min.js               JSZip hospedado localmente (sem CDN).
@@ -97,6 +97,7 @@ raizdosite/
 │
 └── private-config/                        Pasta privada (fora do document root).
     ├── config.php                         Constantes globais e definição das bases.
+    ├── secrets.local.php                  Segredos reais: DB_PASS, CRON_KEY, Turnstile (NÃO versionado).
     ├── google-credentials.json            Credenciais da conta de serviço Google.
     ├── passwords.json                     Sobrescritas dinâmicas de senhas.
     ├── users_override.json                Usuários criados via interface.
@@ -192,7 +193,7 @@ Todas as requisições são despachadas pelo front controller `api/handler.php`.
 
 | Ação              | Método | Descrição                                                            |
 |-------------------|:------:|----------------------------------------------------------------------|
-| `login`           | POST   | Autentica; aplica rate limiting por (usuário+dispositivo). Emite cookie `bi_device` em login bem-sucedido. |
+| `login`           | POST   | Autentica; valida Turnstile quando ativo; aplica rate limiting por (usuário+dispositivo). Emite cookie `bi_device` e devolve o token CSRF em login bem-sucedido. |
 | `logout`          | GET    | Encerra a sessão.                                                    |
 | `check_session`   | GET    | Restaura o estado da sessão sem redirect (chamado em F5).            |
 | `renew_session`   | GET    | Renova o timestamp da sessão.                                        |
@@ -258,7 +259,7 @@ Todas as operações de escrita em arquivos JSON usam o helper `withJsonLock()` 
 | `list_users`             | GET    | Usuários conhecidos com último login e contagem 30 dias.   |
 | `add_user`               | POST   | Cria usuário em `users_override.json`.                     |
 | `remove_user`            | POST   | Remove usuário dinâmico.                                   |
-| `change_password`        | POST   | Atualiza senha em `passwords.json`.                        |
+| `change_password`        | POST   | Troca a senha do usuário-alvo: grava em `users_override.json` (usuários dinâmicos) ou `passwords.json` (estáticos do `config.php`). Um admin não altera a senha de outro admin. |
 | `set_production_access`  | POST   | Concede ou revoga acesso à produção em `production_users.json`. |
 
 ### Downloads
@@ -272,7 +273,7 @@ Todas as operações de escrita em arquivos JSON usam o helper `withJsonLock()` 
 
 ## 7. Frontend (assets modulares)
 
-A partir da v21 o frontend foi dividido em módulos servidos pela pasta `assets/`. O `index.html` contém apenas o markup + as tags `<link>` e `<script>` referenciando os bundles. Cada referência leva o sufixo `?v=NN` (cache busting): ao alterar um arquivo, incremente o número.
+A partir da v21 o frontend foi dividido em módulos servidos pela pasta `assets/`. O `index.php` contém apenas o markup + as tags `<link>` e `<script>` referenciando os bundles; o sufixo `?v=` de cada referência é gerado automaticamente a partir do `filemtime()` do arquivo (cache busting sem intervenção manual).
 
 ### Ordem de carregamento
 
@@ -299,15 +300,11 @@ utils.js → theme.js → casos.js → panel.js → bulk.js → admin.js → aut
 | `auth.js`   | `currentBase`, `availableBases`, `userRole`, `doLogin/doLogout`, `selectBase/switchBase`, `checkSessionOnLoad`, banner de modo TESTE. |
 | `app.js`    | `initApp()` + chamada inicial `checkSessionOnLoad()`. Carregado por último.               |
 
-### Cache busting
+### Cache busting e verificação de build
 
-Para forçar o browser a recarregar um asset alterado:
+Desde a v23 o cache busting é automático: o `index.php` anexa `?v=<filemtime>` a cada asset, então basta subir o arquivo alterado — o timestamp novo força o recarregamento.
 
-1. Edite o arquivo em `assets/`.
-2. No `index.html`, troque `?v=21` por `?v=22` (ou o próximo número) nas linhas correspondentes.
-3. Suba o `index.html` e o(s) asset(s) modificados.
-
-Sem o incremento, alguns browsers/proxies servem a versão em cache por horas.
+Como o site fica atrás do Cloudflare (que pode segurar JS/CSS em cache), há uma verificação extra: `utils.js` declara a constante `APP_BUILD`, e o `index.php` injeta em `window.APP_BUILD_EXPECTED` o valor lido do arquivo no servidor. Se o navegador estiver executando um `utils.js` antigo, os valores divergem e uma faixa avisa o usuário para recarregar. **Ao alterar qualquer asset num release, atualize o `APP_BUILD` em `utils.js`.**
 
 ---
 
@@ -331,35 +328,119 @@ O download das thumbnails é paralelizado por meio de stream contexts não-bloqu
 
 ## 9. Segurança
 
-### Hardening estrutural
+O sistema aplica **defesa em camadas**: cada mecanismo assume que o anterior pode falhar. Visão geral:
 
-- A pasta `private-config/` reside fora do document root, tornando-se inacessível por HTTP independentemente do `.htaccess`.
-- Os endpoints legados (`config/`, `api/db.php`, `api/google.php`) respondem com HTTP 410 (Gone).
-- Sessões PHP são armazenadas em `private-config/sessions/`, com `samesite=Lax`, `httponly` e `secure` quando há HTTPS.
+| # | Camada | Protege contra | Mecanismo principal |
+|---|--------|----------------|---------------------|
+| 1 | Estrutura de arquivos | Vazamento de segredos via HTTP | `private-config/` fora do document root + allowlist no `.htaccess` |
+| 2 | Senhas | Vazamento de credenciais | Hashes bcrypt (`PASSWORD_DEFAULT`) — nunca senha em texto puro |
+| 3 | Login | Força bruta e bots | Rate limit por (usuário, dispositivo) + Turnstile opcional |
+| 4 | Sessão | Sequestro/fixação de sessão | Cookie `httponly`/`samesite`, 2 h, `session_regenerate_id()` |
+| 5 | Requisições POST | CSRF | Token por sessão no cabeçalho `X-CSRF-Token` |
+| 6 | Autorização | Escalada de privilégio | Papéis `admin`/`user` verificados no backend |
+| 7 | Concorrência | Corrupção de dados | Locks por caso e por arquivo JSON |
+| 8 | Auditoria | Ações não rastreáveis | `audit_log` com snapshots antes/depois |
 
-### Autenticação e autorização
+### 9.1 Hardening estrutural
 
-- Senhas armazenadas como hashes bcrypt (`PASSWORD_DEFAULT`).
-- Sobrescritas dinâmicas em `passwords.json` (senha) e `users_override.json` (usuários criados via interface).
-- Controle de papéis: `admin` (acesso total) e `user` (limitado a bases visíveis).
-- `production_users.json` libera bases de produção a usuários comuns.
-- **Rate limiting v21** — chave por `(usuário, dispositivo)` em vez de IP único. O servidor emite um cookie `bi_device` (httpOnly, 2 anos) no primeiro login bem-sucedido; usuários sem cookie usam fallback `(usuário, IP)`. Isto evita que uma pessoa errando a senha bloqueie toda a empresa que compartilha o mesmo IP público.
-- `session_regenerate_id()` no login bem-sucedido para prevenir session fixation.
-- Sessão de **2 horas** (v21, antes 4h). Renovação automática mantém usuários ativos logados.
+- A pasta `private-config/` reside **fora** do document root: nada nela é alcançável por URL, independentemente de `.htaccess`. É onde vivem credenciais, hashes, sessões e os JSONs de estado.
+- `api/.htaccess` usa **allowlist**: só `handler.php`, `cron.php` e `gerar-hash.php` respondem; qualquer outro `.php` em `/api/` é negado. Endpoints legados (`config/`, `api/db.php`, `api/google.php`) respondem HTTP 410 (Gone).
+- Sessões PHP gravadas em `private-config/sessions/` (não no diretório temporário compartilhado da hospedagem).
+- Permissões restritivas no servidor: `700` nas pastas privadas, `600` nos arquivos (ver `DEPLOY.md`).
 
-### Operações sensíveis
+### 9.2 Senhas — por que hash, o que é e qual usamos
 
-- `acquireCaseLock()` serializa escritas concorrentes no mesmo caso (timeout 10s).
-- **v21:** `acquireCaseLock` agora cobre `add_tag` e `remove_tag` (antes só `add_uso`, `set_block`, `unblock_case`).
-- **v21:** `withJsonLock()` serializa leituras-modificações-escritas nos arquivos `passwords.json`, `users_override.json`, `production_users.json` via `flock(LOCK_EX)`.
-- A escrita em Sheets é tentada até três vezes com backoff linear.
+O sistema **nunca armazena senhas em texto puro** — nem no banco, nem em arquivo. O que fica gravado é um **hash**: o resultado de uma função de mão única que transforma a senha numa sequência de tamanho fixo. Não existe caminho de volta — a partir do hash não se recupera a senha.
+
+No login, o PHP aplica a mesma função à senha digitada e compara com o hash armazenado (`password_verify()`). Se baterem, a senha está correta. Assim, mesmo que o `config.php` ou um backup vaze, o atacante não obtém as senhas — o que importa especialmente porque as pessoas reutilizam senhas em outros serviços.
+
+E não é um hash qualquer. Usamos **bcrypt**, via `password_hash($senha, PASSWORD_DEFAULT)` — um algoritmo desenhado especificamente para armazenar senhas, ao contrário de MD5/SHA-256, que são rápidos demais (e por isso fáceis de atacar por força bruta). Anatomia de um hash bcrypt:
+
+```
+$2y$12$T7fqPWCvY0lXhAB2ZqM9T.WvUXAmiEHW1YvBHJTAsF2kZo0diTdW6
+ │   │ └──────────┬─────────┘└────────────┬────────────────┘
+ │   │       salt (22 chars)      hash da senha (31 chars)
+ │   └── custo: 2^12 = 4096 iterações
+ └────── algoritmo (2y = bcrypt)
+```
+
+- **Salt** — valor aleatório gerado a cada `password_hash()` e embutido no resultado. Duas contas com a *mesma* senha produzem hashes diferentes, o que inutiliza tabelas pré-calculadas (rainbow tables) e impede notar senhas repetidas.
+- **Custo (work factor)** — bcrypt é deliberadamente lento: custo N significa 2^N iterações. Alguns milissegundos num login legítimo, mas proibitivo para quem precisa testar bilhões de combinações.
+- **`PASSWORD_DEFAULT`** — deixa o PHP escolher o melhor algoritmo disponível. Como o algoritmo e o custo ficam gravados no próprio hash, `password_verify()` continua validando hashes antigos mesmo se o padrão mudar em versões futuras do PHP.
+
+### 9.3 Onde as senhas vivem — e a ordem de precedência
+
+Três arquivos participam, todos em `private-config/`:
+
+| Arquivo | O que contém | Quem escreve |
+|---------|--------------|--------------|
+| `config.php` (constante `USERS`) | Usuários estáticos: login, hash, papel | Editado à mão |
+| `users_override.json` | Usuários criados pelo painel admin | A aplicação (`add_user`) |
+| `passwords.json` | Trocas de senha feitas pelo painel | A aplicação (`change_password`) |
+
+Na autenticação (`getUserData()` no `handler.php`), a resolução é:
+
+```
+1. users_override.json  → se o usuário existe aqui, este é o cadastro-base
+2. USERS (config.php)   → senão, procura nos usuários estáticos
+3. passwords.json       → POR CIMA de qualquer um dos dois: se houver entrada
+                          para o usuário, o hash dela SUBSTITUI o hash-base
+```
+
+> ⚠️ **Consequência prática:** trocar o hash no `config.php` **não surte efeito** se o usuário tiver uma entrada em `passwords.json` no servidor (deixada por uma troca de senha antiga via painel). Nesse caso, remova a entrada dele do `passwords.json`.
+
+### 9.4 Como gerar um hash e trocar senhas
+
+**No dia a dia — pelo painel admin** (ação `change_password`): grava o novo hash no arquivo certo automaticamente. Salvaguarda: um admin pode trocar a própria senha e a de usuários comuns, mas **não** a de outro admin.
+
+**Quando a senha de um admin foi esquecida** — é preciso editar o `config.php`:
+
+1. Gere o hash da senha nova por um destes caminhos:
+   - **`api/gerar-hash.php`** — página protegida (exige login de admin): digite a senha, copie o hash;
+   - **localmente**: `php -r "echo password_hash('NOVA_SENHA', PASSWORD_DEFAULT), PHP_EOL;"`
+2. Cole o hash na linha do usuário em `USERS` (`config.php`) e suba o arquivo para `private-config/` no servidor.
+3. Confira o `passwords.json` no servidor: se houver entrada para esse usuário, apague-a (ver 9.3).
+
+### 9.5 O que acontece num login (passo a passo)
+
+1. **Turnstile** (opcional, v23): se as chaves estiverem configuradas em `secrets.local.php`, o token anti-bot da Cloudflare é validado no servidor antes de qualquer outra checagem.
+2. **Rate limiting por (usuário, dispositivo)**: o servidor emite um cookie `bi_device` (httpOnly, 2 anos) no primeiro login bem-sucedido; as falhas são contadas pela chave `u:USUARIO:d:DEVICE` (fallback `u:USUARIO:i:IP` sem cookie). Exceder `MAX_LOGIN_ATTEMPTS` bloqueia por `LOGIN_BLOCK_MINUTES`. A chave por dispositivo evita que uma pessoa errando a senha bloqueie a empresa inteira atrás do mesmo IP público.
+3. **Verificação da senha**: resolução do usuário (seção 9.3) + `password_verify()`.
+4. **Sucesso**: contador de falhas zerado, `session_regenerate_id(true)` para prevenir session fixation, e o **token CSRF** da sessão é devolvido ao frontend.
+
+### 9.6 Sessões
+
+- Cookie `bi_session` com `httponly` (inacessível ao JavaScript), `samesite=Lax` (mitiga CSRF) e `secure` sob HTTPS; `use_strict_mode` rejeita IDs de sessão forjados.
+- Duração de **2 horas** (`SESSION_LIFETIME`), com renovação automática enquanto o usuário está ativo e aviso antes de expirar.
+- Arquivos de sessão em `private-config/sessions/`, fora do document root.
+
+### 9.7 CSRF
+
+CSRF (*cross-site request forgery*) é quando um site malicioso dispara, pelo navegador de um usuário logado, uma requisição ao nosso sistema sem que ele perceba. Proteção (v23): no login é gerado um token aleatório de 32 bytes por sessão; **toda ação POST autenticada** precisa reenviá-lo no cabeçalho `X-CSRF-Token` (o frontend faz isso sozinho). A comparação usa `hash_equals()` (timing-safe). Ações GET são somente leitura e não exigem token.
+
+### 9.8 Autorização (papéis)
+
+- Papéis: `admin` (acesso total) e `user` (limitado às bases visíveis e ações de registro).
+- `production_users.json` concede acesso a bases de produção a usuários comuns.
+- Toda ação restrita é verificada **no backend** (`requireAdmin`), nunca apenas escondida na interface.
 - Nenhum admin pode alterar a senha ou remover outro admin via API.
 
-### Proteções HTTP
+### 9.9 Concorrência e integridade
 
-- `X-Content-Type-Options: nosniff` e `X-Frame-Options: DENY` em todas as respostas JSON.
-- `download_photo` e `download_bulk` removem esses cabeçalhos antes do stream binário.
-- **v21:** `cron.php` agora prefere o header `X-Cron-Key` (não vaza em logs de acesso). Mantém `?key=` GET por compatibilidade. Comparação via `hash_equals` (timing-safe).
+- `acquireCaseLock()` serializa escritas concorrentes no mesmo caso (timeout 10 s) — cobre registro de uso, bloqueio e tags.
+- `withJsonLock()` (`flock(LOCK_EX)`) serializa leitura-modificação-escrita nos JSONs de configuração (`passwords.json`, `users_override.json`, `production_users.json`).
+- A escrita em Sheets é tentada até três vezes com backoff linear; a edição simultânea usa lock otimista + aviso de presença (v23).
+
+### 9.10 Proteções HTTP
+
+- `X-Content-Type-Options: nosniff` e `X-Frame-Options: DENY` nas respostas JSON e no `gerar-hash.php`; `download_photo` e `download_bulk` os removem antes do stream binário.
+- `cron.php` autenticado preferencialmente pelo cabeçalho `X-Cron-Key` (não vaza em logs de acesso), comparado com `hash_equals`; `?key=` GET mantido por compatibilidade.
+
+### 9.11 Segredos e o que nunca vai para o Git
+
+- `secrets.local.php` (v23): `DB_PASS`, `CRON_KEY` e chaves do Turnstile — **não versionado** (`.gitignore`); sobe uma única vez por SFTP.
+- Também fora do Git (ou versionados apenas com placeholders): `google-credentials.json`, `passwords.json`, `users_override.json`, `production_users.json`.
+- No repositório público, o `config.php` é versionado **sempre com placeholders** — nunca com hashes, IDs ou domínios reais.
 
 ---
 
@@ -405,6 +486,10 @@ O endpoint `diagnostico` (admin) verifica:
 ---
 
 ## 11. Histórico de mudanças
+
+### v23
+
+Resumo — detalhes em `DEPLOY.md`, seção "O que mudou na v23": segredos movidos para `secrets.local.php`; proteção CSRF em todas as ações POST; Cloudflare Turnstile opcional no login; gerador de hash `api/gerar-hash.php`; sincronização Drive↔planilha automática pelo cron + botão manual; `index.html` → `index.php` com cache busting automático e verificação de build (`APP_BUILD`); edição concorrente (lock otimista + aviso de presença); export com bibliotecas locais (gif.js, lame, ffmpeg.wasm).
 
 ### v21.2 (2026-05-18)
 

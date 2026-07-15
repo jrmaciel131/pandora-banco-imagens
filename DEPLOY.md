@@ -29,7 +29,10 @@ Enquanto as chaves estiverem vazias em `secrets.local.php`, o Turnstile fica **d
    define('TURNSTILE_SITE_KEY', 'sua-site-key');
    define('TURNSTILE_SECRET',   'sua-secret-key');
    ```
-4. Para desligar, basta esvaziar as duas constantes.
+4. Confira numa aba anônima: o widget deve aparecer abaixo do campo de senha e, sem completar a verificação, o login responde "Complete a verificação de segurança antes de entrar."
+5. Para desligar, basta esvaziar as duas constantes — o login volta a funcionar sem o widget.
+
+Como funciona por dentro: o `index.php` injeta o script e o widget do Turnstile apenas quando a site key está preenchida; `assets/auth.js` envia o token no campo `cf-turnstile-response`; o `handler.php` (`verifyTurnstile`) valida o token no endpoint `siteverify` da Cloudflare antes de conferir a senha.
 
 ## Estrutura final no servidor (DreamHost)
 
@@ -156,17 +159,11 @@ Se algo der errado:
 3. Testar `api/handler.php?action=diagnostico` (admin) — aponta onde está falhando.
 4. Para problemas no rate-limit: `DELETE FROM login_attempts;` no MySQL libera todos os bloqueios.
 
-## Cache busting
+## Cache busting e verificação de build
 
-A partir da v21, as referências em `index.html` levam sufixo `?v=N`. Versão atual: **`?v=25`** (v21.2). Quando alterar qualquer arquivo em `assets/`:
+Desde a v23 o `index.html` virou **`index.php`** e o sufixo `?v=` dos assets é gerado automaticamente com `filemtime()` — não é mais preciso bumpar número manualmente; basta subir o asset alterado.
 
-1. Edite o arquivo.
-2. No `index.html`, incremente o número (ex.: `?v=25` → `?v=26`).
-3. Suba `index.html` + o(s) asset(s) alterado(s).
-
-Sem o incremento, os browsers podem servir o asset antigo do cache por horas. Foi exatamente isso que aconteceu no rollout da v21.2 — o `admin.js` cacheado da v21.1 disparou `ReferenceError` ao clicar nos botões novos.
-
-> **Próximo passo opcional:** renomear `index.html` → `index.php` e usar `filemtime()` pra gerar o `?v=` automaticamente. Elimina a necessidade de bumpar manualmente.
+Permanece um cuidado por causa do cache do Cloudflare: `utils.js` declara a constante `APP_BUILD` e o `index.php` injeta o valor lido no servidor em `window.APP_BUILD_EXPECTED`. Se divergirem, o app exibe a faixa de "versão desatualizada" pedindo reload. **Em todo release que altera assets, atualize o `APP_BUILD` no `utils.js`** (ex.: `v23.09 (2026-07-14)`).
 
 ## Checklist final
 
