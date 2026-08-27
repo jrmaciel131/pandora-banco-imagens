@@ -147,6 +147,14 @@ body { margin: 0; font-size: 14px; line-height: 1.45; }
 .sn { font-family: var(--font-mono); font-size: 22px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
 .sl { font-size: 10px; color: var(--tx3); margin-top: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
 
+/* Nota de escopo: aparece quando profissional e local estão combinados, para
+   explicar sobre que recorte os contadores estão sendo calculados. */
+.s-scope-note {
+  display: flex; align-items: center; gap: 6px;
+  margin: 10px 0 12px; font-size: 12px; color: var(--tx2); line-height: 1.45;
+}
+.s-scope-note b { color: var(--tx); font-weight: 600; }
+
 /* ─────────────────────────────────────────────────────────────
  *  Bulk bar
  * ───────────────────────────────────────────────────────────── */

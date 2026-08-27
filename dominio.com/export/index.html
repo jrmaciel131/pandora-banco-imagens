@@ -450,6 +450,10 @@ input[type="number"]:focus,input[type="text"]:focus{border-color:var(--text);}
       </div>
     </div>
     <div class="hint" style="margin-top:10px;">Exporta apenas os formatos selecionados na seção 03. Ex.: CASO-001-VNI · CASO-001-VNI-NA · CASO-001-VNI-LH (ou EH) · CASO-001-VNI-CL · CASO-001-VOI · CASO-001-VOI-CL</div>
+    <label class="hint" style="display:block;margin-top:8px;cursor:pointer;">
+      <input type="checkbox" id="keepOriginalNames" onchange="renderQueue()" style="vertical-align:middle;margin-right:6px;">
+      Manter nomes originais das fotos
+    </label>
   </div>
 
   <!-- 02 LOGOS -->
@@ -1252,6 +1256,16 @@ function getStartNum(){ return parseInt(document.getElementById('startCase').val
 function getPrefix(){ return (document.getElementById('prefix').value||'CASO').trim(); }
 function padNum(n){ return String(n).padStart(3,'0'); }
 function getCaseName(n){ return getPrefix()+'-'+padNum(n); }
+function shouldKeepOriginalNames(){ return document.getElementById('keepOriginalNames').checked; }
+function getOriginalBaseName(filename){
+  const lastDot = filename.lastIndexOf('.');
+  return lastDot > 0 ? filename.slice(0,lastDot) : filename;
+}
+function getOutputBaseName(item, caseName, isMulti){
+  if(shouldKeepOriginalNames()) return getOriginalBaseName(item.file.name);
+  const vSuffix = isMulti && item.version ? '-'+item.version : '';
+  return caseName + vSuffix;
+}
 
 // Assign auto-versions when a group gets a second item
 function assignVersions(group){
@@ -1343,7 +1357,7 @@ function renderQueue(){
     // Items
     group.items.forEach(item=>{
       const vSuffix = item.version ? '-'+item.version : '';
-      const displayName = caseName + vSuffix + '-VNI';
+      const displayName = (shouldKeepOriginalNames() ? getOriginalBaseName(item.file.name) : caseName + vSuffix) + '-VNI';
       const errHtml = item.error ? `<div class="error-badge">${item.error}</div>` : '';
 
       // Version badges — disabled if used by another item in group
@@ -1649,54 +1663,54 @@ async function processAll(){
         done+=stepsPerItem; continue;
       }
 
-      const vSuffix = isMulti && item.version ? '-'+item.version : '';
+      const baseName = getOutputBaseName(item,caseName,isMulti);
 
       // VNI
       if(exp.VNI){
         const cA=compositeCanvas(img,null);
         const bA=await canvasToBlob(cA,'image/jpeg',0.95);
-        outputs.push({blob:bA, name:caseName+vSuffix+'-VNI.jpg', url:URL.createObjectURL(bA)});
-        tick(caseName+vSuffix+' — VNI');
+        outputs.push({blob:bA, name:baseName+'-VNI.jpg', url:URL.createObjectURL(bA)});
+        tick(baseName+' — VNI');
       }
 
       // VNI-NA
       if(exp.NA){
         const c=compositeCanvas(img,logos.NA);
         const b=await canvasToBlob(c,'image/jpeg',0.95);
-        outputs.push({blob:b, name:caseName+vSuffix+'-VNI-NA.jpg', url:URL.createObjectURL(b)});
-        tick(caseName+vSuffix+' — NA');
+        outputs.push({blob:b, name:baseName+'-VNI-NA.jpg', url:URL.createObjectURL(b)});
+        tick(baseName+' — NA');
       }
 
       // VNI-LH or VNI-EH
       if(exp.LHEH){
         const c=compositeCanvas(img,logos.LHEH);
         const b=await canvasToBlob(c,'image/jpeg',0.95);
-        outputs.push({blob:b, name:caseName+vSuffix+'-VNI-'+lhehLabel+'.jpg', url:URL.createObjectURL(b)});
-        tick(caseName+vSuffix+' — '+lhehLabel);
+        outputs.push({blob:b, name:baseName+'-VNI-'+lhehLabel+'.jpg', url:URL.createObjectURL(b)});
+        tick(baseName+' — '+lhehLabel);
       }
 
       // VNI-CL
       if(exp.CL){
         const c=compositeCanvas(img,logos.CL);
         const b=await canvasToBlob(c,'image/jpeg',0.95);
-        outputs.push({blob:b, name:caseName+vSuffix+'-VNI-CL.jpg', url:URL.createObjectURL(b)});
-        tick(caseName+vSuffix+' — CL');
+        outputs.push({blob:b, name:baseName+'-VNI-CL.jpg', url:URL.createObjectURL(b)});
+        tick(baseName+' — CL');
       }
 
       // VOI
       if(exp.VOI){
         const cD=compositeCanvas(img,null);
         const bD=await canvasToBlob(cD,'image/webp',0.5);
-        outputs.push({blob:bD, name:caseName+vSuffix+'-VOI.webp', url:URL.createObjectURL(bD)});
-        tick(caseName+vSuffix+' — VOI');
+        outputs.push({blob:bD, name:baseName+'-VOI.webp', url:URL.createObjectURL(bD)});
+        tick(baseName+' — VOI');
       }
 
       // VOI-CL
       if(exp.VOICL){
         const c=compositeCanvas(img,logos.CL);
         const b=await canvasToBlob(c,'image/webp',0.5);
-        outputs.push({blob:b, name:caseName+vSuffix+'-VOI-CL.webp', url:URL.createObjectURL(b)});
-        tick(caseName+vSuffix+' — VOI-CL');
+        outputs.push({blob:b, name:baseName+'-VOI-CL.webp', url:URL.createObjectURL(b)});
+        tick(baseName+' — VOI-CL');
       }
     }
   }

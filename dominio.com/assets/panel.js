@@ -423,7 +423,7 @@ function confirmBatchRemove(){
         if(refreshed.ok){ casos = refreshed.casos || []; allProfs = refreshed.profissionais || []; }
       } catch(e){}
       currentCaso = casos.find(c => c.id === casoId);
-      applyFilter();
+      applyFilter(true);
       if(currentCaso) renderModalChips();
       if(errs.length) showToast(`${errs.length} erro(s): ${errs[0]}`);
       else showToast('Itens removidos com sucesso!');
@@ -648,10 +648,16 @@ function prepareConfirm(type){
     const city = (document.getElementById('aci').dataset.val || '').toUpperCase();
     const prof = document.getElementById('apro').value.trim();
     const batch = pendingUsos.slice();
-    const currentHasData = uf || city || prof;
-    if(currentHasData){
-      if(!uf || !city || !prof){
-        if(err) err.textContent = 'Linha atual incompleta — preencha todos os campos ou limpe pra registrar só os adicionados.';
+    /* A cidade é o que define se há uma linha nova: depois de "Adicionar mais
+       um" o estado e o profissional continuam preenchidos de propósito. */
+    const cidadeDigitada = document.getElementById('aci').value.trim();
+    if(cidadeDigitada && !city){
+      if(err) err.textContent = 'Escolha a cidade na lista que aparece abaixo do campo.';
+      return;
+    }
+    if(city){
+      if(!uf || !prof){
+        if(err) err.textContent = 'Linha atual incompleta: preencha estado, cidade e profissional.';
         return;
       }
       const dupCity = batch.some(p => p.cidade === city);
@@ -666,23 +672,20 @@ function prepareConfirm(type){
     const title = batch.length > 1 ? `Confirmar ${batch.length} registros` : 'Confirmar registro';
     showConfirm(title, `Registrar ${batch.length} uso(s) em <b>${currentCaso?.id}</b>?`, rows,
       () => submitUsoBatch(batch));
-  } else if(type === 'bulk-grid'){
-    const uf = document.getElementById('bauf').value;
-    const city = document.getElementById('baci').dataset.val || '';
-    const prof = document.getElementById('bapro').value.trim();
-    if(!uf || !city || !prof){ if(err) err.textContent = 'Preencha todos os campos.'; return; }
-    showConfirm('Confirmar registro em massa', `Aplicar para <b>${selIds.size}</b> casos: ${[...selIds].join(', ')}`,
-      [{label:'Estado', val:uf}, {label:'Cidade', val:cap(city)}, {label:'Profissional', val:prof}],
-      () => submitBulkApply());
-  } else if(type === 'bulk-id'){
-    const uf = document.getElementById('biuf').value;
-    const city = document.getElementById('bici').dataset.val || '';
-    const prof = document.getElementById('bipro').value.trim();
-    if(!uf || !city || !prof){ if(err) err.textContent = 'Preencha todos os campos.'; return; }
-    if(!bulkSelIds.size){ if(err) err.textContent = 'Nenhum caso selecionado.'; return; }
-    showConfirm('Confirmar registro por ID', `Aplicar para <b>${bulkSelIds.size}</b> casos: ${[...bulkSelIds].join(', ')}`,
-      [{label:'Estado', val:uf}, {label:'Cidade', val:cap(city)}, {label:'Profissional', val:prof}],
-      () => submitBulkById());
+  } else if(type === 'bulk-grid' || type === 'bulk-id'){
+    /* Registro em massa: a lista de locais (um profissional pode atuar em mais
+       de uma cidade/estado) é aplicada inteira a cada caso selecionado. */
+    const t = type === 'bulk-grid' ? 'ba' : 'bi';
+    const ids = t === 'ba' ? [...selIds] : [...bulkSelIds];
+    if(!ids.length){ if(err) err.textContent = 'Nenhum caso selecionado.'; return; }
+    const col = collectBulkEntries(t);
+    if(col.error){ if(err) err.textContent = col.error; return; }
+    const rows = col.entries.map(p => ({label:`${p.uf} / ${cap(p.cidade)}`, val:p.profissional}));
+    const title = type === 'bulk-grid' ? 'Confirmar registro em massa' : 'Confirmar registro por ID';
+    const desc = col.entries.length > 1
+      ? `Registrar <b>${col.entries.length}</b> locais em <b>${ids.length}</b> caso(s): ${ids.join(', ')}`
+      : `Aplicar para <b>${ids.length}</b> caso(s): ${ids.join(', ')}`;
+    showConfirm(title, desc, rows, () => runBulkRegister(t));
   }
 }
 
@@ -714,12 +717,11 @@ function addPendingUso(){
     return;
   }
   pendingUsos.push({uf, cidade:city, profissional:prof});
-  /* Limpa o formulário pra próxima entrada. */
-  document.getElementById('auf').value = '';
+  /* Mantém UF e profissional preenchidos: o fluxo comum é o mesmo profissional
+     usar o caso em mais de um estado/cidade (ex.: Fortaleza-CE e Parnaíba-PI),
+     então só a cidade é limpa. Para trocar de estado, basta mudar o select. */
   const aci = document.getElementById('aci');
-  aci.value = ''; aci.dataset.val = ''; aci.readOnly = true;
-  aci.placeholder = 'Selecione o estado primeiro...';
-  document.getElementById('apro').value = '';
+  aci.value = ''; aci.dataset.val = '';
   document.getElementById('prosug').style.display = 'none';
   document.getElementById('state-warn').style.display = 'none';
   pendingForce = false;

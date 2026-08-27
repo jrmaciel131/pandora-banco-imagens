@@ -13,7 +13,7 @@ let _pageGeneration = 0;
 let _highPriorityIds = new Set();
 let _loadingCount = 0;
 let casos = [], filtered = [], page = 1;
-let mode = 'estado', selUF = '', selCity = '', selProf = '';
+let selUF = '', selCity = '', selProf = '';
 let selProfs = new Set();
 window._presetRecente = false;
 let density = localStorage.getItem('s-density') || 'normal';
@@ -42,7 +42,7 @@ async function loadCasos(silent = false){
     const tagSet = new Set();
     casos.forEach(c => (c.tags||[]).forEach(t => tagSet.add(t)));
     allTags = [...tagSet].sort();
-    applyFilter();
+    applyFilter(true);
   } catch(e){
     document.getElementById('grid').innerHTML = '';
     document.getElementById('empty').style.display = 'block';
@@ -59,7 +59,7 @@ function updateCasoLocal(casoId, patch){
   const profs = new Set();
   casos.forEach(c => c.clientes.forEach(p => { if(p) profs.add(p); }));
   allProfs = [...profs].sort();
-  applyFilter();
+  applyFilter(true);
   return true;
 }
 
@@ -96,7 +96,7 @@ async function forceRefresh(){
     thumbCache = {};
     thumbErrors = {};
     _baseGeneration++;
-    applyFilter();
+    applyFilter(true);
     checkNewFiles();
     showToast(`✓ ${casos.length} casos sincronizados.`);
   } catch(e){
@@ -116,17 +116,6 @@ async function checkNewFiles(){
   } catch(e){}
 }
 
-function setMode(m){
-  mode = m;
-  selUF = ''; selCity = ''; ibgeCities = [];
-  document.getElementById('fuf').value = '';
-  document.getElementById('fci').value = '';
-  document.getElementById('te').classList.toggle('active', m === 'estado');
-  document.getElementById('tc').classList.toggle('active', m === 'cidade');
-  document.getElementById('cw').style.display = m === 'cidade' ? 'block' : 'none';
-  applyFilter();
-}
-
 async function onUFChange(){
   selUF = document.getElementById('fuf').value;
   selCity = '';
@@ -135,6 +124,7 @@ async function onUFChange(){
   document.getElementById('cdd').classList.remove('open');
   document.getElementById('cw').style.display = selUF ? 'block' : 'none';
   if(selUF) await loadIBGE(selUF, 'filter');
+  autoSyncShowFilter();
   applyFilter();
 }
 
@@ -165,13 +155,16 @@ function autoSyncShowFilter(){
   const fshow = document.getElementById('fshow');
   if(!fshow) return;
   const hasIds = !!(document.getElementById('fids')?.value || '').trim();
-  if(hasIds){
-    /* Com IDs colados, todos eles devem aparecer; o status de cada um fica
-       visível nos badges e nos contadores. */
+  const temProf = !!(selProf || selProfs.size);
+  if(hasIds || (temProf && selUF)){
+    /* Com IDs colados, todos eles devem aparecer. Com profissional + local, o
+       universo já é só o dos casos do profissional e o que interessa é ver
+       quais deles estão em uso e quais estão livres no estado/cidade. Nos dois
+       casos o status fica visível nos badges e nos contadores. */
     fshow.value = 'todos';
     window._presetRecente = false;
   } else {
-    fshow.value = (selProf || selProfs.size) ? 'em_uso' : 'disponivel';
+    fshow.value = temProf ? 'em_uso' : 'disponivel';
   }
   syncQuickTabHighlight();
 }
@@ -252,6 +245,36 @@ function matchesProfFilter(c, qs){
   return c.clientes.some(p => { const pn = norm(p); return qs.some(q => pn.includes(q)); });
 }
 
+/* Predicado de "em uso". Com filtro de profissional ativo, um caso bloqueado
+   que esse profissional usa continua contando como em uso — o bloqueio não
+   apaga o uso, o caso está em uso E bloqueado. Sem esse filtro, o bloqueio
+   tem precedência e o caso aparece apenas em "Bloqueados". */
+function usoPredicate(profQs){
+  const keepBlocked = profQs.length > 0;
+  return c => c.emUso && (keepBlocked || !c.bloqueado);
+}
+
+/* Escopo do filtro. Profissional e local (estado/cidade) se combinam em
+   hierarquia: com os dois ativos, o profissional é o filtro principal (o
+   universo passa a ser apenas os casos dele) e o local vira subfiltro, que
+   define o status de cada caso dentro desse recorte: "em uso" = usado naquele
+   estado/cidade, por qualquer profissional. Assim dá para ver quais casos de
+   um cliente já estão rodando na praça e quais ainda estão livres nela. Com
+   apenas um dos dois ativo, ele sozinho classifica todos os casos. O filtro
+   de IDs restringe o universo antes de tudo. */
+function filterScope(){
+  const profQs = profFilterQueries();
+  const idSet = parseIdFilter((document.getElementById('fids')?.value || '').trim());
+  const base = idSet ? casos.filter(c => idSet.has(c.id)) : casos;
+  const matchLocal = c => selCity ? c.cidades.includes(selCity) : c.ufs.includes(selUF);
+  const combinado = !!(profQs.length && selUF);
+
+  if(combinado)     return {profQs, combinado, universe: base.filter(c => matchesProfFilter(c, profQs)), statusOf: matchLocal};
+  if(profQs.length) return {profQs, combinado, universe: base, statusOf: c => matchesProfFilter(c, profQs)};
+  if(selUF)         return {profQs, combinado, universe: base, statusOf: matchLocal};
+  return {profQs, combinado, universe: base, statusOf: () => false};
+}
+
 function clearFilters(){
   selUF = ''; selCity = ''; selProf = ''; selProfs.clear(); selTags.clear();
   ['fuf','fci','fpro','fids','ftag'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
@@ -260,7 +283,6 @@ function clearFilters(){
   _userTouchedShow = false;
   document.getElementById('fshow').value = 'disponivel';
   document.getElementById('cw').style.display = 'none';
-  mode = 'cidade';
   window._presetRecente = false;
   document.getElementById('btn-clf').style.display = 'none';
   syncQuickTabHighlight();
@@ -332,57 +354,78 @@ function parseIdFilter(raw){
 
 /* applyFilter: o filtro por ID restringe o universo de casos; os demais
    filtros (estado/cidade, profissional, tags, exibir) e todos os contadores
-   continuam valendo sobre esse subconjunto. */
-function applyFilter(){
+   continuam valendo sobre esse subconjunto. Com keepPage=true a página atual
+   é preservada (limitada ao novo total) — usado após mutações (tags, usos,
+   bloqueio) e sincronizações, pra não devolver o usuário à página 1. */
+function applyFilter(keepPage = false){
   const show = document.getElementById('fshow').value;
-  const profQs = profFilterQueries();
+  const scope = filterScope();
+  const profQs = scope.profQs;
   const idsRaw = (document.getElementById('fids')?.value || '').trim();
-  const idSet = parseIdFilter(idsRaw);
-  const hasStateFilter = !!(selUF || profQs.length);
+  const hasStatusFilter = !!(selUF || profQs.length);
   const hasTagFilter = selTags.size > 0;
-  const hasFilter = !!(hasStateFilter || idsRaw || hasTagFilter);
+  const hasFilter = !!(hasStatusFilter || idsRaw || hasTagFilter);
   document.getElementById('btn-clf').style.display = hasFilter ? 'inline-flex' : 'none';
   const expBtn = document.getElementById('btn-export-visual');
   if(expBtn) expBtn.style.display = profQs.length ? 'inline-flex' : 'none';
+  /* O PDF de disponibilidade só faz sentido no escopo combinado: precisa do
+     profissional (define o universo) e da praça (define livre x em uso). */
+  const dispBtn = document.getElementById('btn-export-disp');
+  if(dispBtn) dispBtn.style.display = scope.combinado ? 'inline-flex' : 'none';
 
   const matchesTags = c => !hasTagFilter || [...selTags].every(t => (c.tags||[]).includes(t));
 
-  const universe = idSet ? casos.filter(c => idSet.has(c.id)) : casos;
-
-  const allWithStatus = universe.map(c => {
-    let emUso = false;
-    if(profQs.length){
-      emUso = matchesProfFilter(c, profQs);
-    } else if(selUF){
-      if(mode === 'estado') emUso = c.ufs.includes(selUF);
-      else                  emUso = selCity ? c.cidades.includes(selCity) : c.ufs.includes(selUF);
-    }
-    return {...c, emUso};
-  });
+  const allWithStatus = scope.universe.map(c => ({...c, emUso: scope.statusOf(c)}));
 
   const tagFiltered = hasTagFilter ? allWithStatus.filter(matchesTags) : allWithStatus;
 
+  const emUsoMatch = usoPredicate(profQs);
   const dispCount = tagFiltered.filter(c => !c.emUso && !c.bloqueado).length;
-  const usoCount  = tagFiltered.filter(c =>  c.emUso && !c.bloqueado).length;
+  const usoCount  = tagFiltered.filter(emUsoMatch).length;
 
   let list = [...tagFiltered];
   if(show === 'disponivel')    list = list.filter(c => !c.emUso && !c.bloqueado);
-  else if(show === 'em_uso')   list = list.filter(c =>  c.emUso && !c.bloqueado);
+  else if(show === 'em_uso')   list = list.filter(emUsoMatch);
   else if(show === 'bloqueado')list = list.filter(c =>  !!c.bloqueado);
 
   if(window._presetRecente){
     list = _getRecentes(list);
   }
 
-  filtered = list; page = 1;
+  filtered = list;
+  page = keepPage ? Math.min(page, Math.max(1, Math.ceil(list.length / PER))) : 1;
   document.getElementById('st').textContent = list.length;
-  document.getElementById('sd').textContent = hasStateFilter ? dispCount : '—';
-  document.getElementById('su').textContent = hasStateFilter ? usoCount : '—';
-  list.slice(0, PER).forEach(c => _highPriorityIds.add(c.id));
+  document.getElementById('sd').textContent = hasStatusFilter ? dispCount : '—';
+  document.getElementById('su').textContent = hasStatusFilter ? usoCount : '—';
+  list.slice((page-1)*PER, page*PER).forEach(c => _highPriorityIds.add(c.id));
+  renderScopeLabels(scope);
   renderActiveFilterChips();
   updateQuickTabCounts();
   if(list.length === 0) renderEmptyState();
   renderGrid();
+}
+
+/* Rótulos dos contadores. Em modo combinado (profissional + local) eles ganham
+   o sufixo do estado/cidade, porque "disponível" e "em uso" passam a ser lidos
+   dentro do local, sobre um universo que já é só o do profissional. A nota
+   acima dos números explica o recorte por extenso. */
+function renderScopeLabels(scope){
+  const local = selCity ? cap(selCity) : selUF;
+  const sufixo = scope.combinado ? ' em ' + local : '';
+  const set = (id, txt) => { const el = document.getElementById(id); if(el) el.textContent = txt; };
+  set('sd-l', 'Disponíveis' + sufixo);
+  set('su-l', 'Em uso' + sufixo);
+  set('qt-l-disp', 'Disponíveis' + sufixo);
+  set('qt-l-uso', 'Em uso' + sufixo);
+
+  const note = document.getElementById('s-scope-note');
+  if(!note) return;
+  if(!scope.combinado){ note.style.display = 'none'; note.innerHTML = ''; return; }
+  const nomes = [...selProfs];
+  if(selProf.trim()) nomes.push(selProf.trim());
+  note.style.display = 'flex';
+  note.innerHTML = `<span>Só os casos de <b>${esc(nomes.join(', '))}</b>, `
+    + `classificados pelo uso em <b>${esc(local)}</b>.</span>`;
 }
 
 function renderActiveFilterChips(){
@@ -428,22 +471,13 @@ function _getRecentes(arr){
 }
 
 function updateQuickTabCounts(){
-  const profQs = profFilterQueries();
-  const idSet = parseIdFilter((document.getElementById('fids')?.value || '').trim());
-  const universe = idSet ? casos.filter(c => idSet.has(c.id)) : casos;
-  const withStatus = universe.map(c => {
-    let emUso = false;
-    if(profQs.length) emUso = matchesProfFilter(c, profQs);
-    else if(selUF){
-      if(mode === 'estado') emUso = c.ufs.includes(selUF);
-      else                  emUso = selCity ? c.cidades.includes(selCity) : c.ufs.includes(selUF);
-    }
-    return {...c, emUso};
-  });
+  const scope = filterScope();
+  const universe = scope.universe;
+  const withStatus = universe.map(c => ({...c, emUso: scope.statusOf(c)}));
   const el = id => document.getElementById(id);
   if(el('qt-c-todos')) el('qt-c-todos').textContent = universe.length;
   if(el('qt-c-disp'))  el('qt-c-disp').textContent  = withStatus.filter(c => !c.emUso && !c.bloqueado).length;
-  if(el('qt-c-uso'))   el('qt-c-uso').textContent   = withStatus.filter(c =>  c.emUso && !c.bloqueado).length;
+  if(el('qt-c-uso'))   el('qt-c-uso').textContent   = withStatus.filter(usoPredicate(scope.profQs)).length;
   if(el('qt-c-bloq'))  el('qt-c-bloq').textContent  = universe.filter(c => !!c.bloqueado).length;
   if(el('qt-c-rec'))   el('qt-c-rec').textContent   = '+' + _getRecentes(universe).length;
 }
@@ -551,12 +585,13 @@ function renderGrid(){
     const isBlocked = !!c.bloqueado;
     const nv = !isBlocked && !c.ufs.length && !c.cidades.length;
     let cls, lbl;
-    if(isBlocked){ cls = 'bblock'; lbl = '🔒 Bloqueado'; }
+    if(isBlocked){ cls = 'bblock'; lbl = c.emUso ? '🔒 Bloqueado · Em uso' : '🔒 Bloqueado'; }
     else if(nv){ cls = 'bfree'; lbl = 'Nunca usado'; }
     else if(c.emUso){ cls = 'bused'; lbl = 'Em uso'; }
     else { cls = 'bok'; lbl = 'Disponível'; }
     const realUfs = (c.ufs||[]).filter(u => !isBlockMarker(u));
-    const sub = isBlocked ? 'Bloqueado' : (realUfs.length ? realUfs.slice(0,5).join(', ') + (realUfs.length>5 ? '…' : '') : 'Sem uso');
+    const sub = (isBlocked && !c.emUso) ? 'Bloqueado'
+              : (realUfs.length ? realUfs.slice(0,5).join(', ') + (realUfs.length>5 ? '…' : '') : 'Sem uso');
     const isSel = selIds.has(c.id);
     const tc = thumbCache[c.id];
 

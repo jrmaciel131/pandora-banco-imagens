@@ -1302,49 +1302,93 @@ switch ($action) {
         break;
 
     /*
-     * Pré-flight do registro em massa: valida o trio (uf, cidade, prof) contra
-     * TODOS os casos selecionados. Devolve `errors` (bloqueios) e `warns` (admin
-     * pode prosseguir). O frontend usa pra implementar atomicidade — só dispara
-     * os writes se errors estiver vazio.
+     * Pré-flight do registro em massa: valida cada linha (uf, cidade, prof)
+     * contra TODOS os casos selecionados. Devolve `errors` (bloqueios) e
+     * `warns` (admin pode prosseguir). O frontend usa pra implementar
+     * atomicidade: só dispara os writes se errors estiver vazio.
      */
     case 'bulk_preflight':
-        $idsRaw   = $_POST['ids'] ?? '';
-        $nova_uf  = strtoupper(trim($_POST['uf'] ?? ''));
-        $nova_cid = strtoupper(trim($_POST['cidade'] ?? ''));
-        $prof     = trim($_POST['profissional'] ?? '');
+        $idsRaw = $_POST['ids'] ?? '';
+        /* Aceita várias tuplas (uf, cidade, profissional) em `entries`: o mesmo
+           profissional pode atuar em mais de uma cidade/estado e todas as linhas
+           são aplicadas a todos os casos selecionados. O formato antigo (uf,
+           cidade e profissional soltos) continua valendo como uma única linha. */
+        $entries = json_decode((string)($_POST['entries'] ?? ''), true);
+        if (!is_array($entries) || !$entries) {
+            $entries = [[
+                'uf'           => $_POST['uf'] ?? '',
+                'cidade'       => $_POST['cidade'] ?? '',
+                'profissional' => $_POST['profissional'] ?? '',
+            ]];
+        }
         $ids = array_values(array_filter(
             array_map('trim', explode(',', $idsRaw)),
             fn($x) => preg_match('/^CASO-\d+$/', $x)
         ));
-        if (!$ids || !$nova_uf || !$nova_cid || !$prof) {
-            echo json_encode(['ok'=>false,'error'=>'Dados inválidos.']); break;
+        $linhas = [];
+        foreach ($entries as $e) {
+            if (!is_array($e)) continue;
+            $uf   = strtoupper(trim($e['uf'] ?? ''));
+            $cidE = strtoupper(trim($e['cidade'] ?? ''));
+            $prof = trim($e['profissional'] ?? '');
+            if ($uf === '' || $cidE === '' || $prof === '') continue;
+            $linhas[] = ['uf'=>$uf, 'cidade'=>$cidE, 'profissional'=>$prof];
+        }
+        if (!$ids || !$linhas) { echo json_encode(['ok'=>false,'error'=>'Dados inválidos.']); break; }
+        if (count($linhas) > 30) {
+            echo json_encode(['ok'=>false,'error'=>'Máximo de 30 locais por registro em massa.']); break;
         }
         try {
             $errs = [];
             $warns = [];
+            /* Cidade repetida entre as linhas quebraria todos os casos de uma vez. */
+            $vistas = [];
+            foreach ($linhas as $e) {
+                if (isset($vistas[$e['cidade']])) {
+                    $errs[] = 'Cidade '.ucwords(strtolower($e['cidade'])).' aparece em mais de uma linha.';
+                }
+                $vistas[$e['cidade']] = true;
+            }
+            if ($errs) { echo json_encode(['ok'=>true,'errors'=>$errs,'warns'=>[]]); break; }
+
+            $multi    = count($linhas) > 1;
             $casosAll = $api->getCasos(false);
             foreach ($ids as $cid) {
                 $caso = null;
                 foreach ($casosAll as $c) if ($c['id'] === $cid) { $caso = $c; break; }
                 if (!$caso) { $errs[] = "{$cid}: não encontrado"; continue; }
                 if (!empty($caso['bloqueado'])) { $errs[] = "{$cid}: caso bloqueado"; continue; }
-                if (in_array($nova_cid, $caso['cidades'], true)) {
-                    $errs[] = "{$cid}: cidade ".ucwords(strtolower($nova_cid))." já está em uso";
-                    continue;
-                }
-                try {
-                    $conf = findDistanceConflicts($nova_uf, $nova_cid, $caso);
-                } catch (Throwable $e) {
-                    echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); break 2;
-                }
-                if (!empty($conf)) {
-                    $lista = array_map(fn($x) => "{$x['cidade']}/{$x['uf']} ({$x['distancia_km']}km, limite {$x['raio_km']}km)", $conf);
-                    $line = "{$cid}: cidades perto demais — ".implode(', ', $lista);
-                    if (!$isAdmin) $errs[] = $line;
-                    else           $warns[] = $line;
-                }
-                if (in_array($nova_uf, $caso['ufs'], true)) {
-                    $warns[] = "{$cid}: estado {$nova_uf} já tem uso";
+                /* Simula a gravação linha a linha: a segunda cidade do lote também
+                   precisa respeitar a distância em relação à primeira. */
+                $sim = ['ufs'=>$caso['ufs'], 'cidades'=>$caso['cidades']];
+                $ufAvisadas = [];
+                foreach ($linhas as $e) {
+                    $cidadeFmt = ucwords(strtolower($e['cidade']));
+                    $tag = $multi ? "{$cid} ({$e['uf']}/{$cidadeFmt})" : $cid;
+                    if (in_array($e['cidade'], $sim['cidades'], true)) {
+                        $errs[] = "{$tag}: cidade {$cidadeFmt} já está em uso";
+                        continue;
+                    }
+                    try {
+                        $conf = findDistanceConflicts($e['uf'], $e['cidade'], $sim);
+                    } catch (Throwable $ex) {
+                        echo json_encode(['ok'=>false,'error'=>$ex->getMessage(),'error_tipo'=>get_class($ex),'error_origem'=>basename($ex->getFile()).':'.$ex->getLine()]); break 3;
+                    }
+                    if (!empty($conf)) {
+                        $lista = array_map(fn($x) => "{$x['cidade']}/{$x['uf']} ({$x['distancia_km']}km, limite {$x['raio_km']}km)", $conf);
+                        $line = "{$tag}: cidades perto demais: ".implode(', ', $lista);
+                        if (!$isAdmin) $errs[] = $line;
+                        else           $warns[] = $line;
+                    }
+                    /* O aviso de UF repetida olha só o que já estava no caso
+                       (as demais linhas do próprio lote são intencionais) e sai
+                       uma vez por caso, não uma por linha. */
+                    if (in_array($e['uf'], $caso['ufs'], true) && !isset($ufAvisadas[$e['uf']])) {
+                        $ufAvisadas[$e['uf']] = true;
+                        $warns[] = "{$cid}: estado {$e['uf']} já tem uso";
+                    }
+                    if (!in_array($e['uf'], $sim['ufs'], true)) $sim['ufs'][] = $e['uf'];
+                    $sim['cidades'][] = $e['cidade'];
                 }
             }
             echo json_encode(['ok'=>true, 'errors'=>$errs, 'warns'=>$warns]);

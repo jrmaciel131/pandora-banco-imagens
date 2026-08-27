@@ -171,6 +171,7 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
             </div>
             <div id="fpro-chips" style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px"></div>
             <button class="btn bs" id="btn-export-visual" style="display:none;margin-top:8px;width:100%;justify-content:center" onclick="exportVisualizadorPDF()" title="Gera um PDF em grade com todos os casos em uso pelos profissionais filtrados (todas as versões, formato VNI/QNI ou NA)">📄 Exportar PDF dos casos</button>
+            <button class="btn bs" id="btn-export-disp" style="display:none;margin-top:6px;width:100%;justify-content:center" onclick="exportDisponibilidadePDF()" title="Gera um PDF separando os casos do profissional entre livres e em uso na praça selecionada. Não mostra cidades, outros estados nem quem está usando.">📍 PDF de disponibilidade</button>
           </section>
 
           <section class="s-rail-section" style="display:none">
@@ -241,17 +242,19 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
 
           <div id="s-quick-tabs" class="s-quick-tabs">
             <button class="s-qt-btn" data-preset="todos">Todos <span class="s-qt-count" id="qt-c-todos">—</span></button>
-            <button class="s-qt-btn active" data-preset="disponivel">Disponíveis <span class="s-qt-count" id="qt-c-disp">—</span></button>
-            <button class="s-qt-btn" data-preset="em_uso">Em uso <span class="s-qt-count" id="qt-c-uso">—</span></button>
+            <button class="s-qt-btn active" data-preset="disponivel"><span id="qt-l-disp">Disponíveis</span> <span class="s-qt-count" id="qt-c-disp">—</span></button>
+            <button class="s-qt-btn" data-preset="em_uso"><span id="qt-l-uso">Em uso</span> <span class="s-qt-count" id="qt-c-uso">—</span></button>
             <button class="s-qt-btn" data-preset="bloqueado">Bloqueados <span class="s-qt-count" id="qt-c-bloq">—</span></button>
             <span class="s-qt-sep"></span>
             <button class="s-qt-btn" data-preset="recente">Recém-adicionados <span class="s-qt-count" id="qt-c-rec">—</span></button>
           </div>
 
+          <div id="s-scope-note" class="s-scope-note" style="display:none"></div>
+
           <div class="stats">
             <div class="stat"><div class="sn" id="st">—</div><div class="sl">Total</div></div>
-            <div class="stat"><div class="sn" id="sd" style="color:var(--gtx)">—</div><div class="sl">Disponíveis</div></div>
-            <div class="stat"><div class="sn" id="su" style="color:var(--rtx)">—</div><div class="sl">Em uso</div></div>
+            <div class="stat"><div class="sn" id="sd" style="color:var(--gtx)">—</div><div class="sl" id="sd-l">Disponíveis</div></div>
+            <div class="stat"><div class="sn" id="su" style="color:var(--rtx)">—</div><div class="sl" id="su-l">Em uso</div></div>
           </div>
 
           <div id="s-active-filters" class="s-active-filters" style="display:none">
@@ -585,6 +588,43 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
   </div>
 </div>
 
+<!-- PDF de disponibilidade por praça -->
+<div class="ov" id="dispv" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal" style="max-width:440px">
+    <div class="mh"><div class="mt">📍 PDF de disponibilidade</div><button class="mx" onclick="this.closest('.ov').classList.remove('open')">×</button></div>
+    <div style="padding:1.25rem">
+      <p id="disp-info" style="font-size:13px;color:var(--tx2);margin-bottom:1rem"></p>
+      <label style="display:flex;align-items:center;gap:9px;padding:9px 11px;border:0.5px solid var(--bds);border-radius:var(--rs);font-size:13px;cursor:pointer">
+        <input type="checkbox" id="disp-livres" checked style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">
+        <span id="disp-livres-l"></span>
+      </label>
+      <label style="display:flex;align-items:center;gap:9px;padding:9px 11px;border:0.5px solid var(--bds);border-radius:var(--rs);font-size:13px;cursor:pointer;margin-top:7px">
+        <input type="checkbox" id="disp-uso" checked style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">
+        <span id="disp-uso-l"></span>
+      </label>
+      <div class="err" id="disp-err"></div>
+
+      <div style="margin-top:1.1rem;padding-top:1.1rem;border-top:0.5px solid var(--bds)">
+        <div style="font-size:10px;color:var(--tx3);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">Qualidade das imagens</div>
+        <label style="display:flex;align-items:flex-start;gap:9px;padding:9px 11px;border:0.5px solid var(--bds);border-radius:var(--rs);font-size:13px;cursor:pointer">
+          <input type="radio" name="disp-q" id="disp-q-alta" checked style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex-shrink:0;margin-top:1px">
+          <span>Alta (~1600px)<br><span style="font-size:11px;color:var(--tx3)">Para enviar ao cliente. A primeira geração demora mais, porque as imagens são baixadas do Drive.</span></span>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:9px;padding:9px 11px;border:0.5px solid var(--bds);border-radius:var(--rs);font-size:13px;cursor:pointer;margin-top:7px">
+          <input type="radio" name="disp-q" id="disp-q-baixa" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex-shrink:0;margin-top:1px">
+          <span>Rápida (miniaturas)<br><span style="font-size:11px;color:var(--tx3)">Sai na hora, usando o cache local. Serve para conferir a lista, não para enviar.</span></span>
+        </label>
+      </div>
+
+      <p id="disp-nota" style="font-size:11px;color:var(--tx3);margin-top:.75rem"></p>
+      <div style="display:flex;gap:8px;margin-top:1.25rem">
+        <button class="btn bp" style="flex:1;justify-content:center" onclick="submitDisponibilidadePDF()">Gerar PDF</button>
+        <button class="btn bs" onclick="this.closest('.ov').classList.remove('open')">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Aplicar tag em massa -->
 <div class="ov" id="btv" onclick="if(event.target===this)this.classList.remove('open')">
   <div class="modal" style="max-width:400px">
@@ -614,12 +654,14 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
     <div style="padding:0 1.25rem .5rem;font-size:13px;color:var(--tx2)" id="bai"></div>
     <div class="berrs" id="baerrs" style="display:none;margin:0 1.25rem .5rem"></div>
     <div class="af" style="display:block;margin-top:0">
+      <div id="ba-pending" style="display:none;margin-bottom:.65rem"></div>
       <div class="fg">
         <div class="ff"><label>Estado</label><select id="bauf" onchange="onBulkUF('ba')"><option value="">Selecione...</option></select></div>
         <div class="ff"><label>Cidade</label><div class="ddw"><input type="text" id="baci" placeholder="Selecione estado..." readonly oninput="onBulkCityInp('ba')" onfocus="openBulkCityDD('ba')" autocomplete="off" data-val=""><div class="dd" id="bacdd"></div></div></div>
       </div>
       <div class="fg full"><div class="ff"><label>Profissional</label><div class="ddw"><input type="text" id="bapro" oninput="onBulkProf('ba')" placeholder="Nome completo..." autocomplete="off"><div class="dd" id="baprodd"></div></div><div class="psug" id="baprosug"></div></div></div>
-      <div style="display:flex;gap:8px;margin-top:.5rem">
+      <div style="display:flex;gap:8px;margin-top:.5rem;flex-wrap:wrap">
+        <button class="btn bs" type="button" onclick="addBulkPending('ba')" style="padding:8px 14px" title="Guarda este local e mantém estado e profissional preenchidos: troque só a cidade (ou o estado) para o próximo. Todos os locais da lista vão para todos os casos selecionados.">+ Adicionar outro local</button>
         <button class="btn bp" style="flex:1;justify-content:center" id="babtn" onclick="prepareConfirm('bulk-grid')">Registrar em todos</button>
         <button class="btn bs" onclick="this.closest('.ov').classList.remove('open')">Cancelar</button>
       </div>
@@ -645,13 +687,15 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
       <div class="berrs" id="bierrs" style="display:none;margin:0 1.25rem .5rem"></div>
       <div class="af" style="margin-top:0">
         <h4 id="biform-t">Aplicar para os casos selecionados</h4>
+        <div id="bi-pending" style="display:none;margin-bottom:.65rem"></div>
         <div class="fg">
           <div class="ff"><label>Estado</label><select id="biuf" onchange="onBulkUF('bi')"><option value="">Selecione...</option></select></div>
           <div class="ff"><label>Cidade</label><div class="ddw"><input type="text" id="bici" placeholder="Selecione estado..." readonly oninput="onBulkCityInp('bi')" onfocus="openBulkCityDD('bi')" autocomplete="off" data-val=""><div class="dd" id="bicdd"></div></div></div>
         </div>
         <div class="fg full"><div class="ff"><label>Profissional</label><div class="ddw"><input type="text" id="bipro" oninput="onBulkProf('bi')" placeholder="Nome completo..." autocomplete="off"><div class="dd" id="biprodd"></div></div><div class="psug" id="biprosug"></div></div></div>
-        <div style="display:flex;gap:8px;margin-top:.5rem">
-          <button class="btn bp" style="flex:1;justify-content:center" id="bibtn" onclick="prepareConfirm('bulk-id')">Registrar uso</button>
+        <div style="display:flex;gap:8px;margin-top:.5rem;flex-wrap:wrap">
+          <button class="btn bs" type="button" onclick="addBulkPending('bi')" style="padding:8px 14px" title="Guarda este local e mantém estado e profissional preenchidos: troque só a cidade (ou o estado) para o próximo. Todos os locais da lista vão para todos os casos selecionados.">+ Adicionar outro local</button>
+          <button class="btn bp" style="flex:1;justify-content:center" id="bibtn" onclick="prepareConfirm('bulk-id')">Registrar em todos</button>
         </div>
         <div class="err" id="bierr2"></div>
       </div>
@@ -715,6 +759,7 @@ window.APP_BUILD_EXPECTED = <?php echo json_encode(jsBuild()); ?>;</script>
 <script src="<?php echo v('assets/theme.js'); ?>"></script>
 <script src="<?php echo v('assets/casos.js'); ?>"></script>
 <script src="<?php echo v('assets/visualizador.js'); ?>"></script>
+<script src="<?php echo v('assets/disponibilidade.js'); ?>"></script>
 <script src="<?php echo v('assets/panel.js'); ?>"></script>
 <script src="<?php echo v('assets/bulk.js'); ?>"></script>
 <script src="<?php echo v('assets/admin.js'); ?>"></script>

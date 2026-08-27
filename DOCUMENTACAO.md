@@ -215,7 +215,7 @@ Todas as requisições são despachadas pelo front controller `api/handler.php`.
 | `new_files`     | GET    | Arquivos novos no Drive (últimos 7 dias).                                              |
 | `add_uso`       | POST   | Registra uso (UF, cidade, profissional). Aplica lock otimista por caso. **v21.1:** UF não duplica no Sheets; check de distância (`DISTANCE_RADIUS_KM`). |
 | `add_uso_batch` | POST   | **(v21.1)** Registro atômico de várias linhas no mesmo caso. Pré-flight valida tudo antes do write; nenhuma linha é gravada se houver erro. Payload: `entries` (JSON array). |
-| `bulk_preflight`| POST   | **(v21.1)** Verifica em lote antes do registro em massa: cidade-block, bloqueio, distância. Devolve `errors[]` e `warns[]`. |
+| `bulk_preflight`| POST   | **(v21.1)** Verifica em lote antes do registro em massa: cidade-block, bloqueio, distância. Devolve `errors[]` e `warns[]`. **(v23.15)** Aceita `entries` (JSON array de trios) para registrar vários locais de uma vez; o formato antigo `uf`/`cidade`/`profissional` segue valendo como uma linha. |
 | `audit_data`    | GET    | **(v21.1, admin)** Varre todos os casos de todas as bases procurando UFs inválidas, cidades não reconhecidas pelo CSV (com sugestões fuzzy via Levenshtein), cidades cadastradas em UF errada e duplicatas com escritas diferentes. Usado pra limpar a planilha antes da validação por distância funcionar bem. |
 | `audit_distances`     | GET    | **(v21.2, admin)** Simula a regra de raio mínimo sobre os casos existentes: aponta pares de cidades no mesmo caso a uma distância em linha reta menor ou igual ao raio efetivo do par (`min(raioA, raioB)`). |
 | `get_distance_config` | GET    | **(v21.2, admin)** Retorna o `DISTANCE_RADIUS_KM` em vigor (lê o override de `distance_config.json` quando presente). |
@@ -282,7 +282,7 @@ A ordem é significativa porque todos os arquivos compartilham o mesmo escopo gl
 ```
 theme.css → app.css
 ↓
-utils.js → theme.js → casos.js → panel.js → bulk.js → admin.js → auth.js → app.js
+utils.js → theme.js → casos.js → visualizador.js → disponibilidade.js → panel.js → bulk.js → admin.js → auth.js → app.js
 ```
 
 ### Responsabilidades
@@ -294,6 +294,8 @@ utils.js → theme.js → casos.js → panel.js → bulk.js → admin.js → aut
 | `utils.js`  | `api()`, `esc/cap/norm`, `showToast/showConfirm`, `renderDD/renderFormDD`, `lev`, `ESTADOS`, `populateEstados`, `togglePwd`, `buildProfAC`, `API`. |
 | `theme.js`  | IIFE inicial (aplica tema salvo), `setTheme`, `updateThemeButtons`, `initFAB`, `openHelp`, `startTour`. |
 | `casos.js`  | Estado da grade (`casos`, `filtered`, `page`, `mode`, `thumbCache`, etc.), `loadCasos`, `applyFilter`, `renderGrid`, filtros de UF/cidade/profissional/tags, paginação, `lazyLoadThumbs`. |
+| `visualizador.js` | `exportVisualizadorPDF` — documento imprimível em grade com os casos em uso pelos profissionais filtrados (todas as versões). |
+| `disponibilidade.js` | `exportDisponibilidadePDF` — documento imprimível separando os casos do profissional entre livres e em uso na praça filtrada (`dispScore`, `pickDisponibilidadePhotos`). |
 | `panel.js`  | `currentCaso`, `pendingRemovals`, `openModal`, `renderModalChips`, editor de tags, add/remove de uso, bloqueio/desbloqueio, `loadIBGE`. |
 | `bulk.js`   | `selMode`, `selIds`, `bulkSelIds`, `bulkCities`, lightbox flutuante, `downloadBulkZip`, registro em massa por grid e por ID, `parseBulkIds`. |
 | `admin.js`  | `adminModeVisible`, `thumbSourceMode`, painel administrativo, histórico/reversões, `runDiag`, gerenciamento de usuários e senhas, cache. |

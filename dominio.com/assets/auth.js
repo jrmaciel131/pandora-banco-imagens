@@ -140,7 +140,7 @@ async function switchBase(baseKey){
     _pageGeneration++;
     thumbCache = {};
     casos = []; filtered = [];
-    selUF = ''; selCity = ''; selProf = ''; ibgeCities = [];
+    selUF = ''; selCity = ''; selProf = ''; selProfs.clear(); renderProfFilterChips(); ibgeCities = [];
     selMode = false; selIds = new Set(); bulkSelIds = new Set();
     _highPriorityIds = new Set();
     currentCaso = null;
@@ -149,9 +149,6 @@ async function switchBase(baseKey){
     _userTouchedShow = false;
     const fshow = document.getElementById('fshow'); if(fshow) fshow.value = 'disponivel';
     const cw = document.getElementById('cw'); if(cw) cw.style.display = 'none';
-    mode = 'estado';
-    const te = document.getElementById('te'); if(te) te.classList.add('active');
-    const tc = document.getElementById('tc'); if(tc) tc.classList.remove('active');
 
     const grid = document.getElementById('grid');
     if(grid) grid.innerHTML = '';

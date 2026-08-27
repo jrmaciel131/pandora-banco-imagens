@@ -2,6 +2,11 @@
 
 let selMode = false, selIds = new Set(), bulkSelIds = new Set();
 let bulkCities = {ba:[], bi:[]};
+/* Locais já adicionados em cada modal de registro em massa ('ba' = grade,
+   'bi' = por ID). Um profissional costuma atuar em mais de uma cidade/estado
+   (ex.: Fortaleza-CE e Parnaíba-PI), e cada caso selecionado recebe todas as
+   linhas da lista de uma vez. */
+let bulkPending = {ba:[], bi:[]};
 let _lfIdx = 0, _lfLoadToken = 0;
 
 function openLightboxFlo(idx){
@@ -244,78 +249,218 @@ async function downloadBulkZip(){
   finally { clearInterval(timer); ov.remove(); }
 }
 
+/* ── Registro em massa: vários locais por profissional ────────
+   Os dois modais (grade e por ID) compartilham a mesma mecânica: o usuário
+   monta uma lista de locais (UF + cidade + profissional) e todos os casos
+   selecionados recebem a lista inteira numa única gravação por caso. */
+
+function bulkFieldIds(t){
+  return t === 'ba'
+    ? {uf:'bauf', city:'baci', prof:'bapro', sug:'baprosug', err:'baerr',  errs:'baerrs', list:'ba-pending', btn:'babtn', ov:'bav'}
+    : {uf:'biuf', city:'bici', prof:'bipro', sug:'biprosug', err:'bierr2', errs:'bierrs', list:'bi-pending', btn:'bibtn', ov:'biv'};
+}
+
+/* O registro substitui o conteúdo do modal pela tela de progresso e depois
+   pela de resultado. Guardamos o formulário original na primeira abertura e
+   o restauramos nas seguintes, em vez de exigir um reload da página. */
+const _bulkModalHtml = {};
+function resetBulkModal(t){
+  const modal = document.querySelector(`#${bulkFieldIds(t).ov} .modal`);
+  if(!modal) return;
+  if(_bulkModalHtml[t] === undefined) _bulkModalHtml[t] = modal.innerHTML;
+  else modal.innerHTML = _bulkModalHtml[t];
+}
+
+/* Zera o formulário e a lista de locais de um dos modais. */
+function resetBulkForm(t){
+  const f = bulkFieldIds(t);
+  bulkPending[t] = [];
+  bulkCities[t] = [];
+  const uf = document.getElementById(f.uf);
+  uf.innerHTML = '<option value="">Selecione...</option>';
+  ESTADOS.forEach(e => uf.appendChild(new Option(`${e.s} – ${e.n}`, e.s)));
+  const ci = document.getElementById(f.city);
+  ci.value = ''; ci.dataset.val = ''; ci.readOnly = true;
+  ci.placeholder = 'Selecione estado...';
+  document.getElementById(f.prof).value = '';
+  document.getElementById(f.sug).style.display = 'none';
+  document.getElementById(f.errs).style.display = 'none';
+  document.getElementById(f.err).textContent = '';
+  renderBulkPending(t);
+}
+
+function currentBulkRow(t){
+  const f = bulkFieldIds(t);
+  return {
+    uf: document.getElementById(f.uf).value,
+    cidade: (document.getElementById(f.city).dataset.val || '').toUpperCase(),
+    profissional: document.getElementById(f.prof).value.trim(),
+  };
+}
+
+/* Guarda a linha atual na lista. Mantém estado e profissional preenchidos
+   (o fluxo comum é o mesmo profissional atuando em outra cidade) e limpa só
+   a cidade. Para mudar de estado basta trocar o select. */
+function addBulkPending(t){
+  const f = bulkFieldIds(t);
+  const err = document.getElementById(f.err);
+  err.textContent = '';
+  const row = currentBulkRow(t);
+  if(!row.uf || !row.cidade || !row.profissional){
+    err.textContent = 'Preencha estado, cidade e profissional antes de adicionar.';
+    return;
+  }
+  if(bulkPending[t].some(p => p.cidade === row.cidade)){
+    err.textContent = `Cidade ${cap(row.cidade)} já está na lista.`;
+    return;
+  }
+  bulkPending[t].push(row);
+  const ci = document.getElementById(f.city);
+  ci.value = ''; ci.dataset.val = '';
+  document.getElementById(f.sug).style.display = 'none';
+  renderBulkPending(t);
+}
+
+function removeBulkPending(t, i){
+  bulkPending[t].splice(i, 1);
+  renderBulkPending(t);
+}
+
+function renderBulkPending(t){
+  const f = bulkFieldIds(t);
+  const box = document.getElementById(f.list);
+  if(box){
+    const list = bulkPending[t];
+    if(!list.length){ box.innerHTML = ''; box.style.display = 'none'; }
+    else {
+      box.style.display = 'block';
+      box.innerHTML = `<div style="font-size:10px;color:var(--tx2);text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:6px">Locais adicionados (${list.length})</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${list.map((p, i) =>
+          `<span class="tag-pill" style="font-size:12px;background:var(--gbg);color:var(--gtx)">${esc(p.uf)} / ${esc(cap(p.cidade))} / ${esc(p.profissional)}<span class="x" onclick="removeBulkPending('${t}',${i})" title="Remover este local">×</span></span>`
+        ).join('')}</div>`;
+    }
+  }
+  updateBulkBtnLabel(t);
+}
+
+function updateBulkBtnLabel(t){
+  const btn = document.getElementById(bulkFieldIds(t).btn);
+  if(!btn) return;
+  const row = currentBulkRow(t);
+  let n = bulkPending[t].length;
+  if(row.uf && row.cidade && row.profissional) n++;
+  btn.textContent = n > 1 ? `Registrar ${n} locais em todos` : 'Registrar em todos';
+}
+
+/* Linhas efetivas: as já adicionadas mais a linha do formulário, quando
+   preenchida. Devolve {entries} ou {error}. A cidade é o que define se há uma
+   linha nova: depois de "Adicionar outro local" o estado e o profissional
+   continuam preenchidos de propósito, e sozinhos não formam um local. */
+function collectBulkEntries(t){
+  const f = bulkFieldIds(t);
+  const row = currentBulkRow(t);
+  const entries = bulkPending[t].slice();
+  const cidadeDigitada = document.getElementById(f.city).value.trim();
+  if(cidadeDigitada && !row.cidade)
+    return {error: 'Escolha a cidade na lista que aparece abaixo do campo.'};
+  if(row.cidade){
+    if(!row.uf || !row.profissional)
+      return {error: 'Linha atual incompleta: preencha estado, cidade e profissional.'};
+    if(entries.some(p => p.cidade === row.cidade))
+      return {error: `Cidade ${cap(row.cidade)} já está na lista.`};
+    entries.push(row);
+  }
+  if(!entries.length) return {error: 'Preencha todos os campos.'};
+  return {entries};
+}
+
 function openBulkApply(){
   if(!selIds.size) return;
+  resetBulkModal('ba');
   document.getElementById('bai').textContent = `Aplicar para ${selIds.size} caso(s): ${[...selIds].join(', ')}`;
-  document.getElementById('baerrs').style.display = 'none';
-  document.getElementById('baerr').textContent = '';
-  document.getElementById('bauf').innerHTML = '<option value="">Selecione...</option>';
-  ESTADOS.forEach(e => document.getElementById('bauf').appendChild(new Option(`${e.s} – ${e.n}`, e.s)));
-  const baci = document.getElementById('baci');
-  baci.value = ''; baci.dataset.val = ''; baci.readOnly = true;
-  document.getElementById('bapro').value = '';
-  document.getElementById('baprosug').style.display = 'none';
+  resetBulkForm('ba');
   document.getElementById('bav').classList.add('open');
 }
 
-async function submitBulkApply(){
-  const uf = document.getElementById('bauf').value;
-  const city = (document.getElementById('baci').dataset.val || '').toUpperCase();
-  const prof = document.getElementById('bapro').value.trim();
+/* Núcleo dos dois registros em massa. Aplica a mesma lista de locais a todos
+   os casos selecionados: uma chamada add_uso_batch por caso, ou seja, uma
+   gravação por caso mesmo quando há vários locais. */
+async function runBulkRegister(t){
+  const f      = bulkFieldIds(t);
+  const errEl  = document.getElementById(f.err);
+  const errsEl = document.getElementById(f.errs);
+  const ids    = t === 'ba' ? [...selIds] : [...bulkSelIds];
+  errEl.textContent = '';
+  errsEl.style.display = 'none';
 
-  if(!uf || !city || !prof){ document.getElementById('baerr').textContent = 'Preencha todos os campos.'; return; }
-  if(!selIds.size){ document.getElementById('baerr').textContent = 'Nenhum caso selecionado.'; return; }
-
-  const ids = [...selIds];
+  if(!ids.length){ errEl.textContent = 'Nenhum caso selecionado.'; return; }
+  const col = collectBulkEntries(t);
+  if(col.error){ errEl.textContent = col.error; return; }
+  const entries = col.entries;
   const total = ids.length;
+  const payload = JSON.stringify(entries);
 
-  /* Pré-flight ATÔMICO via backend (verifica cidade, bloqueio e distância). */
-  const pre = await api('bulk_preflight', {ids:ids.join(','), uf, cidade:city, profissional:prof}, 'POST');
-  if(!pre.ok){
-    document.getElementById('baerr').textContent = pre.error || 'Erro na verificação prévia.';
-    return;
-  }
+  /* Pré-flight ATÔMICO via backend (cidade em uso, bloqueio e distância),
+     considerando também as demais linhas do próprio lote. */
+  const pre = await api('bulk_preflight', {ids:ids.join(','), entries:payload}, 'POST');
+  if(!pre.ok){ errEl.textContent = apiErrText(pre); return; }
   if(pre.errors && pre.errors.length){
-    document.getElementById('baerrs').innerHTML = '<div style="font-weight:700;margin-bottom:.4rem">Falhou na verificação prévia (' + pre.errors.length + ') — nada foi gravado:</div>' + pre.errors.map(e => '<div style="padding:2px 0">• '+esc(e)+'</div>').join('');
-    document.getElementById('baerrs').style.display = 'block';
-    document.getElementById('baerr').textContent = '';
+    errsEl.innerHTML = `<div style="font-weight:700;margin-bottom:.4rem">Falhou na verificação prévia (${pre.errors.length}), nada foi gravado:</div>`
+      + pre.errors.map(e => `<div style="padding:2px 0">• ${esc(e)}</div>`).join('');
+    errsEl.style.display = 'block';
     return;
   }
   if(pre.warns && pre.warns.length){
-    const proceed = confirm('Atenção (' + pre.warns.length + ' aviso(s)):\n\n' + pre.warns.join('\n') + '\n\nDeseja continuar mesmo assim?');
+    /* Com vários locais × vários casos a lista de avisos cresce rápido; o
+       alerta mostra os primeiros e resume o resto. */
+    const shown = pre.warns.slice(0, 15);
+    const rest  = pre.warns.length - shown.length;
+    const proceed = confirm(`Atenção (${pre.warns.length} aviso(s)):\n\n${shown.join('\n')}${rest > 0 ? `\n… e mais ${rest}.` : ''}\n\nDeseja continuar mesmo assim?`);
     if(!proceed) return;
   }
 
-  const modal = document.querySelector('#bav .modal');
+  const modal = document.querySelector(`#${f.ov} .modal`);
+  const alvo = entries.length > 1 ? `${entries.length} locais em ${total} caso(s)` : `${total} caso(s)`;
   modal.innerHTML = `<div style="padding:3rem 2rem;text-align:center">
     <div style="margin-bottom:1.25rem"><span class="spin" style="width:32px;height:32px;border-width:3px"></span></div>
-    <div style="font-size:15px;font-weight:600;margin-bottom:.5rem">Registrando usos...</div>
-    <div style="font-size:13px;color:var(--tx2);margin-bottom:.5rem" id="ba-progress">0 de ${total} processados</div>
+    <div style="font-size:15px;font-weight:600;margin-bottom:.5rem">Registrando ${esc(alvo)}...</div>
+    <div style="font-size:13px;color:var(--tx2);margin-bottom:.5rem" id="bulk-progress">0 de ${total} processados</div>
     <div style="width:100%;max-width:240px;margin:0 auto;height:4px;background:var(--bd);border-radius:2px;overflow:hidden">
-      <div id="ba-bar" style="height:100%;background:var(--accent);width:0%;transition:width .2s;border-radius:2px"></div>
+      <div id="bulk-bar" style="height:100%;background:var(--accent);width:0%;transition:width .2s;border-radius:2px"></div>
     </div>
   </div>`;
 
+  /* Busca dentro do modal: os dois usam os mesmos ids e um pode ter ficado
+     com a tela de progresso anterior na tela. */
+  const prog = modal.querySelector('#bulk-progress');
+  const bar  = modal.querySelector('#bulk-bar');
   const errors = [];
   let done = 0;
   for(const id of ids){
     const caso = casos.find(c => c.id === id);
-    if(!caso){ errors.push(`${id}: não encontrado na planilha`); done++; }
+    if(!caso) errors.push(`${id}: não encontrado na planilha`);
     else {
       try{
-        const r = await api('add_uso', {caso_id:id, row:caso.row, uf, cidade:city, profissional:prof, force:'1'}, 'POST');
-        if(!r.ok && !r.warn) errors.push(`${id}: ${r.error||'erro desconhecido'}`);
+        const r = await api('add_uso_batch', {caso_id:id, row:caso.row, entries:payload, force:'1'}, 'POST');
+        if(!r.ok){
+          const det = Array.isArray(r.errors) && r.errors.length ? r.errors.join(' ') : apiErrText(r);
+          errors.push(`${id}: ${det}`);
+        }
       } catch(e){ errors.push(`${id}: falha de conexão`); }
-      done++;
     }
-    const prog = document.getElementById('ba-progress');
-    const bar = document.getElementById('ba-bar');
+    done++;
     if(prog) prog.textContent = `${done} de ${total} processados`;
-    if(bar) bar.style.width = `${Math.round(done/total*100)}%`;
+    if(bar)  bar.style.width = `${Math.round(done/total*100)}%`;
   }
 
   await loadCasos(true);
   const ok = total - errors.length;
+  const locais = entries.map(p =>
+    `<div style="font-size:13px;color:var(--tx2);margin-bottom:.25rem"><b>${esc(p.uf)} / ${esc(cap(p.cidade))}</b>: ${esc(p.profissional)}</div>`
+  ).join('');
+  const fechar = t === 'ba'
+    ? `document.getElementById('bav').classList.remove('open');clearSel()`
+    : `document.getElementById('biv').classList.remove('open')`;
 
   if(errors.length){
     modal.innerHTML = `<div style="padding:2rem 1.5rem">
@@ -323,44 +468,38 @@ async function submitBulkApply(){
       <div style="font-size:15px;font-weight:700;text-align:center;margin-bottom:1rem;color:${ok>0?'var(--atx)':'var(--rtx)'}">
         ${ok>0?`${ok} registrados, ${errors.length} com erro`:'Falha ao registrar'}
       </div>
-      ${ok>0?`<div style="font-size:12px;color:var(--tx2);text-align:center;margin-bottom:.75rem">Estado: <b>${esc(uf)}</b> · Cidade: <b>${esc(cap(city))}</b> · Profissional: <b>${esc(prof)}</b></div>`:''}
+      ${ok>0?`<div style="text-align:center;margin-bottom:.75rem">${locais}</div>`:''}
       <div style="background:var(--rbg);border:1px solid var(--rtx);border-radius:var(--rs);padding:.75rem;font-size:12px;color:var(--rtx);max-height:180px;overflow-y:auto;margin-bottom:1rem">
         <div style="font-weight:700;margin-bottom:.4rem">Erros (${errors.length}):</div>
         ${errors.map(e => `<div style="padding:2px 0">• ${esc(e)}</div>`).join('')}
       </div>
       <div style="display:flex;gap:8px;justify-content:center">
-        <button class="btn bp" onclick="document.getElementById('bav').classList.remove('open');clearSel()">Fechar</button>
-        <button class="btn bs" onclick="document.getElementById('bav').classList.remove('open')">Manter seleção</button>
+        <button class="btn bp" onclick="${fechar}">Fechar</button>
+        <button class="btn bs" onclick="document.getElementById('${f.ov}').classList.remove('open')">Manter seleção</button>
       </div>
     </div>`;
   } else {
     modal.innerHTML = `<div style="padding:3rem 2rem;text-align:center">
       <div style="font-size:2.5rem;margin-bottom:.75rem">✅</div>
       <div style="font-size:16px;font-weight:700;color:var(--gtx);margin-bottom:.75rem">${ok} caso(s) registrados com sucesso!</div>
-      <div style="font-size:13px;color:var(--tx2);margin-bottom:.25rem">Estado: <b>${esc(uf)}</b></div>
-      <div style="font-size:13px;color:var(--tx2);margin-bottom:.25rem">Cidade: <b>${esc(cap(city))}</b></div>
-      <div style="font-size:13px;color:var(--tx2);margin-bottom:1.25rem">Profissional: <b>${esc(prof)}</b></div>
+      <div style="margin-bottom:1.25rem">${locais}</div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin-bottom:1.5rem;max-height:120px;overflow-y:auto">
         ${ids.map(id => `<span style="padding:2px 8px;background:var(--gbg);color:var(--gtx);border-radius:10px;font-size:11px">${esc(id)}</span>`).join('')}
       </div>
-      <button class="btn bp" onclick="document.getElementById('bav').classList.remove('open');clearSel()" style="margin:0 auto">Concluir</button>
+      <button class="btn bp" onclick="${fechar}" style="margin:0 auto">Concluir</button>
     </div>`;
-    bulkSelIds = new Set();
+    bulkPending[t] = [];
+    if(t === 'bi') bulkSelIds = new Set();
   }
 }
 
 function openBulkModal(){
+  resetBulkModal('bi');
   document.getElementById('biinp').value = '';
   document.getElementById('bierr').textContent = '';
   document.getElementById('bigrid').innerHTML = '';
   document.getElementById('biform').style.display = 'none';
-  document.getElementById('biuf').innerHTML = '<option value="">Selecione...</option>';
-  ESTADOS.forEach(e => document.getElementById('biuf').appendChild(new Option(`${e.s} – ${e.n}`, e.s)));
-  const bici = document.getElementById('bici');
-  bici.value = ''; bici.dataset.val = ''; bici.readOnly = true;
-  document.getElementById('bipro').value = '';
-  document.getElementById('biprosug').style.display = 'none';
-  document.getElementById('bierrs').style.display = 'none';
+  resetBulkForm('bi');
   bulkSelIds = new Set();
   document.getElementById('biv').classList.add('open');
 }
@@ -451,82 +590,6 @@ function parseBulkIds(){
   document.getElementById('biform-t').textContent = `Aplicar para ${found} caso(s)`;
 }
 
-async function submitBulkById(){
-  const uf = document.getElementById('biuf').value;
-  const city = (document.getElementById('bici').dataset.val || '').toUpperCase();
-  const prof = document.getElementById('bipro').value.trim();
-  document.getElementById('bierrs').style.display = 'none';
-
-  if(!bulkSelIds.size){ document.getElementById('bierr2').textContent = 'Nenhum caso selecionado.'; return; }
-
-  const ids = [...bulkSelIds];
-  const total = ids.length;
-
-  /* Pré-flight ATÔMICO via backend (cidade-block + distância + bloqueio). */
-  const pre = await api('bulk_preflight', {ids:ids.join(','), uf, cidade:city, profissional:prof}, 'POST');
-  if(!pre.ok){
-    document.getElementById('bierr2').textContent = pre.error || 'Erro na verificação prévia.';
-    return;
-  }
-  if(pre.errors && pre.errors.length){
-    document.getElementById('bierrs').innerHTML = '<div style="font-weight:700;margin-bottom:.4rem">Falhou na verificação prévia (' + pre.errors.length + ') — nada foi gravado:</div>' + pre.errors.map(e => '<div style="padding:2px 0">• '+esc(e)+'</div>').join('');
-    document.getElementById('bierrs').style.display = 'block';
-    document.getElementById('bierr2').textContent = '';
-    return;
-  }
-  if(pre.warns && pre.warns.length){
-    const proceed = confirm('Atenção (' + pre.warns.length + ' aviso(s)):\n\n' + pre.warns.join('\n') + '\n\nDeseja continuar mesmo assim?');
-    if(!proceed) return;
-  }
-
-  const modal = document.querySelector('#biv .modal');
-  modal.innerHTML = `<div style="padding:3rem 2rem;text-align:center">
-    <div style="margin-bottom:1.25rem"><span class="spin" style="width:32px;height:32px;border-width:3px"></span></div>
-    <div style="font-size:15px;font-weight:600;margin-bottom:.5rem">Registrando usos...</div>
-    <div style="font-size:13px;color:var(--tx2)" id="bi-progress">0 de ${total} processados</div>
-  </div>`;
-
-  const errors = [];
-  let done = 0;
-  for(const id of ids){
-    const caso = casos.find(c => c.id === id);
-    if(!caso){ errors.push(`${id}: não encontrado`); done++; continue; }
-    try{
-      const r = await api('add_uso', {caso_id:id, row:caso.row, uf, cidade:city, profissional:prof, force:'1'}, 'POST');
-      if(!r.ok && !r.warn) errors.push(`${id}: ${r.error||'erro'}`);
-    } catch(e){ errors.push(`${id}: conexão`); }
-    done++;
-    const prog = document.getElementById('bi-progress');
-    if(prog) prog.textContent = `${done} de ${total} processados`;
-  }
-  await loadCasos(true);
-
-  const ok = total - errors.length;
-  if(errors.length){
-    modal.innerHTML = `<div style="padding:2rem 1.5rem">
-      <div style="font-size:1.75rem;text-align:center;margin-bottom:.75rem">${ok>0?'⚠️':'❌'}</div>
-      <div style="font-size:15px;font-weight:700;text-align:center;margin-bottom:1rem;color:var(--rtx)">${ok>0?`${ok} registrados, ${errors.length} com erro`:'Falha no registro'}</div>
-      <div style="background:var(--rbg);border-radius:var(--rs);padding:.75rem;font-size:12px;color:var(--rtx);max-height:150px;overflow-y:auto;margin-bottom:1rem">
-        ${errors.map(e => `<div>• ${esc(e)}</div>`).join('')}
-      </div>
-      <div style="display:flex;gap:8px;justify-content:center">
-        <button class="btn bp" onclick="document.getElementById('biv').classList.remove('open')">Fechar</button>
-      </div>
-    </div>`;
-  } else {
-    modal.innerHTML = `<div style="padding:3rem 2rem;text-align:center">
-      <div style="font-size:2.5rem;margin-bottom:.75rem">✅</div>
-      <div style="font-size:16px;font-weight:700;color:var(--gtx);margin-bottom:.5rem">${ok} caso(s) registrados com sucesso!</div>
-      <div style="font-size:13px;color:var(--tx2);margin-bottom:.35rem">Estado: <b>${esc(uf)}</b></div>
-      <div style="font-size:13px;color:var(--tx2);margin-bottom:.35rem">Cidade: <b>${esc(cap(city))}</b></div>
-      <div style="font-size:13px;color:var(--tx2);margin-bottom:1.5rem">Profissional: <b>${esc(prof)}</b></div>
-      <div style="font-size:12px;color:var(--tx3);margin-bottom:1.5rem">${ids.map(id => `<span style="display:inline-block;padding:2px 8px;background:var(--gbg);color:var(--gtx);border-radius:10px;font-size:11px;margin:2px">${esc(id)}</span>`).join('')}</div>
-      <button class="btn bp" onclick="document.getElementById('biv').classList.remove('open')" style="margin:0 auto">Concluir</button>
-    </div>`;
-    bulkSelIds = new Set();
-  }
-}
-
 async function onBulkUF(t){
   const si = t === 'ba' ? 'bauf' : 'biuf';
   const ci = t === 'ba' ? 'baci' : 'bici';
@@ -535,6 +598,7 @@ async function onBulkUF(t){
   el.value = ''; el.dataset.val = '';
   bulkCities[t] = [];
   el.readOnly = true;
+  updateBulkBtnLabel(t);
   if(uf){
     el.placeholder = 'Carregando...';
     await loadIBGE(uf, t);
@@ -550,6 +614,7 @@ function onBulkCityInp(t){
     const e = document.getElementById(ci);
     e.value = cap(c); e.dataset.val = c;
     document.getElementById(dd).classList.remove('open');
+    updateBulkBtnLabel(t);
   });
 }
 
@@ -561,6 +626,7 @@ function openBulkCityDD(t){
 function onBulkProf(t){
   if(t === 'ba') buildProfAC('bapro', 'baprodd', 'baprosug');
   else           buildProfAC('bipro', 'biprodd', 'biprosug');
+  updateBulkBtnLabel(t);
 }
 
 /* ── Aplicar tag em massa ─────────────────────────────────── */
@@ -622,7 +688,7 @@ async function submitBulkTag(){
         if(!c.tags.includes(tag)) c.tags.push(tag);
       }
     });
-    if(typeof applyFilter === 'function') applyFilter();
+    if(typeof applyFilter === 'function') applyFilter(true);
 
     const okN   = applied.length;
     const skipN = (r.skipped || []).length;
