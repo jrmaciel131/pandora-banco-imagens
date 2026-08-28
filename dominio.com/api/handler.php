@@ -47,7 +47,7 @@ require_once __DIR__ . '/../../private-config/lib/google.php';
 
 /* Build do backend. Atualize a cada deploy do handler.php; é exibido no painel
    "Diagnóstico de versão" do Admin Mode para confirmar que o PHP novo subiu. */
-if (!defined('HANDLER_BUILD')) define('HANDLER_BUILD', 'v23.19 (2026-08-28)');
+if (!defined('HANDLER_BUILD')) define('HANDLER_BUILD', 'v23.20 (2026-08-28)');
 // Teto de casos por chamada de `clear_cache` em lote.
 if (!defined('CLEAR_CACHE_MAX_IDS')) define('CLEAR_CACHE_MAX_IDS', 100);
 
@@ -1057,6 +1057,23 @@ function thumbCacheDiag(string $id): array {
     return $d;
 }
 
+/**
+ * Informa se o profissional já consta na coluna de clientes do caso.
+ *
+ * A coluna guarda um conjunto único, como a de UF: um profissional que atua em
+ * várias cidades do mesmo caso aparece uma vez só. O alinhamento por índice
+ * entre as três colunas deixou de existir na v21.1, e `remove_item` remove cada
+ * item sem tocar nas listas paralelas. A comparação ignora caixa e espaços nas
+ * pontas, como a checagem de duplicidade do registro em massa.
+ */
+function profJaRegistrado(string $prof, array $clientes): bool {
+    $alvo = mb_strtoupper(trim($prof), 'UTF-8');
+    foreach ($clientes as $c) {
+        if (mb_strtoupper(trim((string)$c), 'UTF-8') === $alvo) return true;
+    }
+    return false;
+}
+
 /** Aborta com HTTP 403 quando a ação requer privilégio de administrador. */
 function requireAdmin(bool $isAdmin): void {
     if (!$isAdmin) {
@@ -1392,13 +1409,16 @@ switch ($action) {
             }
 
             $antes  = ['ufs'=>$caso['ufs'],'cidades'=>$caso['cidades'],'clientes'=>$caso['clientes']];
-            // UF só é acrescentada quando ainda não existe — a coluna C do Sheets
-            // passa a guardar um conjunto único. Cidade e cliente entram normalmente.
+            // UF e profissional só são acrescentados quando ainda não existem: as
+            // colunas C e E do Sheets guardam conjuntos únicos. A cidade entra
+            // sempre, já que repetição de cidade no caso é barrada antes daqui.
             $nufs   = in_array($nova_uf, $caso['ufs'], true)
                 ? array_values($caso['ufs'])
                 : array_merge($caso['ufs'], [$nova_uf]);
             $ncids  = array_merge($caso['cidades'],  [$nova_cid]);
-            $nclis  = array_merge($caso['clientes'], [$prof]);
+            $nclis  = profJaRegistrado($prof, $caso['clientes'])
+                ? array_values($caso['clientes'])
+                : array_merge($caso['clientes'], [$prof]);
 
             // Lock otimista para evitar gravações simultâneas no mesmo caso.
             if (!acquireCaseLock($caso_id)) {
@@ -1552,7 +1572,8 @@ switch ($action) {
             foreach ($clean as $e) {
                 if (!in_array($e['uf'], $nufs, true)) $nufs[] = $e['uf'];
                 $ncids[] = $e['cidade'];
-                $nclis[] = $e['profissional'];
+                // O mesmo profissional em duas cidades do lote entra uma vez só.
+                if (!profJaRegistrado($e['profissional'], $nclis)) $nclis[] = $e['profissional'];
             }
             $api->updateCaso($row, implode('/',$nufs), implode('/',$ncids), implode('/',$nclis));
             DB::log($me, $caso_id, 'add_uso_batch', $antes, [
