@@ -197,10 +197,206 @@ function updateBulkBar(){
   } else bar.classList.remove('show');
 }
 
-/* Download em lote: backend monta o ZIP com PHP ZipArchive e stream — sem lib JS.
-   Como é uma única resposta (sem progresso real), mostramos um overlay com
-   cronômetro pra deixar claro que está trabalhando — vídeos podem demorar. */
-async function downloadBulkZip(){
+/* Limpa o cache de fotos dos casos marcados na grade. Necessário quando os
+   arquivos mudam no Drive: até o cache ser limpo (TTL de 30 dias) o caso
+   continua exibindo a listagem antiga, inclusive fotos que já saíram da pasta. */
+function bulkClearCache(){
+  const ids = [...selIds];
+  if(!ids.length) return;
+  showConfirm('Limpar cache dos casos selecionados',
+    `As fotos de <b>${ids.length} caso(s)</b> serão lidas de novo no Google Drive na próxima abertura. Nenhum arquivo do Drive é apagado.`,
+    [{label:'Casos', val: ids.join(', ')}],
+    async () => {
+      const r = await clearCacheBatch(ids);
+      if(r && r.ok) clearSel();
+    }
+  );
+}
+
+/* ── Seleção de versões antes do download ────────────────────
+   Cada caso costuma ter o mesmo par de fotos repetido em três marcas (sem
+   logo, LH, NA) e em dois enquadramentos (vertical e quadrado), às vezes
+   ainda em versões V1 a V6. Baixar tudo multiplica o peso por seis sem
+   necessidade, então o usuário escolhe os eixos antes de disparar o ZIP. */
+
+let dlFiles = null;                    // inventário classificado do lote atual
+let dlSel = {logo:new Set(), formato:new Set(), versao:new Set()};
+
+/* Rótulos legíveis. O que não estiver aqui aparece com o próprio código. */
+const DL_ROTULOS = {
+  'SEM LOGO':'Sem logo', 'LH':'LH (Linda Harmonização)', 'EH':'EH (EH Sorriso)', 'NA':'NA',
+  'VNI':'VNI · vertical, normal',   'VOI':'VOI · vertical, otimizada',
+  'QNI':'QNI · quadrada, normal',   'QOI':'QOI · quadrada, otimizada',
+  'VNV':'VNV · vertical, vídeo',    'VOV':'VOV · vertical, vídeo otimizado',
+  'QNV':'QNV · quadrada, vídeo',    'QOV':'QOV · quadrada, vídeo otimizado',
+  'OUTROS':'Outros (fora do padrão de nome)',
+};
+/* Ordem de exibição; o que não estiver listado vai para o fim, alfabético. */
+const DL_ORDEM = {
+  logo:    ['NA','LH','EH','SEM LOGO'],
+  formato: ['VNI','QNI','VOI','QOI','VNV','QNV','VOV','QOV','OUTROS'],
+};
+
+function dlRotulo(v){ return DL_ROTULOS[v] || v; }
+
+function dlOrdena(eixo, valores){
+  const ordem = DL_ORDEM[eixo] || [];
+  return [...valores].sort((a, b) => {
+    const ia = ordem.indexOf(a), ib = ordem.indexOf(b);
+    if(ia !== -1 && ib !== -1) return ia - ib;
+    if(ia !== -1) return -1;
+    if(ib !== -1) return 1;
+    /* Versões ordenam por número, não por texto: V10 depois de V9. */
+    const na = /^V(\d+)$/.exec(a), nb = /^V(\d+)$/.exec(b);
+    if(na && nb) return +na[1] - +nb[1];
+    return a.localeCompare(b);
+  });
+}
+
+/* Um arquivo entra quando bate nos três eixos. Como um arquivo pode ter mais
+   de um logo (existe CASO-100-LH-NA-QNI.jpg), basta um deles estar marcado. */
+function dlCombina(f){
+  return f.logos.some(l => dlSel.logo.has(l))
+      && dlSel.formato.has(f.formato)
+      && dlSel.versao.has(f.versao);
+}
+
+function dlEscolhidos(){ return (dlFiles || []).filter(dlCombina); }
+
+async function openDownloadPicker(){
+  if(!selIds.size){ showToast('Selecione pelo menos 1 caso.'); return; }
+  if(selIds.size > 30){ showToast(`Máximo 30 casos por download. Selecionados: ${selIds.size}.`); return; }
+
+  const ov = document.getElementById('dlv');
+  document.getElementById('dl-body').innerHTML =
+    `<div style="padding:2rem 0;text-align:center;color:var(--tx2);font-size:13px"><span class="spin"></span> Lendo as versões disponíveis…</div>`;
+  document.getElementById('dl-foot').innerHTML = '';
+  ov.classList.add('open');
+
+  let r;
+  try { r = await api('bulk_manifest', {ids:[...selIds].join(',')}, 'POST'); }
+  catch(e){ document.getElementById('dl-body').innerHTML = `<div class="err">Erro de conexão: ${esc(e.message)}</div>`; return; }
+  if(!r.ok){ document.getElementById('dl-body').innerHTML = `<div class="err">${esc(apiErrText(r))}</div>`; return; }
+  if(!r.files || !r.files.length){
+    document.getElementById('dl-body').innerHTML =
+      `<div style="padding:1.5rem 0;text-align:center;color:var(--tx2);font-size:13px">Nenhuma foto ou vídeo encontrado nos casos selecionados.</div>`
+      + (r.errors && r.errors.length ? `<div class="berrs" style="display:block">${r.errors.map(e => `<div>• ${esc(e)}</div>`).join('')}</div>` : '');
+    return;
+  }
+
+  dlFiles = r.files;
+  dlFiles._errors = r.errors || [];
+
+  /* Padrão pedido: NA, e os formatos "normais" (VNI/QNI). Quando o lote não
+     tem o que o padrão pede, marca tudo daquele eixo em vez de abrir vazio. */
+  const logos    = new Set(); dlFiles.forEach(f => f.logos.forEach(l => logos.add(l)));
+  const formatos = new Set(dlFiles.map(f => f.formato));
+  const versoes  = new Set(dlFiles.map(f => f.versao));
+
+  dlSel.logo    = logos.has('NA') ? new Set(['NA']) : new Set(logos);
+  const normais = ['VNI','QNI'].filter(x => formatos.has(x));
+  dlSel.formato = normais.length ? new Set(normais) : new Set(formatos);
+  dlSel.versao  = new Set(versoes);
+
+  renderDownloadPicker();
+}
+
+function renderDownloadPicker(){
+  const eixos = {
+    logo:    {titulo:'Logo',    valores:new Set()},
+    formato: {titulo:'Formato', valores:new Set()},
+    versao:  {titulo:'Versão',  valores:new Set()},
+  };
+  dlFiles.forEach(f => {
+    f.logos.forEach(l => eixos.logo.valores.add(l));
+    eixos.formato.valores.add(f.formato);
+    eixos.versao.valores.add(f.versao);
+  });
+
+  /* Contagem e peso por opção, considerando os OUTROS eixos já marcados: o
+     número ao lado de cada caixa é o que aquela opção acrescenta de fato. */
+  const medir = (eixo, valor) => {
+    const casa = f => (eixo === 'logo'    ? f.logos.includes(valor) : f.logos.some(l => dlSel.logo.has(l)))
+                   && (eixo === 'formato' ? f.formato === valor     : dlSel.formato.has(f.formato))
+                   && (eixo === 'versao'  ? f.versao === valor      : dlSel.versao.has(f.versao));
+    const lista = dlFiles.filter(casa);
+    return {n: lista.length, bytes: lista.reduce((s, f) => s + (f.size || 0), 0)};
+  };
+
+  const bloco = (chave) => {
+    const e = eixos[chave];
+    const vals = dlOrdena(chave, e.valores);
+    if(vals.length <= 1 && chave === 'versao') return '';   // uma versão só não é escolha
+    const todosMarcados = vals.every(v => dlSel[chave].has(v));
+    return `<div style="margin-bottom:1rem">
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:.45rem">
+        <div style="font-size:10px;color:var(--tx2);text-transform:uppercase;letter-spacing:.06em;font-weight:700">${e.titulo}</div>
+        <button class="btn bs" style="padding:1px 8px;font-size:10px" onclick="dlMarcarTodos('${chave}',${todosMarcados ? 'false' : 'true'})">${todosMarcados ? 'limpar' : 'todos'}</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px">
+        ${vals.map(v => {
+          const m = medir(chave, v);
+          const on = dlSel[chave].has(v);
+          return `<label style="display:flex;align-items:center;gap:9px;padding:6px 9px;border:0.5px solid var(--bds);border-radius:var(--rs);cursor:pointer;background:${on ? 'var(--accent-soft)' : 'transparent'}">
+            <input type="checkbox" ${on ? 'checked' : ''} onchange="dlAlterna('${chave}','${esc(v).replace(/'/g,"\\'")}')" style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer">
+            <span style="flex:1;font-size:13px">${esc(dlRotulo(v))}</span>
+            <span style="font-size:11px;color:var(--tx3);white-space:nowrap">${m.n} ${m.n === 1 ? 'arquivo' : 'arquivos'} · ${fmtBytes(m.bytes)}</span>
+          </label>`;
+        }).join('')}
+      </div>
+    </div>`;
+  };
+
+  document.getElementById('dl-body').innerHTML =
+    `<p style="font-size:12px;color:var(--tx2);margin:.25rem 0 .9rem">${selIds.size} caso(s) selecionado(s). Marque o que deve entrar no ZIP.</p>`
+    + bloco('logo') + bloco('formato') + bloco('versao')
+    + (dlFiles._errors.length ? `<div class="berrs" style="display:block;margin-top:.5rem">${dlFiles._errors.map(e => `<div>• ${esc(e)}</div>`).join('')}</div>` : '');
+
+  const sel = dlEscolhidos();
+  const selBytes = sel.reduce((s, f) => s + (f.size || 0), 0);
+  const totBytes = dlFiles.reduce((s, f) => s + (f.size || 0), 0);
+  const semTamanho = dlFiles.some(f => f.size === null);
+  document.getElementById('dl-foot').innerHTML =
+    `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:.85rem 1.25rem;border-top:0.5px solid var(--bds)">
+      <div style="flex:1;min-width:180px;font-size:12px;color:var(--tx2)">
+        <b style="color:var(--tx)">${sel.length} de ${dlFiles.length} arquivos</b>${semTamanho ? '' : ` · ${fmtBytes(selBytes)} de ${fmtBytes(totBytes)}`}
+        ${!semTamanho && selBytes < totBytes ? `<span style="color:var(--gtx)"> · economiza ${fmtBytes(totBytes - selBytes)}</span>` : ''}
+      </div>
+      <button class="btn bs" onclick="document.getElementById('dlv').classList.remove('open')">Cancelar</button>
+      <button class="btn bp" id="dl-go" ${sel.length ? '' : 'disabled'} onclick="dlBaixarSelecao()">Baixar ${sel.length || ''}</button>
+    </div>`;
+}
+
+function dlAlterna(eixo, valor){
+  if(dlSel[eixo].has(valor)) dlSel[eixo].delete(valor);
+  else                       dlSel[eixo].add(valor);
+  renderDownloadPicker();
+}
+
+function dlMarcarTodos(eixo, marcar){
+  const vals = new Set();
+  dlFiles.forEach(f => {
+    if(eixo === 'logo') f.logos.forEach(l => vals.add(l));
+    else vals.add(eixo === 'formato' ? f.formato : f.versao);
+  });
+  dlSel[eixo] = marcar ? vals : new Set();
+  renderDownloadPicker();
+}
+
+function dlBaixarSelecao(){
+  const sel = dlEscolhidos();
+  if(!sel.length){ showToast('Nada marcado para baixar.'); return; }
+  document.getElementById('dlv').classList.remove('open');
+  downloadBulkZip(sel.map(f => f.id));
+}
+
+/* Download em lote. O backend escreve o ZIP direto na resposta conforme baixa
+   cada arquivo do Drive, então dá para ler o corpo em pedaços e mostrar quanto
+   já chegou, em vez do cronômetro antigo que não dizia nada.
+
+   `fileIds` vem do seletor de versões; sem ele o pacote leva todas as fotos e
+   vídeos dos casos selecionados. */
+async function downloadBulkZip(fileIds){
   if(!selIds.size){ showToast('Selecione pelo menos 1 caso.'); return; }
   if(selIds.size > 30){ showToast(`Máximo 30 casos por download. Selecionados: ${selIds.size}.`); return; }
   const ids = [...selIds].join(',');
@@ -208,25 +404,25 @@ async function downloadBulkZip(){
 
   const ov = document.createElement('div');
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:950;display:flex;align-items:center;justify-content:center;padding:1rem';
-  ov.innerHTML = `<div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:2rem 2.5rem;text-align:center;min-width:260px;box-shadow:var(--shadow-lg)">
+  ov.innerHTML = `<div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:2rem 2.5rem;text-align:center;min-width:300px;box-shadow:var(--shadow-lg)">
     <span class="spin" style="width:30px;height:30px;border-width:3px"></span>
-    <div style="margin-top:.85rem;font-size:14px;font-weight:600">Gerando ZIP de ${count} caso(s)…</div>
-    <div style="margin-top:.35rem;font-size:12px;color:var(--tx2)" id="zip-timer">Preparando… vídeos podem demorar</div>
+    <div style="margin-top:.85rem;font-size:14px;font-weight:600">Baixando ${count} caso(s)…</div>
+    <div id="zip-barwrap" style="display:none;margin:.75rem auto 0;width:100%;max-width:260px;height:5px;background:var(--bd);border-radius:3px;overflow:hidden">
+      <div id="zip-bar" style="height:100%;width:0%;background:var(--accent);border-radius:3px;transition:width .25s"></div>
+    </div>
+    <div style="margin-top:.5rem;font-size:12px;color:var(--tx2)" id="zip-status">Conectando…</div>
+    <div style="margin-top:.5rem;font-size:11px;color:var(--tx3)">Limite: 2 GB / 30 casos</div>
   </div>`;
   document.body.appendChild(ov);
-  let secs = 0;
-  const timer = setInterval(() => {
-    secs++;
-    const t = document.getElementById('zip-timer');
-    if(t) t.textContent = `${secs}s — baixando e compactando (limite: 2 GB / 30 casos)`;
-  }, 1000);
 
   try{
+    const corpo = {ids};
+    if(Array.isArray(fileIds) && fileIds.length) corpo.file_ids = fileIds.join(',');
     const resp = await fetch(`${API}?action=download_bulk`, {
       method: 'POST',
       credentials: 'same-origin',
       headers: {'Content-Type':'application/x-www-form-urlencoded', 'X-CSRF-Token': CSRF_TOKEN},
-      body: new URLSearchParams({ids}).toString()
+      body: new URLSearchParams(corpo).toString()
     });
     const ct = resp.headers.get('Content-Type') || '';
     if(!resp.ok || !ct.includes('zip')){
@@ -235,7 +431,48 @@ async function downloadBulkZip(){
       showToast('Erro: '+msg);
       return;
     }
-    const blob = await resp.blob();
+
+    /* Não há Content-Length de propósito (um arquivo pode falhar e encolher o
+       total), mas o backend manda a previsão exata em X-Zip-Total, calculada a
+       partir do tamanho de cada foto. Com ela dá porcentagem e tempo restante;
+       sem ela, cai para bytes recebidos e velocidade. */
+    const total = Number(resp.headers.get('X-Zip-Total')) || 0;
+    const barwrap = document.getElementById('zip-barwrap');
+    const bar = document.getElementById('zip-bar');
+    if(total && barwrap) barwrap.style.display = 'block';
+
+    const t0 = Date.now();
+    const reader = resp.body && resp.body.getReader ? resp.body.getReader() : null;
+    let blob;
+    if(reader){
+      const chunks = [];
+      let received = 0;
+      for(;;){
+        const {done, value} = await reader.read();
+        if(done) break;
+        chunks.push(value);
+        received += value.length;
+        const el = document.getElementById('zip-status');
+        if(el){
+          const secs = Math.max(0.5, (Date.now() - t0) / 1000);
+          const vel = received / secs;
+          if(total){
+            const pct = Math.min(100, received / total * 100);
+            if(bar) bar.style.width = pct.toFixed(1) + '%';
+            const falta = vel > 0 ? (total - received) / vel : 0;
+            el.textContent = `${pct.toFixed(0)}% · ${fmtBytes(received)} de ${fmtBytes(total)} · ${fmtBytes(vel)}/s`
+              + (received < total && falta > 1 ? ` · faltam ${fmtDur(falta)}` : '');
+          } else {
+            el.textContent = `${fmtBytes(received)} recebidos · ${fmtBytes(vel)}/s`;
+          }
+        }
+      }
+      if(bar) bar.style.width = '100%';
+      blob = new Blob(chunks, {type:'application/zip'});
+    } else {
+      blob = await resp.blob();
+    }
+
     const url = URL.createObjectURL(blob);
     const cd = resp.headers.get('Content-Disposition') || '';
     const m = cd.match(/filename="?([^";]+)"?/);
@@ -244,9 +481,9 @@ async function downloadBulkZip(){
     a.href = url; a.download = filename; a.style.display = 'none';
     document.body.appendChild(a); a.click();
     setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1500);
-    showToast(`✅ ZIP com ${count} caso(s) baixado.`);
+    showToast(`✅ ZIP com ${count} caso(s) baixado (${fmtBytes(blob.size)}).`);
   } catch(e){ showToast('Erro de conexão: '+e.message); }
-  finally { clearInterval(timer); ov.remove(); }
+  finally { ov.remove(); }
 }
 
 /* ── Registro em massa: vários locais por profissional ────────

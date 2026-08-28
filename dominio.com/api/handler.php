@@ -47,7 +47,9 @@ require_once __DIR__ . '/../../private-config/lib/google.php';
 
 /* Build do backend. Atualize a cada deploy do handler.php; é exibido no painel
    "Diagnóstico de versão" do Admin Mode para confirmar que o PHP novo subiu. */
-if (!defined('HANDLER_BUILD')) define('HANDLER_BUILD', 'v23.05 (2026-06-12)');
+if (!defined('HANDLER_BUILD')) define('HANDLER_BUILD', 'v23.19 (2026-08-28)');
+// Teto de casos por chamada de `clear_cache` em lote.
+if (!defined('CLEAR_CACHE_MAX_IDS')) define('CLEAR_CACHE_MAX_IDS', 100);
 
 /*
  * Bootstrap idempotente do schema para todas as bases configuradas.
@@ -654,6 +656,275 @@ function withJsonLock(string $jsonPath, callable $fn): void {
     } finally {
         flock($fp, LOCK_UN);
         fclose($fp);
+    }
+}
+
+/**
+ * Leitura do nome de arquivo do acervo nos eixos do seletor de versões.
+ *
+ * A nomenclatura é `CASO-123` seguido de tokens em ordem livre. Os mesmos dois
+ * arquivos aparecem como `VNI-NA` e `NA-VNI` na base, então casar por sufixo
+ * inteiro não funciona: é preciso quebrar em tokens e classificar um a um.
+ *
+ * Eixos:
+ *   - logo:    LH, EH, NA. Um arquivo pode ter mais de um e entra em todos.
+ *   - formato: [V|Q][N|O][I|V] = Vertical/Quadrado, Normal/Otimizada, Imagem/Vídeo.
+ *   - versão:  V1, V2, ... (a base tem até V6, então nada de lista fixa).
+ *
+ * Token não reconhecido não descarta o arquivo: ele só não contribui para
+ * nenhum eixo. Assim um `CASO-102-H-NA-QNI.jpg`, cujo `H` ninguém sabe o que
+ * é, ainda é corretamente lido como NA + QNI.
+ */
+final class AssetName
+{
+    /** Logos conhecidos. Um arquivo pode carregar mais de um. */
+    public const LOGOS = ['LH', 'EH', 'NA'];
+
+    /** Extensões que aparecem grudadas no token quando falta o ponto no nome. */
+    private const EXT_COLADA = ['JPEG','WEBP','JPG','PNG','GIF','MP4','MOV','AVI','MKV','WEBM'];
+
+    private static function ehFormato(string $t): bool { return (bool)preg_match('/^[VQ][NO][IV]$/', $t); }
+    private static function ehVersao(string $t): bool  { return (bool)preg_match('/^V\d+$/', $t); }
+
+    public static function parse(string $name): array
+    {
+        $semExt = preg_replace('/\.[^.]+$/', '', $name);
+        $semExt = preg_replace('/\s*\(\d+\)\s*$/', '', $semExt); // duplicata do Drive: "arquivo (2)"
+        $resto  = preg_replace('/^CASO[-_\s]?\d+[-_\s]*/i', '', $semExt);
+        $tokens = preg_split('/[-_\s.]+/', mb_strtoupper((string)$resto, 'UTF-8'), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        $logos = []; $formato = null; $versao = null; $sobra = [];
+        foreach ($tokens as $t) {
+            $t = self::recuperaToken($t);
+            if ($t === '') continue;
+            if (in_array($t, self::LOGOS, true)) {
+                if (!in_array($t, $logos, true)) $logos[] = $t;
+            } elseif (self::ehFormato($t)) {
+                $formato = $formato ?? $t;
+            } elseif (self::ehVersao($t)) {
+                $versao = $versao ?? 'V'.(int)substr($t, 1);
+            } else {
+                $sobra[] = $t;
+            }
+        }
+        return [
+            'logos'   => $logos ?: ['SEM LOGO'],
+            'formato' => $formato ?? 'OUTROS',
+            'versao'  => $versao ?? 'V1',
+            'sobra'   => $sobra,
+        ];
+    }
+
+    /** Recupera token colado à extensão quando o ponto faltou ("LHJPG" vira "LH"). */
+    private static function recuperaToken(string $t): string
+    {
+        if (in_array($t, self::LOGOS, true) || self::ehFormato($t) || self::ehVersao($t)) return $t;
+        foreach (self::EXT_COLADA as $e) {
+            if (str_ends_with($t, $e)) {
+                $p = substr($t, 0, -strlen($e));
+                if (in_array($p, self::LOGOS, true) || self::ehFormato($p) || self::ehVersao($p)) return $p;
+            }
+        }
+        return $t;
+    }
+
+    /**
+     * Só imagem e vídeo entram no pacote. Projeto do Premiere e afins ficam de
+     * fora do download inteiro, não é uma opção do seletor.
+     */
+    public static function isMedia(string $name, string $mime = ''): bool
+    {
+        if (str_starts_with($mime, 'image/') || str_starts_with($mime, 'video/')) return true;
+        $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+        return in_array($ext, ['jpg','jpeg','png','webp','gif','bmp','tif','tiff','heic','avif',
+                               'mp4','mov','avi','mkv','webm','m4v','wmv'], true);
+    }
+}
+
+/**
+ * Escritor de ZIP em streaming, usado pelo download em lote.
+ *
+ * Emite cada arquivo assim que os bytes chegam, em vez de montar o pacote
+ * inteiro em disco para só então responder. Isso resolve dois problemas:
+ *
+ *   - O Cloudflare derruba a requisição com 524 quando a origem passa de 100 s
+ *     sem responder. Montando o ZIP antes de enviar, um lote grande estourava
+ *     esse limite e o usuário não recebia nada.
+ *   - O navegador começa a receber em segundos, então dá para mostrar progresso
+ *     real em vez de um cronômetro que não significa nada.
+ *
+ * Usa o método "store" (sem compressão) porque o acervo é JPEG, WebP e MP4,
+ * formatos já comprimidos: deflate gastaria CPU para ganhar quase nada.
+ *
+ * Como o tamanho de cada arquivo não é conhecido antes de baixá-lo, cada entrada
+ * usa "data descriptor" (bit 3 do flag geral): CRC e tamanhos são gravados logo
+ * depois dos dados, não antes. É o mecanismo previsto no formato para escrita em
+ * fluxo, e foi verificado contra o Explorer do Windows, o .NET e o unzip.
+ *
+ * Limites: ZIP clássico, sem ZIP64. Suporta 65535 arquivos e 4 GB de pacote,
+ * bem acima do teto aplicado pelo endpoint.
+ */
+final class StreamingZip
+{
+    private int   $offset  = 0;
+    private array $entries = [];
+
+    /** Bytes já emitidos, incluindo cabeçalhos. */
+    public function bytesWritten(): int { return $this->offset; }
+
+    /** Quantidade de entradas fechadas com sucesso. */
+    public function fileCount(): int { return count($this->entries); }
+
+    private function out(string $bytes): void
+    {
+        echo $bytes;
+        $this->offset += strlen($bytes);
+    }
+
+    /** Converte um timestamp para o par (hora, data) no formato DOS do ZIP. */
+    private static function dosTime(int $ts): array
+    {
+        $t = getdate($ts);
+        if ($t['year'] < 1980) return [0, 33]; // 1980-01-01, o mínimo do formato
+        return [
+            (($t['hours'] << 11) | ($t['minutes'] << 5) | ($t['seconds'] >> 1)) & 0xFFFF,
+            ((($t['year'] - 1980) << 9) | ($t['mon'] << 5) | $t['mday']) & 0xFFFF,
+        ];
+    }
+
+    /**
+     * Normaliza o caminho da entrada: separador do ZIP é sempre "/", nada de
+     * caminho absoluto nem "..", e caracteres proibidos no Windows viram "_".
+     */
+    public static function sanitizeEntry(string $name): string
+    {
+        $name  = str_replace('\\', '/', $name);
+        $parts = [];
+        foreach (explode('/', $name) as $seg) {
+            $seg = preg_replace('/[:*?"<>|\x00-\x1F]/u', '_', $seg);
+            $seg = trim($seg);
+            if ($seg === '' || $seg === '.' || $seg === '..') continue;
+            $parts[] = $seg;
+        }
+        $out = implode('/', $parts);
+        return $out !== '' ? $out : 'arquivo';
+    }
+
+    /**
+     * Tamanho exato que o pacote terá, dado o nome e o tamanho de cada arquivo.
+     *
+     * Só dá para prever porque o método é "store", sem compressão: por entrada
+     * são 30 bytes de cabeçalho local + nome + dados + 16 do data descriptor,
+     * mais 46 + nome no diretório central, e 22 no fecho. O endpoint manda esse
+     * número num cabeçalho para o frontend mostrar progresso em porcentagem.
+     *
+     * @param array $itens lista de ['name' => string, 'size' => int]
+     */
+    public static function predictSize(array $itens): int
+    {
+        $total = 22; // fim do diretório central
+        foreach ($itens as $it) {
+            $n = strlen(self::sanitizeEntry((string)($it['name'] ?? '')));
+            $total += 30 + $n + (int)($it['size'] ?? 0) + 16; // cabeçalho local + dados + descriptor
+            $total += 46 + $n;                                // diretório central
+        }
+        return $total;
+    }
+
+    /**
+     * Abre uma entrada e delega a produção dos bytes ao callback, que recebe um
+     * writer: $producer(function (string $chunk) { ... }).
+     *
+     * O produtor pode devolver false para abandonar a entrada (o download falhou
+     * no meio): ela não é registrada no diretório central e some do pacote.
+     *
+     * @return int bytes gravados na entrada, ou -1 quando ela foi abandonada
+     */
+    public function addStreamed(string $name, callable $producer, ?int $mtime = null): int
+    {
+        $name = self::sanitizeEntry($name);
+        [$dosT, $dosD] = self::dosTime($mtime ?? time());
+        $localOffset = $this->offset;
+
+        $this->out(pack('VvvvvvVVVvv',
+            0x04034b50,            // assinatura do cabeçalho local
+            20,                    // versão necessária para extrair (2.0)
+            0x0808,                // bit 3: data descriptor · bit 11: nome UTF-8
+            0,                     // método: store
+            $dosT, $dosD,
+            0, 0, 0,               // CRC e tamanhos só se sabem depois dos dados
+            strlen($name), 0
+        ));
+        $this->out($name);
+
+        $ctx  = hash_init('crc32b');
+        $size = 0;
+        $ok = $producer(function (string $chunk) use ($ctx, &$size) {
+            if ($chunk === '') return;
+            hash_update($ctx, $chunk);
+            $size += strlen($chunk);
+            $this->out($chunk);
+        });
+        $crc = (int) hexdec(hash_final($ctx));
+
+        // A assinatura do data descriptor é opcional no formato, mas na prática
+        // todo extrator espera encontrá-la. Sai mesmo quando a entrada é
+        // abandonada, para o fluxo seguir coerente daqui em diante.
+        $this->out(pack('VVVV', 0x08074b50, $crc, $size, $size));
+
+        // Entrada abandonada: os bytes já emitidos viram lixo ignorado, porque é
+        // pelo diretório central que os extratores leem o pacote. Melhor do que
+        // entregar um JPEG de 0 byte parecendo corrompido.
+        if ($ok === false) return -1;
+
+        $this->entries[] = [
+            'name'   => $name,
+            'crc'    => $crc,
+            'size'   => $size,
+            'offset' => $localOffset,
+            't'      => $dosT,
+            'd'      => $dosD,
+        ];
+        return $size;
+    }
+
+    /** Atalho para conteúdo que já está inteiro em memória (avisos, listas). */
+    public function addString(string $name, string $content, ?int $mtime = null): int
+    {
+        return $this->addStreamed($name, function (callable $w) use ($content) { $w($content); }, $mtime);
+    }
+
+    /** Fecha o pacote gravando o diretório central. */
+    public function finish(): void
+    {
+        $cdStart = $this->offset;
+        foreach ($this->entries as $e) {
+            $this->out(pack('VvvvvvvVVVvvvvvVV',
+                0x02014b50,        // assinatura do diretório central
+                20,                // versão de quem criou
+                20,                // versão necessária para extrair
+                0x0808,            // mesmo flag do cabeçalho local
+                0,                 // método: store
+                $e['t'], $e['d'],
+                $e['crc'], $e['size'], $e['size'],
+                strlen($e['name']),
+                0, 0,              // extra e comentário
+                0,                 // disco inicial
+                0,                 // atributos internos
+                0,                 // atributos externos
+                $e['offset']
+            ));
+            $this->out($e['name']);
+        }
+        $cdSize = $this->offset - $cdStart;
+        $n = count($this->entries);
+        $this->out(pack('VvvvvVVv',
+            0x06054b50,            // fim do diretório central
+            0, 0,                  // disco atual e disco do diretório
+            $n, $n,
+            $cdSize, $cdStart,
+            0                      // sem comentário
+        ));
     }
 }
 
@@ -1511,10 +1782,48 @@ switch ($action) {
         break;
 
     // ── Limpar cache ──────────────────────────────────────
+    // Aceita três modos: um caso (`caso_id`), um lote (`caso_ids`, lista
+    // separada por vírgula, espaço ou quebra de linha) ou a base inteira
+    // (nenhum dos dois, restrito a admin). O lote atende o cenário de arquivos
+    // que entram na pasta errada no Drive: como THUMB_CACHE_TTL é de 30 dias,
+    // os casos afetados continuam exibindo as fotos já removidas até serem
+    // limpos um a um.
     case 'clear_cache':
         $caso_id = preg_replace('/[^A-Z0-9\-]/','',strtoupper($_POST['caso_id']??''));
+        $idsRaw  = trim((string)($_POST['caso_ids'] ?? ''));
         try {
-            if ($caso_id) {
+            if ($idsRaw !== '') {
+                $ids = [];
+                foreach (preg_split('/[\s,;]+/', $idsRaw) as $tok) {
+                    $cid = preg_replace('/[^A-Z0-9\-]/','',strtoupper($tok));
+                    if ($cid !== '' && !in_array($cid, $ids, true)) $ids[] = $cid;
+                }
+                if (!$ids) { echo json_encode(['ok'=>false,'error'=>'Nenhum ID válido na lista.']); break; }
+                // Teto por requisição: cada caso limpo volta a ser lido do Drive
+                // na próxima visualização, então um lote grande demais viraria
+                // uma rajada de chamadas à API do Google.
+                if (count($ids) > CLEAR_CACHE_MAX_IDS) {
+                    echo json_encode(['ok'=>false,'error'=>'Máximo de '.CLEAR_CACHE_MAX_IDS.' casos por vez ('.count($ids).' enviados).']);
+                    break;
+                }
+                $limpos = []; $semCache = []; $thumbs = 0;
+                foreach ($ids as $cid) {
+                    $raw = DB::getThumbCacheRaw($cid);
+                    // Ausência de registro não é erro: o caso já estava sem cache.
+                    if ($raw === null) { $semCache[] = $cid; continue; }
+                    DB::clearThumbCache($cid);
+                    foreach (json_decode($raw, true) ?? [] as $p)
+                        if (!empty($p['local_thumb']) && @unlink($thumbDir.'/'.$p['local_thumb'])) $thumbs++;
+                    $limpos[] = $cid;
+                }
+                if ($limpos) {
+                    try { DB::log($me, 'sistema', 'clear_cache_batch', null, ['ids'=>$limpos,'total'=>count($limpos),'thumbs'=>$thumbs]); }
+                    catch (Throwable $e) {}
+                }
+                $msg = count($limpos)." caso(s) limpo(s), {$thumbs} thumb(s) removida(s).";
+                if ($semCache) $msg .= ' '.count($semCache).' já estava(m) sem cache.';
+                echo json_encode(['ok'=>true,'msg'=>$msg,'limpos'=>$limpos,'sem_cache'=>$semCache,'thumbs'=>$thumbs]);
+            } elseif ($caso_id) {
                 $raw = DB::getThumbCacheRaw($caso_id);
                 DB::clearThumbCache($caso_id);
                 foreach (json_decode($raw??'[]', true)??[] as $p)
@@ -2257,8 +2566,71 @@ switch ($action) {
         break;
 
     // ── Download em lote: ZIP com até 30 casos ─────────────────
+    /*
+     * Inventário dos arquivos dos casos selecionados, classificado nos eixos do
+     * seletor de versões (logo, formato, versão) e com o tamanho de cada um.
+     *
+     * Alimenta a janela que o usuário usa para escolher o que baixar antes de
+     * disparar o ZIP. Sai do cache de fotos, então é barato; a única chamada ao
+     * Drive que pode acontecer é a de completar tamanhos faltantes, uma por caso
+     * e só na primeira vez.
+     */
+    case 'bulk_manifest':
+        $idsRaw = $_POST['ids'] ?? '';
+        $ids = array_values(array_unique(array_map('strtoupper', array_filter(
+            array_map('trim', explode(',', $idsRaw)),
+            fn($x) => preg_match('/^CASO-\d+$/', $x)
+        ))));
+        if (!$ids) { echo json_encode(['ok'=>false,'error'=>'Nenhum ID válido informado.']); break; }
+        if (count($ids) > 30) { echo json_encode(['ok'=>false,'error'=>'Máximo 30 casos por download.']); break; }
+        try {
+            $arquivos = [];
+            $errs = [];
+            foreach ($ids as $cid) {
+                try {
+                    $photos = $api->getDrivePhotos($cid, false);
+                    $photos = $api->fillMissingSizes($cid, $photos);
+                } catch (Throwable $e) { $errs[] = "$cid: ".$e->getMessage(); continue; }
+                if (!$photos) { $errs[] = "$cid: sem fotos"; continue; }
+                foreach ($photos as $p) {
+                    $nome = $p['name'] ?? '';
+                    if (empty($p['id']) || $nome === '') continue;
+                    // Só imagem e vídeo: projeto do Premiere e afins nem aparecem.
+                    if (!AssetName::isMedia($nome, $p['mimeType'] ?? '')) continue;
+                    $c = AssetName::parse($nome);
+                    $arquivos[] = [
+                        'caso'    => $cid,
+                        'id'      => $p['id'],
+                        'name'    => $nome,
+                        'size'    => isset($p['size']) ? (int)$p['size'] : null,
+                        'logos'   => $c['logos'],
+                        'formato' => $c['formato'],
+                        'versao'  => $c['versao'],
+                        'isVideo' => !empty($p['isVideo']),
+                    ];
+                }
+            }
+            echo json_encode(['ok'=>true, 'files'=>$arquivos, 'errors'=>$errs]);
+        } catch (Throwable $e) {
+            echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]);
+        }
+        break;
+
+    /*
+     * Download em lote.
+     *
+     * O ZIP é escrito direto na resposta, arquivo a arquivo, conforme cada um
+     * chega do Drive. A versão anterior baixava tudo, montava o pacote em disco
+     * e só então respondia: com poucos casos isso já passava dos 100 s que o
+     * Cloudflare espera pela origem, e a requisição morria em 524 sem entregar
+     * nada. Streaming também dispensa os temporários e mantém a memória no
+     * tamanho de um pedaço, não do lote inteiro.
+     *
+     * Uma vez que o primeiro byte do ZIP saiu, não há como voltar atrás e
+     * responder um JSON de erro: falhas parciais viram um `_ERROS.txt` dentro
+     * do próprio pacote.
+     */
     case 'download_bulk':
-        if (!class_exists('ZipArchive')) { echo json_encode(['ok'=>false,'error'=>'ZipArchive não disponível neste servidor.']); break; }
         $idsRaw = $_POST['ids'] ?? '';
         $ids = array_values(array_filter(
             array_map('trim', explode(',', $idsRaw)),
@@ -2267,80 +2639,112 @@ switch ($action) {
         $ids = array_values(array_unique(array_map('strtoupper', $ids)));
         if (!$ids) { echo json_encode(['ok'=>false,'error'=>'Nenhum ID válido informado.']); break; }
         if (count($ids) > 30) { echo json_encode(['ok'=>false,'error'=>'Máximo 30 casos por download.']); break; }
-        // Empacotar arquivos completos (vídeos inclusive) pode ser pesado. Damos
-        // mais tempo/memória e gravamos cada arquivo num temporário em disco antes
-        // de adicioná-lo: ZipArchive::addFile lê do disco só no close(), em vez de
-        // manter todos os bytes na RAM ao mesmo tempo (como faria addFromString).
-        @set_time_limit(300);
-        if ((int)ini_get('memory_limit') !== -1) @ini_set('memory_limit', '512M');
+
+        @set_time_limit(0);
+        @ignore_user_abort(false); // desistiu do download? para de puxar do Drive
         $MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024; // teto de segurança: 2 GB
-        $tmpZip = tempnam(sys_get_temp_dir(), 'bi_zip_');
-        $zip = new ZipArchive();
-        if ($zip->open($tmpZip, ZipArchive::OVERWRITE) !== true) {
-            @unlink($tmpZip);
-            echo json_encode(['ok'=>false,'error'=>'Falha ao criar ZIP.']); break;
-        }
-        $errors     = [];
-        $totalFiles = 0;
-        $totalBytes = 0;
-        $tmpFiles   = [];
-        $limitHit   = false;
-        try {
-            foreach ($ids as $cid) {
-                if ($limitHit) break;
-                try {
-                    $photos = $api->getDrivePhotos($cid, false);
-                } catch (Throwable $e) {
-                    $errors[] = "$cid: ".$e->getMessage(); continue;
-                }
-                if (!$photos) { $errors[] = "$cid: sem fotos"; continue; }
-                // Inclui o arquivo completo (não a thumbnail) de cada foto.
-                foreach ($photos as $p) {
-                    $r = $api->downloadDriveFile($p['id']);
-                    if (!$r['ok']) { $errors[] = "$cid/{$p['name']}: ".($r['error']??'falha'); continue; }
-                    $bytes = strlen($r['data']);
-                    if ($totalBytes + $bytes > $MAX_TOTAL_BYTES) {
-                        $errors[] = 'Limite de 2 GB por download atingido — selecione menos casos por vez.';
-                        $limitHit = true; break;
-                    }
-                    $tmp = tempnam(sys_get_temp_dir(), 'bi_f_');
-                    if ($tmp === false || @file_put_contents($tmp, $r['data']) === false) {
-                        $errors[] = "$cid/{$r['name']}: falha ao gravar arquivo temporário";
-                        if ($tmp !== false) @unlink($tmp);
-                        continue;
-                    }
-                    $totalBytes += $bytes;
-                    unset($r['data']); // libera a cópia em memória o quanto antes
-                    $entry = $cid.'/'.preg_replace('/[\\\\\/:*?"<>|]/','_', $r['name']);
-                    $zip->addFile($tmp, $entry);
-                    $tmpFiles[] = $tmp;
-                    $totalFiles++;
-                }
+
+        // A listagem de fotos vem do cache e é barata; fazê-la antes de abrir a
+        // resposta permite devolver um JSON de erro honesto quando não há nada
+        // para empacotar, em vez de entregar um ZIP vazio.
+        /* Seleção vinda do seletor de versões. Quando ausente, o pacote leva
+           tudo que for imagem ou vídeo, como antes. Os ids são conferidos
+           contra os arquivos dos casos pedidos, então a lista do cliente não
+           serve para alcançar arquivo de outro caso. */
+        $filtro = array_flip(array_values(array_filter(
+            array_map('trim', explode(',', (string)($_POST['file_ids'] ?? ''))),
+            fn($x) => $x !== '' && preg_match('/^[A-Za-z0-9_-]{10,120}$/', $x)
+        )));
+
+        $plano  = [];
+        $errors = [];
+        $semTamanho = false;
+        foreach ($ids as $cid) {
+            try {
+                $photos = $api->getDrivePhotos($cid, false);
+                // Casos cacheados antes de o `size` passar a ser pedido ao Drive
+                // ganham os tamanhos aqui, com uma listagem por caso.
+                $photos = $api->fillMissingSizes($cid, $photos);
+            } catch (Throwable $e) {
+                $errors[] = "$cid: ".$e->getMessage(); continue;
             }
-            $zip->close(); // só aqui o ZipArchive lê os temporários do disco
-        } catch (Throwable $e) {
-            @$zip->close(); @unlink($tmpZip);
-            foreach ($tmpFiles as $tf) @unlink($tf);
-            echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]); break;
+            if (!$photos) { $errors[] = "$cid: sem fotos"; continue; }
+            foreach ($photos as $p) {
+                if (empty($p['id'])) continue;
+                $nome = $p['name'] ?? $p['id'];
+                if (!AssetName::isMedia($nome, $p['mimeType'] ?? '')) continue;
+                if ($filtro && !isset($filtro[$p['id']])) continue;
+                if (!isset($p['size']) || $p['size'] === null) $semTamanho = true;
+                $plano[] = ['caso'=>$cid, 'id'=>$p['id'], 'name'=>$nome,
+                            'entry'=>$cid.'/'.$nome, 'size'=>(int)($p['size'] ?? 0)];
+            }
         }
-        if ($totalFiles === 0) {
-            @unlink($tmpZip);
-            foreach ($tmpFiles as $tf) @unlink($tf);
-            echo json_encode(['ok'=>false,'error'=>'Nenhum arquivo encontrado para os IDs informados.', 'details'=>$errors]); break;
+        if (!$plano) {
+            echo json_encode(['ok'=>false,'error'=>'Nenhum arquivo encontrado para os IDs informados.','details'=>$errors]);
+            break;
         }
-        // Faz streaming do ZIP montado para o cliente e remove tudo em seguida.
-        $size = filesize($tmpZip);
+
         $fname = 'casos_'.date('Ymd_His').'_'.count($ids).'.zip';
+        // Sem Content-Length: um arquivo pode falhar no meio e o total real cair,
+        // e declarar um tamanho que não se cumpre quebra a resposta. A resposta
+        // sai em chunked, que é o que permite o envio progressivo.
         header_remove('Content-Type');
         header_remove('X-Frame-Options');
         header('Content-Type: application/zip');
-        header('Content-Length: '.$size);
         header('Content-Disposition: attachment; filename="'.$fname.'"');
         header('Cache-Control: private, no-cache');
-        readfile($tmpZip);
-        @unlink($tmpZip);
-        foreach ($tmpFiles as $tf) @unlink($tf);
-        DB::log($me, 'sistema', 'download_bulk', null, ['ids'=>$ids,'files'=>$totalFiles,'errors'=>count($errors)]);
+        header('X-Accel-Buffering: no'); // impede bufferização em proxies intermediários
+        // Previsão exata do tamanho final (só é exata porque o ZIP é "store").
+        // Serve ao frontend para mostrar porcentagem; se algum arquivo falhar,
+        // o total real fica um pouco abaixo e a barra simplesmente não fecha
+        // em 100%. Omitido quando algum tamanho é desconhecido.
+        if (!$semTamanho) {
+            header('X-Zip-Total: '.StreamingZip::predictSize(
+                array_map(fn($i) => ['name'=>$i['entry'], 'size'=>$i['size']], $plano)
+            ));
+            header('Access-Control-Expose-Headers: X-Zip-Total');
+        }
+        @ini_set('zlib.output_compression', 'Off');
+        while (ob_get_level() > 0) @ob_end_flush();
+
+        $zip        = new StreamingZip();
+        $totalFiles = 0;
+        $limitHit   = false;
+        foreach ($plano as $item) {
+            if ($limitHit) break;
+            $entry = $item['entry'];
+            $falha = null;
+            try {
+                // Os bytes vão do Drive direto para a saída: o produtor abaixo é
+                // chamado de dentro da entrada do ZIP, sem passo intermediário.
+                $zip->addStreamed($entry, function (callable $write) use ($api, $item, &$falha, &$limitHit, $zip, $MAX_TOTAL_BYTES) {
+                    $res = $api->streamDriveFile($item['id'], function (string $chunk) use ($write, $zip, &$limitHit, $MAX_TOTAL_BYTES) {
+                        if ($limitHit) return;
+                        if ($zip->bytesWritten() > $MAX_TOTAL_BYTES) { $limitHit = true; return; }
+                        $write($chunk);
+                    });
+                    if (!$res['ok']) { $falha = $res['error'] ?? 'falha ao baixar'; return false; }
+                    return true;
+                });
+            } catch (Throwable $e) {
+                $falha = $e->getMessage();
+            }
+            if ($falha !== null) $errors[] = "{$entry}: {$falha}";
+            else                 $totalFiles++;
+            if ($limitHit) $errors[] = 'Limite de 2 GB por download atingido: selecione menos casos por vez.';
+            flush();
+        }
+
+        if ($errors) {
+            $zip->addString('_ERROS.txt',
+                "Arquivos que não entraram neste pacote:\n\n".implode("\n", $errors)."\n");
+        }
+        $zip->finish();
+        flush();
+
+        DB::log($me, 'sistema', 'download_bulk', null, [
+            'ids'=>$ids, 'files'=>$totalFiles, 'bytes'=>$zip->bytesWritten(), 'errors'=>count($errors),
+        ]);
         exit;
 
     /*

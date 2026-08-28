@@ -151,6 +151,16 @@ kbd{background:var(--bd);border:1px solid var(--bds);border-radius:4px;padding:2
     <p><b>Profissional que atua em mais de uma cidade ou estado.</b> Preencha estado, cidade e profissional e clique em <b>"+ Adicionar outro local"</b>: o local vai para a lista e o formulário mantém o estado e o profissional preenchidos, bastando trocar a cidade (ou o estado) para o próximo. Repita quantas vezes precisar e clique em <b>"Registrar N locais em todos"</b>: cada caso selecionado recebe todos os locais da lista de uma vez. Exemplo: um profissional que atende em Fortaleza-CE e Parnaíba-PI fica com os dois registros em cada caso.</p>
     <p>A verificação prévia roda antes de gravar qualquer coisa e considera também os locais do próprio lote: se duas cidades da lista estiverem perto demais uma da outra, o aviso aparece antes do registro.</p>
     <p>Há também <b>"Aplicar por ID"</b> — você cola a lista de IDs (ex.: 244, 255, 320) e o sistema aplica o registro em todos.</p>
+
+    <h4>Baixar os casos selecionados (ZIP)</h4>
+    <p>Com os casos marcados, o botão <b>"📦 Baixar (ZIP)"</b> abre uma janela para escolher <b>o que</b> entra no pacote, em três eixos:</p>
+    <ul>
+      <li><b>Logo</b>: sem logo, LH, NA (e EH, quando houver). Um arquivo que tem dois logos no nome aparece nos dois filtros.</li>
+      <li><b>Formato</b>: VNI, QNI, VOI, QOI e os equivalentes de vídeo. A leitura é V = vertical, Q = quadrada, N = normal, O = otimizada, I = imagem, V no fim = vídeo.</li>
+      <li><b>Versão</b>: V1, V2, V3 em diante, quando o caso tiver mais de uma.</li>
+    </ul>
+    <p>Cada opção mostra quantos arquivos e quantos megabytes ela acrescenta, e o rodapé mostra o total escolhido e quanto você economiza. Já vêm marcados <b>NA</b> e os formatos normais (<b>VNI</b> e <b>QNI</b>), que é o conjunto usado na maioria das vezes.</p>
+    <div class="tip">💡 O download mostra barra de progresso com porcentagem e tempo restante. Se algum arquivo falhar, ele não entra no pacote e o motivo fica num <b>_ERROS.txt</b> dentro do próprio ZIP.</div>
   </section>
 
   <section id="fotos">

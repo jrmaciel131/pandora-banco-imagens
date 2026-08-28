@@ -11,7 +11,7 @@ let CSRF_TOKEN = '';
    cada alteração publicada. O index.php lê este mesmo texto do arquivo no
    servidor e o injeta em window.APP_BUILD_EXPECTED; se o que o navegador
    carregou divergir do que está no servidor, exibimos um aviso de cache. */
-const APP_BUILD = 'v23.15 (2026-08-27)';
+const APP_BUILD = 'v23.19 (2026-08-28)';
 
 (function reportBuild(){
   try {
@@ -42,6 +42,24 @@ const ESTADOS = [
 
 const norm = s => (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
 const cap  = s => s ? s.charAt(0).toUpperCase()+s.slice(1).toLowerCase() : '';
+
+/* Duração curta para tempo restante: "45 s", "2 min 10 s". */
+function fmtDur(seg){
+  seg = Math.max(0, Math.round(Number(seg) || 0));
+  if(seg < 60) return seg + ' s';
+  const m = Math.floor(seg / 60), s = seg % 60;
+  return s ? `${m} min ${s} s` : `${m} min`;
+}
+
+/* Tamanho legível, com vírgula decimal. Usado no progresso do download em lote. */
+function fmtBytes(n){
+  n = Number(n) || 0;
+  const un = ['B','KB','MB','GB'];
+  let i = 0;
+  while(n >= 1024 && i < un.length - 1){ n /= 1024; i++; }
+  const casas = i === 0 ? 0 : (n < 10 ? 1 : 0);
+  return n.toFixed(casas).replace('.', ',') + ' ' + un[i];
+}
 /* Escapa para HTML. Inclui aspas duplas (&quot;) para que valores vindos da
    planilha (motivo de bloqueio, nomes, cidades) não consigam "escapar" de um
    atributo title="..."/style="..." e injetar outro atributo (XSS). A aspa

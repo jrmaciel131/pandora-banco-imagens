@@ -3,7 +3,11 @@
 /* Build deste arquivo. Atualize a cada deploy do admin.js; aparece no painel
    "Diagnóstico de versão" do Admin Mode e é comparado com a cópia do servidor
    para revelar quando o navegador está com uma versão em cache. */
-const ADMIN_BUILD = 'v23.05 (2026-06-12)';
+const ADMIN_BUILD = 'v23.19 (2026-08-28)';
+
+/* Teto de casos por limpeza de cache em lote. Espelha CLEAR_CACHE_MAX_IDS
+   do handler.php: serve só para avisar antes de gastar a requisição. */
+const CACHE_IDS_MAX = 100;
 
 let adminModeVisible = false;
 let thumbSourceMode = 'auto';
@@ -1523,4 +1527,63 @@ async function clearCaseCache(casoId){
     showToast(r.ok ? r.msg : 'Erro.');
     renderGrid();
   } catch(e){ showToast('Erro.'); }
+}
+
+/* Limpeza de cache em lote. Serve ao cenário de arquivos que entraram na pasta
+   errada no Drive: depois de removê-los de lá, o caso continua exibindo a
+   listagem antiga porque o cache de thumbs vale 30 dias. Devolve a resposta
+   crua do servidor para quem chamou decidir o que fazer com o resultado. */
+async function clearCacheBatch(ids){
+  try{
+    const r = await api('clear_cache', {caso_ids: ids.join(',')}, 'POST');
+    if(r.ok) ids.forEach(id => { delete thumbCache[id]; });
+    showToast(r.ok ? r.msg : 'Erro: ' + apiErrText(r));
+    return r;
+  } catch(e){ showToast('Erro: ' + e.message); return null; }
+}
+
+/* Normaliza a lista colada pelo usuário: aceita vírgula, ponto-e-vírgula,
+   espaço ou quebra de linha, com ou sem o prefixo CASO-, e remove repetidos. */
+function parseCacheIds(raw){
+  const seen = new Set(), ids = [];
+  for(const tok of String(raw || '').split(/[\s,;]+/)){
+    const num = tok.replace(/^CASO-?/i, '').replace(/\D/g, '');
+    if(!num) continue;
+    const fid = 'CASO-' + num;
+    if(seen.has(fid)) continue;
+    seen.add(fid);
+    ids.push(fid);
+  }
+  return ids;
+}
+
+/* Ação do card "Limpar cache de casos específicos" no Admin Mode. */
+function clearCacheFromInput(){
+  const inp = document.getElementById('cache-ids');
+  const box = document.getElementById('cache-ids-result');
+  const ids = parseCacheIds(inp.value);
+  box.style.display = 'block';
+  if(!ids.length){
+    box.innerHTML = '<span style="color:var(--rtx)">Nenhum ID reconhecido. Informe os números dos casos.</span>';
+    return;
+  }
+  if(ids.length > CACHE_IDS_MAX){
+    box.innerHTML = `<span style="color:var(--rtx)">Máximo de ${CACHE_IDS_MAX} casos por vez (${ids.length} informados).</span>`;
+    return;
+  }
+  showConfirm('Limpar cache destes casos',
+    `As fotos de <b>${ids.length} caso(s)</b> serão lidas de novo no Google Drive na próxima abertura. Nenhum arquivo do Drive é apagado. Vale só para a base ativa.`,
+    [{label:'Casos', val: ids.join(', ')}],
+    async () => {
+      const r = await clearCacheBatch(ids);
+      if(!r){ box.innerHTML = '<span style="color:var(--rtx)">Falha na chamada ao servidor.</span>'; return; }
+      if(!r.ok){ box.innerHTML = `<span style="color:var(--rtx)">${esc(apiErrText(r))}</span>`; return; }
+      box.innerHTML = `<div style="color:var(--gtx);font-weight:600">✓ ${r.limpos.length} caso(s) limpo(s) · ${r.thumbs} thumb(s) removida(s)</div>`
+        + (r.limpos.length ? `<div style="margin-top:.35rem;color:var(--tx2)">Limpos: ${esc(r.limpos.join(', '))}</div>` : '')
+        + (r.sem_cache && r.sem_cache.length
+            ? `<div style="margin-top:.35rem;color:var(--atx)">Já estavam sem cache: ${esc(r.sem_cache.join(', '))}</div>` : '');
+      inp.value = '';
+      if(typeof renderGrid === 'function') renderGrid();
+    }
+  );
 }

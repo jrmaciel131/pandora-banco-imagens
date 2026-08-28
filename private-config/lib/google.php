@@ -21,6 +21,10 @@ class GoogleAPI {
     private $token = null;
     private $exp   = 0;
 
+    /* Conexão cURL reaproveitada por streamDriveFile() dentro do mesmo request,
+       para não repetir o handshake TLS a cada arquivo do download em lote. */
+    private $dlHandle = null;
+
     private string $spreadsheetId;
     private string $sheetName;
     private string $driveFolderId;
@@ -402,7 +406,9 @@ class GoogleAPI {
         foreach (array_chunk($folderIds,30) as $chunk) {
             $parents=implode(' or ',array_map(fn($id)=>"'$id' in parents",$chunk));
             $q=urlencode("($parents) and name contains '$caso_id' and trashed=false");
-            $resp=hget("https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,mimeType,thumbnailLink,webViewLink)&pageSize=100",["Authorization: Bearer $tok"]);
+            // `size` vem de graça nesta mesma listagem e é o que permite prever
+            // o tamanho do ZIP antes de começar a baixar (progresso em %).
+            $resp=hget("https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,mimeType,size,thumbnailLink,webViewLink)&pageSize=100",["Authorization: Bearer $tok"]);
             // Falha de transporte ou erro da API abortam a busca em vez de
             // seguir adiante: um resultado parcial/vazio seria gravado no
             // cache como "caso sem fotos" e mascararia o problema real.
@@ -460,6 +466,7 @@ class GoogleAPI {
             $photos[]=[
                 'id'           =>$f['id'],
                 'name'         =>$name,
+                'size'         =>isset($f['size']) ? (int)$f['size'] : null,
                 'mimeType'     =>$mime,
                 'isVideo'      =>$isVid,
                 'isWebp'       =>$isWebp,
@@ -480,6 +487,55 @@ class GoogleAPI {
         });
 
         DB::setThumbCache($caso_id,$photos);
+        return $photos;
+    }
+
+    /**
+     * Preenche o `size` das fotos de um caso que foram cacheadas antes de o
+     * campo passar a ser pedido ao Drive.
+     *
+     * Custa UMA listagem por caso (não uma por arquivo) e devolve as fotos já
+     * com os tamanhos, regravando o cache para não repetir na próxima vez. O
+     * cache de thumbs tem TTL de 30 dias, então sem esse reparo o progresso em
+     * porcentagem só apareceria conforme os casos fossem expirando.
+     *
+     * Falha de rede aqui não é fatal: devolve o que tinha e quem chama segue
+     * sem a previsão de tamanho.
+     *
+     * @param array $photos Saída de getDrivePhotos()
+     * @return array As mesmas fotos, com `size` preenchido onde foi possível
+     */
+    public function fillMissingSizes(string $caso_id, array $photos): array {
+        $faltando = array_filter($photos, fn($p) => !isset($p['size']) || $p['size'] === null);
+        if (!$faltando) return $photos;
+        try {
+            $tok = $this->getToken();
+            $mapa = [];
+            foreach (array_chunk($this->getAllFolderIds(), 30) as $chunk) {
+                $parents = implode(' or ', array_map(fn($id) => "'$id' in parents", $chunk));
+                $q = urlencode("($parents) and name contains '$caso_id' and trashed=false");
+                $resp = hget("https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,size)&pageSize=100",
+                             ["Authorization: Bearer $tok"]);
+                if (!$resp) return $photos;
+                $d = json_decode($resp, true);
+                if (isset($d['error'])) return $photos;
+                foreach (($d['files'] ?? []) as $f) {
+                    if (isset($f['size'])) $mapa[$f['id']] = (int)$f['size'];
+                }
+            }
+            if (!$mapa) return $photos;
+            $mudou = false;
+            foreach ($photos as &$p) {
+                if ((!isset($p['size']) || $p['size'] === null) && isset($mapa[$p['id']])) {
+                    $p['size'] = $mapa[$p['id']];
+                    $mudou = true;
+                }
+            }
+            unset($p);
+            if ($mudou) DB::setThumbCache($caso_id, $photos);
+        } catch (Throwable $e) {
+            // Sem tamanho o download continua funcionando, só sem a previsão.
+        }
         return $photos;
     }
 
@@ -629,6 +685,106 @@ class GoogleAPI {
             'name' => $m['name'],
             'mime' => $m['mimeType'] ?? 'application/octet-stream',
         ];
+    }
+
+    /**
+     * Baixa um arquivo do Drive entregando os bytes em pedaços para o callback,
+     * sem nunca manter o arquivo inteiro em memória. É o que o empacotamento em
+     * lote usa: o ZIP sai pela resposta enquanto ainda está sendo baixado.
+     *
+     * Diferenças em relação a downloadDriveFile(), que continua servindo o
+     * download de um arquivo só:
+     *   - Não faz a chamada de metadados. Quem chama em lote já tem o nome do
+     *     arquivo pela listagem, e essa viagem extra ao Google, multiplicada
+     *     pela quantidade de fotos, era boa parte da demora.
+     *   - Reaproveita a mesma conexão cURL entre chamadas do mesmo request,
+     *     economizando um handshake TLS por arquivo.
+     *
+     * O status HTTP chega antes do corpo, então uma resposta de erro do Drive
+     * (JSON pequeno) é capturada e devolvida em vez de ser escrita no ZIP.
+     *
+     * @param callable $write function(string $chunk): void
+     * @return array{ok:bool, bytes:int, error?:string}
+     */
+    public function streamDriveFile(string $fileId, callable $write): array {
+        $tok = $this->getToken();
+        $url = "https://www.googleapis.com/drive/v3/files/".urlencode($fileId)."?alt=media";
+        $bytes = 0;
+
+        if (function_exists('curl_init')) {
+            if ($this->dlHandle === null) $this->dlHandle = curl_init();
+            $ch     = $this->dlHandle;
+            $status = 0;
+            $errBody = '';
+            curl_setopt_array($ch, [
+                CURLOPT_URL            => $url,
+                CURLOPT_HTTPHEADER     => ["Authorization: Bearer $tok"],
+                CURLOPT_RETURNTRANSFER => false,
+                CURLOPT_HEADER         => false,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_MAXREDIRS      => 5,
+                CURLOPT_SSL_VERIFYPEER => true,
+                CURLOPT_SSL_VERIFYHOST => 2,
+                CURLOPT_CONNECTTIMEOUT => 20,
+                CURLOPT_TIMEOUT        => 600,
+                CURLOPT_HEADERFUNCTION => function ($ch, $line) use (&$status) {
+                    if (preg_match('#^HTTP/\S+\s+(\d{3})#', $line, $m)) $status = (int)$m[1];
+                    return strlen($line);
+                },
+                CURLOPT_WRITEFUNCTION  => function ($ch, $chunk) use ($write, &$bytes, &$status, &$errBody) {
+                    $n = strlen($chunk);
+                    if ($status !== 200) {
+                        // Corpo de erro: guarda um trecho para a mensagem, não vai pro ZIP.
+                        if (strlen($errBody) < 2048) $errBody .= $chunk;
+                        return $n;
+                    }
+                    $bytes += $n;
+                    $write($chunk);
+                    return $n;
+                },
+            ]);
+            $ok = curl_exec($ch);
+            if ($ok === false) {
+                return ['ok'=>false, 'bytes'=>$bytes, 'error'=>'cURL: '.curl_error($ch)];
+            }
+            if ($status !== 200) {
+                $j   = json_decode($errBody, true);
+                $msg = $j['error']['message'] ?? trim(substr($errBody, 0, 200));
+                return ['ok'=>false, 'bytes'=>0, 'error'=>"Drive HTTP {$status}".($msg !== '' ? ": {$msg}" : '')];
+            }
+            return ['ok'=>true, 'bytes'=>$bytes];
+        }
+
+        // Sem cURL: stream wrapper. Continua sem carregar o arquivo inteiro,
+        // só perde o reuso de conexão.
+        $ctx = stream_context_create(['http'=>[
+            'method'        => 'GET',
+            'header'        => "Authorization: Bearer $tok\r\n",
+            'timeout'       => 600,
+            'ignore_errors' => true,
+        ]]);
+        $fh = @fopen($url, 'rb', false, $ctx);
+        if (!$fh) return ['ok'=>false, 'bytes'=>0, 'error'=>'Falha ao abrir o arquivo no Drive.'.hLastError()];
+        $status = 0;
+        foreach ($http_response_header ?? [] as $h) {
+            if (preg_match('#^HTTP/\S+\s+(\d{3})#', $h, $m)) $status = (int)$m[1];
+        }
+        if ($status !== 200) {
+            $body = stream_get_contents($fh, 2048);
+            fclose($fh);
+            $j   = json_decode((string)$body, true);
+            $msg = $j['error']['message'] ?? '';
+            return ['ok'=>false, 'bytes'=>0, 'error'=>"Drive HTTP {$status}".($msg !== '' ? ": {$msg}" : '')];
+        }
+        while (!feof($fh)) {
+            $chunk = fread($fh, 262144);
+            if ($chunk === false) break;
+            if ($chunk === '') continue;
+            $bytes += strlen($chunk);
+            $write($chunk);
+        }
+        fclose($fh);
+        return ['ok'=>true, 'bytes'=>$bytes];
     }
 
     /**

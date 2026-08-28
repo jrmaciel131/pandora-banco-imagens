@@ -267,7 +267,8 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
             <div style="font-size:13px;font-weight:600;flex:1" id="bc">0 selecionados</div>
             <button class="btn bp" style="padding:6px 13px;font-size:12px" onclick="openBulkApply()">Registrar uso nos selecionados</button>
             <button class="btn bs" style="padding:6px 13px;font-size:12px" onclick="openBulkTag()">🏷 Aplicar tag</button>
-            <button class="btn bs" style="padding:6px 13px;font-size:12px" onclick="downloadBulkZip()" title="Até 30 casos por download">📦 Baixar (ZIP)</button>
+            <button class="btn bs" style="padding:6px 13px;font-size:12px" onclick="openDownloadPicker()" title="Escolha quais versões entram no ZIP. Até 30 casos por download">📦 Baixar (ZIP)</button>
+            <button class="btn bs" style="padding:6px 13px;font-size:12px" onclick="bulkClearCache()" title="Recarrega as fotos destes casos direto do Drive na próxima abertura">🗑 Limpar cache</button>
             <button class="btn bs" style="padding:6px 13px;font-size:12px" onclick="clearSel()">Limpar seleção</button>
           </div>
 
@@ -328,6 +329,17 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
           <button class="btn bs" id="adminmode-toggle" style="padding:7px 14px;font-size:13px" onclick="toggleGodModeVisual()">👁 Ativar métricas visuais</button>
           <button class="btn bd-r" style="padding:7px 14px;font-size:13px" onclick="confirmClearAllCache()">🗑 Limpar cache global</button>
         </div>
+      </div>
+
+      <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:.35rem">🧹 Limpar cache de casos específicos</h3>
+        <p style="font-size:12px;color:var(--tx2);margin-bottom:.75rem">Use quando arquivos entrarem na pasta errada no Drive: depois de removê-los de lá, o caso continua mostrando as fotos antigas porque o cache de thumbs dura 30 dias. Cole os IDs separados por vírgula, espaço ou quebra de linha (com ou sem o prefixo CASO-). Máximo de 100 por vez, e vale só para a base ativa.</p>
+        <textarea id="cache-ids" rows="3" placeholder="244, 245, 246&#10;CASO-247 CASO-248" style="width:100%;padding:8px 10px;border:1px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none;resize:vertical;font-family:inherit"></textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:.6rem">
+          <button class="btn bd-r" style="padding:7px 14px;font-size:13px" onclick="clearCacheFromInput()">🗑 Limpar cache dos IDs</button>
+          <button class="btn bs" style="padding:7px 14px;font-size:13px" onclick="document.getElementById('cache-ids').value='';document.getElementById('cache-ids-result').style.display='none'">Limpar campo</button>
+        </div>
+        <div id="cache-ids-result" style="display:none;background:var(--bg);border-radius:var(--rs);padding:.85rem 1rem;font-size:13px;margin-top:.75rem"></div>
       </div>
 
       <div style="background:var(--sf);border:1px solid var(--bd);border-radius:var(--r);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)">
@@ -644,6 +656,15 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
         <button class="btn bs" onclick="this.closest('.ov').classList.remove('open')">Cancelar</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- Seleção de versões antes do download em lote -->
+<div class="ov" id="dlv" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal" style="max-width:560px">
+    <div class="mh"><div class="mt">O que baixar</div><button class="mx" onclick="this.closest('.ov').classList.remove('open')">×</button></div>
+    <div id="dl-body" style="padding:0 1.25rem;max-height:60vh;overflow-y:auto"></div>
+    <div id="dl-foot"></div>
   </div>
 </div>
 

@@ -245,7 +245,7 @@ Todas as requisições são despachadas pelo front controller `api/handler.php`.
 
 | Ação           | Método | Descrição                                                                |
 |----------------|:------:|--------------------------------------------------------------------------|
-| `clear_cache`  | POST   | Limpa cache de um caso ou de toda a base; apaga thumbnails locais.       |
+| `clear_cache`  | POST   | Limpa o cache de um caso (`caso_id`), de um lote (`caso_ids`) ou de toda a base (admin); apaga as thumbnails locais. |
 | `speed_test`   | GET    | Compara o tempo de resposta entre Drive e cache local (admin).           |
 | `diagnostico`  | GET    | Health-check completo do ambiente (admin).                               |
 | `test_log`     | GET    | Diagnóstico do `audit_log`: grava e relê uma entrada.                    |
@@ -267,7 +267,8 @@ Todas as operações de escrita em arquivos JSON usam o helper `withJsonLock()` 
 | Ação              | Método | Conteúdo                                                                   |
 |-------------------|:------:|----------------------------------------------------------------------------|
 | `download_photo`  | GET    | Stream do arquivo individual do Drive.                                     |
-| `download_bulk`   | POST   | ZIP com até 30 casos. Cada subpasta no ZIP corresponde ao identificador.   |
+| `download_bulk`   | POST   | ZIP com até 30 casos. Cada subpasta no ZIP corresponde ao identificador. **(v23.16)** Escrito em fluxo, sem montar o pacote antes de responder: evita o 524 do Cloudflare. Falhas parciais viram `_ERROS.txt` dentro do próprio ZIP. **(v23.17)** Manda o tamanho previsto em `X-Zip-Total`. **(v23.18)** Aceita `file_ids` com a seleção do usuário; só imagem e vídeo entram. |
+| `bulk_manifest`   | POST   | **(v23.18)** Inventário dos arquivos dos casos selecionados, classificado em logo / formato / versão e com tamanho, para a janela de seleção do download. |
 
 ---
 
@@ -322,6 +323,14 @@ Ações que invalidam parcialmente o cache:
 
 - Qualquer escrita em `updateCaso*` invalida `sheet_cache` da base ativa.
 - `clear_cache` apaga as entradas de `thumb_cache` e os arquivos físicos correspondentes.
+  - `caso_id` limpa um caso; `caso_ids` (lista separada por vírgula, espaço ou quebra de linha, teto de
+    `CLEAR_CACHE_MAX_IDS` = 100) limpa um lote; sem nenhum dos dois, limpa a base inteira (admin).
+  - O lote existe porque `THUMB_CACHE_TTL` é de 30 dias: quando um arquivo entra na pasta errada no
+    Drive e depois é removido de lá, os casos afetados continuam exibindo a listagem antiga até a
+    limpeza. Na interface: barra de seleção da grade (botão "Limpar cache") e Admin Mode
+    ("Limpar cache de casos específicos", por lista de IDs). A operação é registrada no `audit_log`
+    como `clear_cache_batch`.
+  - `folder_cache` não entra no lote: ele é global e expira sozinho em `FOLDER_CACHE_TTL` (1 hora).
 - O cache warmer (`api/cron.php`) percorre todas as bases e regenera o cache faltante.
 
 O download das thumbnails é paralelizado por meio de stream contexts não-bloqueantes (`GoogleAPI::downloadThumbsBatch()`), reduzindo o tempo total de N×T para aproximadamente max(T).
