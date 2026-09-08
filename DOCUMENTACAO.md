@@ -67,7 +67,7 @@ raizdosite/
 ├── DEPLOY.md                              Notas de deploy e hardening do servidor.
 ├── DOCUMENTACAO.md                        Este documento.
 │
-├── seu-dominio.com/   Document root público.
+├── adm1-projectcasos.euemeunegocio.com/   Document root público.
 │   ├── index.php                          Markup principal; gera cache busting automático e injeta o build esperado.
 │   ├── ajuda.html                         Documentação interna em formato de tutorial.
 │   ├── 403.html / 404.html / 500.html     Páginas de erro com redirect automático.
@@ -135,7 +135,7 @@ Todas as constantes globais ficam em `private-config/config.php`. As principais 
 | `MAX_LOGIN_ATTEMPTS`    | Tentativas antes do bloqueio (por usuário+dispositivo desde v21).         |
 | `LOGIN_BLOCK_MINUTES`   | Duração do bloqueio (min).                                                |
 | `CRON_KEY`              | Chave necessária para invocar o cache warmer via HTTP.                    |
-| `DISTANCE_RADIUS_KM`    | Raio mínimo (km) entre uma cidade nova e qualquer já em uso no mesmo caso. Default: 80. Apenas admin pode prosseguir em caso de conflito. **v21.2:** o valor pode ser sobrescrito em runtime por `private-config/distance_config.json` (gravado pelo painel admin); cidades coringa (raio reduzido) em `distance_overrides.json` — em pares mistos vale `min(raioA, raioB)`. |
+| `DISTANCE_RADIUS_KM`    | Raio mínimo (km) entre uma cidade nova e qualquer já em uso no mesmo caso. Default: 80. Apenas admin pode prosseguir em caso de conflito. **v21.2:** o valor pode ser sobrescrito em runtime por `private-config/distance_config.json` (gravado pelo painel admin); cidades coringa (raio reduzido) em `distance_overrides.json` — em pares mistos vale `min(raioA, raioB)`. **(v23.21)** Acima dele existe o raio de atenção (`alert_radius_km`, dobro do mínimo por padrão), faixa em que o registro só pede confirmação. |
 
 ### Bases
 
@@ -218,8 +218,8 @@ Todas as requisições são despachadas pelo front controller `api/handler.php`.
 | `bulk_preflight`| POST   | **(v21.1)** Verifica em lote antes do registro em massa: cidade-block, bloqueio, distância. Devolve `errors[]` e `warns[]`. **(v23.15)** Aceita `entries` (JSON array de trios) para registrar vários locais de uma vez; o formato antigo `uf`/`cidade`/`profissional` segue valendo como uma linha. |
 | `audit_data`    | GET    | **(v21.1, admin)** Varre todos os casos de todas as bases procurando UFs inválidas, cidades não reconhecidas pelo CSV (com sugestões fuzzy via Levenshtein), cidades cadastradas em UF errada e duplicatas com escritas diferentes. Usado pra limpar a planilha antes da validação por distância funcionar bem. |
 | `audit_distances`     | GET    | **(v21.2, admin)** Simula a regra de raio mínimo sobre os casos existentes: aponta pares de cidades no mesmo caso a uma distância em linha reta menor ou igual ao raio efetivo do par (`min(raioA, raioB)`). |
-| `get_distance_config` | GET    | **(v21.2, admin)** Retorna o `DISTANCE_RADIUS_KM` em vigor (lê o override de `distance_config.json` quando presente). |
-| `set_distance_config` | POST   | **(v21.2, admin)** Grava o novo raio padrão em `distance_config.json` (faixa 1–5000 km). Vale a partir da próxima requisição. |
+| `get_distance_config` | GET    | **(v21.2, admin)** Retorna o `DISTANCE_RADIUS_KM` em vigor (lê o override de `distance_config.json` quando presente). **(v23.21)** Devolve também o `alert_radius_km` efetivo. |
+| `set_distance_config` | POST   | **(v21.2, admin)** Grava o novo raio padrão em `distance_config.json` (faixa 1–5000 km). Vale a partir da próxima requisição. **(v23.21)** Aceita `alert_radius_km` (≥ raio mínimo); em branco apaga o valor gravado e volta ao dobro. |
 | `list_distance_overrides`  | GET    | **(v21.2, admin)** Lista as cidades coringa cadastradas em `distance_overrides.json`, já resolvendo o nome canônico pelo CSV de coordenadas. |
 | `add_distance_override`    | POST   | **(v21.2, admin)** Cadastra/atualiza uma cidade coringa (UF + cidade do CSV + raio em km). Recusa raio maior que o padrão. |
 | `remove_distance_override` | POST   | **(v21.2, admin)** Remove uma cidade coringa pela chave `UF\|CIDADE_NORMALIZADA`. |
@@ -267,7 +267,7 @@ Todas as operações de escrita em arquivos JSON usam o helper `withJsonLock()` 
 | Ação              | Método | Conteúdo                                                                   |
 |-------------------|:------:|----------------------------------------------------------------------------|
 | `download_photo`  | GET    | Stream do arquivo individual do Drive.                                     |
-| `download_bulk`   | POST   | ZIP com até 30 casos. Cada subpasta no ZIP corresponde ao identificador. **(v23.16)** Escrito em fluxo, sem montar o pacote antes de responder: evita o 524 do Cloudflare. Falhas parciais viram `_ERROS.txt` dentro do próprio ZIP. **(v23.17)** Manda o tamanho previsto em `X-Zip-Total`. **(v23.18)** Aceita `file_ids` com a seleção do usuário; só imagem e vídeo entram. |
+| `download_bulk`   | POST   | ZIP com até 30 casos. Cada subpasta no ZIP corresponde ao identificador. **(v23.16)** Escrito em fluxo, sem montar o pacote antes de responder: evita o 524 do Cloudflare. Falhas parciais viram `_ERROS.txt` dentro do próprio ZIP. **(v23.17)** Manda o tamanho previsto em `X-Zip-Total`. **(v23.18)** Aceita `file_ids` com a seleção do usuário; só imagem e vídeo entram. **(v23.21)** Com `flat=1` o pacote sai sem subpastas, e nomes repetidos entre casos ganham o ID do caso na frente. |
 | `bulk_manifest`   | POST   | **(v23.18)** Inventário dos arquivos dos casos selecionados, classificado em logo / formato / versão e com tamanho, para a janela de seleção do download. |
 
 ---
@@ -466,7 +466,7 @@ O script `api/cron.php` percorre todas as bases configuradas e força a recriaç
 
 ```
 # CLI (DreamHost)
-/usr/local/php83/bin/php /home/SEU_USER/seu-dominio.com/api/cron.php
+/usr/local/php83/bin/php /home/SEU_USER/adm1-projectcasos.../api/cron.php
 
 # HTTP via curl (preferido sobre ?key=)
 curl -s -H "X-Cron-Key: SEU_CRON_KEY" https://seu-site.com/api/cron.php
@@ -498,6 +498,112 @@ O endpoint `diagnostico` (admin) verifica:
 
 ## 11. Histórico de mudanças
 
+### v23.21 (2026-09-08)
+
+**Estrutura do ZIP, faixa de atenção na regra de distância e filtro de interseção por profissional.**
+
+O download em lote passou a perguntar como o pacote deve sair: uma subpasta por caso (padrão de sempre) ou todos os arquivos soltos na raiz. A escolha fica em `localStorage` (`bi_dl_flat`) e vai ao backend em `flat`. Sem subpastas dois casos podem trazer arquivos de mesmo nome; o primeiro mantém o nome original e os seguintes entram como `CASO-XXX - nome.jpg`, com sufixo numérico se ainda assim colidirem, então nenhum arquivo se perde na extração.
+
+A regra de distância ganhou uma segunda faixa. O raio mínimo continua bloqueando (usuário comum barrado, admin confirma com `force`), e acima dele existe agora o **raio de atenção** (`alert_radius_km` em `distance_config.json`, editável no painel admin, igual ao dobro do mínimo quando não informado): nessa faixa qualquer usuário registra, mas só depois de confirmar. O gatilho foi concreto: com raio de 15 km, São Paulo a 15,5 km de Osasco passava sem aviso nenhum, e meio quilômetro de diferença não é visível para quem registra. `findDistanceProximity()` mede todas as cidades do caso e devolve `bloqueios`, `alertas` e `proxima`; `findDistanceConflicts()` virou atalho para os bloqueios. Os três pontos de registro (`add_uso`, `add_uso_batch`, `bulk_preflight`) devolvem `warn_detalhes` estruturado, e o frontend troca a faixa inline e o `confirm()` do navegador por um modal dedicado (`showDistanceWarn()`), que mostra caso, cidade nova, de quem está perto, a distância medida e o limite aplicado.
+
+O filtro de profissional ganhou o modo **"usam juntos"**. Com dois ou mais nomes, o padrão segue mostrando a união dos casos de cada um; no modo novo `matchesProfFilter()` exige que todos os nomes tenham correspondência no mesmo caso, que é como achar os poucos casos em comum entre dois clientes. Contadores, nota de escopo, chips de filtro ativo e o PDF do visualizador seguem o mesmo modo.
+
+### v23.20 (2026-08-28)
+
+**Correção: o profissional deixa de ser duplicado quando atua em mais de uma cidade do caso.** Registrando duas cidades para a mesma pessoa, a coluna de clientes ficava com o nome repetido ("FLÁVIA AMORIM/FLÁVIA AMORIM") enquanto a UF aparecia uma vez só.
+
+As três colunas são listas independentes desde a v21.1, quando a UF passou a ser gravada como conjunto único e o alinhamento por índice entre elas deixou de valer (o `remove_item` remove um item sem tocar nas listas paralelas). O profissional tinha ficado de fora dessa regra: `add_uso` e `add_uso_batch` anexavam o nome a cada linha registrada.
+
+Agora os dois caminhos passam pelo helper `profJaRegistrado()`, que compara ignorando caixa e espaços nas pontas, o mesmo critério da checagem de duplicidade do registro em massa. A grafia já gravada é preservada. Cidade continua entrando sempre, porque cidade repetida no caso já é barrada antes da escrita.
+
+Casos gravados antes desta versão mantêm o nome repetido até serem editados.
+
+### v23.19 (2026-08-28)
+
+**Limpeza de cache de casos específicos, em lote.** A ação `clear_cache` passou a aceitar `caso_ids`, uma lista separada por vírgula, espaço ou quebra de linha, além do `caso_id` único e da limpeza global. Para cada ID ela apaga a linha em `thumb_cache` e as thumbnails físicas correspondentes; a listagem volta a ser lida do Drive na próxima abertura do caso.
+
+O motivo é o TTL: `THUMB_CACHE_TTL` é de 30 dias. Quando um arquivo entra na pasta errada no Drive e depois é retirado de lá, o caso afetado continua exibindo a listagem antiga, e até aqui a correção era limpar caso a caso pelo painel ou zerar o cache da base inteira.
+
+Dois pontos de entrada na interface, os dois com confirmação listando os IDs antes de executar:
+
+- **Barra de seleção da grade**, botão "Limpar cache": age sobre os casos marcados.
+- **Admin Mode**, card "Limpar cache de casos específicos": aceita a lista colada, com ou sem o prefixo `CASO-`, e informa quais IDs já estavam sem cache (útil para achar ID digitado errado).
+
+Teto de `CLEAR_CACHE_MAX_IDS` (100) por chamada, porque cada caso limpo vira uma releitura no Drive na próxima visualização. A operação é registrada no `audit_log` como `clear_cache_batch`. O `folder_cache` fica de fora de propósito: é global e expira sozinho em `FOLDER_CACHE_TTL` (1 hora).
+
+### v23.18 (2026-08-27)
+
+**Seletor de versões antes do download em lote.** O botão "Baixar (ZIP)" passa por uma janela onde se escolhe o que entra no pacote, em três eixos: **logo** (sem logo, LH, EH, NA), **formato** (VNI, VOI, QNI, QOI e os equivalentes de vídeo) e **versão** (V1 em diante). Cada opção mostra quantos arquivos e quantos bytes acrescenta, e o rodapé mostra o total selecionado e quanto se economiza. Vêm marcados NA e os formatos normais (VNI/QNI); se o lote não tiver o que o padrão pede, marca tudo daquele eixo em vez de abrir vazio.
+
+O motivo é peso: o mesmo par de fotos costuma existir em três marcas e dois enquadramentos. Na base PH, os arquivos com NA são cerca de um quarto do acervo, então o padrão corta perto de três quartos do download.
+
+Novo endpoint `bulk_manifest` devolve o inventário classificado dos casos selecionados (sai do cache de fotos, é barato), e `download_bulk` passou a aceitar `file_ids` com a escolha do usuário, conferidos contra os arquivos dos casos pedidos.
+
+**Classificação por token, não por sufixo.** A nomenclatura tem ordem livre: a base tem 423 arquivos `VNI-NA` e 165 `NA-VNI`, 333 `LH-QNI` e 19 `QNI-LH`. A classe `AssetName` quebra o nome em tokens e classifica um a um. Verificado contra os 4434 arquivos do acervo: apenas 6 (0,1%) ficam sem formato reconhecido.
+
+Achados do levantamento que mudaram o desenho:
+
+- O sufixo de formato é `[V|Q][N|O][I|V]`, não só `...I`: existem 44 `VNV` e 9 `VOV`, que são vídeo, não imagem.
+- As versões vão até **V6**, não até V3, então o eixo é montado a partir do que existe.
+- Um mesmo arquivo pode ter dois logos (`CASO-100-LH-NA-QNI.jpg`) e aparece nos dois filtros.
+- Os tokens soltos `H-` (34) e `L-` (49) **não são `LH` truncado**: conferido nas imagens, esses arquivos não têm marca nenhuma, e a leitura como "sem logo" está correta. Token desconhecido não descarta o arquivo, só não contribui para nenhum eixo, então um `CASO-102-H-NA-QNI.jpg` ainda é lido como NA + QNI.
+- Só imagem e vídeo entram no pacote. O acervo tem 3 `.prproj`, que ficam de fora do download.
+
+### v23.17 (2026-08-27)
+
+**Progresso em porcentagem no download em lote.** O `size` de cada arquivo passou a ser pedido na mesma listagem do Drive que já era feita, sem chamada extra. Com ele o backend calcula o tamanho **exato** do ZIP antes de começar (só é exato porque o pacote é "store": 30 bytes de cabeçalho local + nome + dados + 16 do data descriptor por entrada, mais 46 + nome no diretório central, mais 22 no fecho) e manda em `X-Zip-Total`. O frontend mostra barra, porcentagem, velocidade e tempo restante.
+
+Vai num cabeçalho próprio e não em `Content-Length` de propósito: se um arquivo falhar no meio, o total real encolhe, e prometer um `Content-Length` que não se cumpre quebra a resposta. Assim a barra apenas não fecha em 100%.
+
+Casos cacheados antes da mudança ganham os tamanhos por `fillMissingSizes()`, uma listagem por caso, gravada de volta no cache. Sem tamanho conhecido, o cabeçalho é omitido e o frontend cai no progresso por bytes recebidos.
+
+### v23.16 (2026-08-27)
+
+**Download em lote voltou a funcionar: o ZIP agora é escrito em fluxo.** Um lote de 8 casos passava de 100 s montando o pacote e o Cloudflare derrubava a requisição com **HTTP 524** antes de qualquer byte sair do servidor, então o usuário esperava dois minutos e não recebia nada. A causa não era volume de dados: era a ordem das operações.
+
+O endpoint baixava todas as fotos do Drive, montava o ZIP inteiro em disco com `ZipArchive` e só então chamava `readfile()`. O primeiro byte da resposta só existia depois de tudo pronto, e é justamente esse tempo que o Cloudflare cronometra.
+
+O que mudou:
+
+- Novo `StreamingZip` em `handler.php`: escreve o pacote direto na resposta, arquivo a arquivo, conforme cada um chega do Drive. Usa "store" (sem compressão, já que JPEG e MP4 não comprimem) e *data descriptor* por entrada, que é o mecanismo do formato para escrita em fluxo quando o tamanho ainda não é conhecido. Verificado contra o Explorer do Windows, o `System.IO.Compression` do .NET e o `zipfile` do Python, com CRC conferido entrada por entrada.
+- Novo `GoogleAPI::streamDriveFile()`: entrega os bytes em pedaços para um callback em vez de carregar o arquivo inteiro em memória, **dispensa a chamada de metadados** (quem chama em lote já tem o nome pela listagem, e essa viagem extra ao Google multiplicada por foto era boa parte da demora) e reaproveita a mesma conexão cURL entre arquivos, economizando um handshake TLS por foto.
+- Sem mais temporários em disco e sem o lote inteiro em RAM: a memória fica no tamanho de um pedaço.
+- Falha em um arquivo não contamina o pacote: a entrada é abandonada (não entra no diretório central, some do ZIP em vez de virar um JPEG de 0 byte) e o motivo é listado num `_ERROS.txt` dentro do próprio pacote, já que depois do primeiro byte não há como responder um JSON de erro.
+- O overlay do frontend mostra bytes recebidos e velocidade, lendo o corpo da resposta em pedaços, no lugar do cronômetro que só contava segundos.
+
+### v23.15 (2026-08-27)
+
+**Registro em massa aceita vários locais por profissional.** Os dois modais (grade selecionada e "por ID") ganharam o botão **"+ Adicionar outro local"** e a lista de locais adicionados, espelhando o formulário do painel do caso: cada linha é um trio UF + cidade + profissional, e todos os casos selecionados recebem a lista inteira. Cobre o profissional que atua em mais de uma praça (Fortaleza-CE e Parnaíba-PI, Osasco-SP e Ubatuba-SP) sem precisar repetir o registro em massa uma vez por cidade.
+
+Mudanças de apoio:
+
+- `bulk_preflight` passou a aceitar `entries` (JSON array de trios), simulando a gravação linha a linha em cada caso: a segunda cidade do lote também é checada por distância contra a primeira. O formato antigo (`uf`/`cidade`/`profissional` soltos) continua aceito como uma única linha. O aviso de "estado já tem uso" sai uma vez por caso, não uma por linha.
+- A gravação passou de N chamadas `add_uso` (uma por caso) para uma `add_uso_batch` por caso: uma escrita no Sheets por caso, mesmo com vários locais.
+- Os dois modais voltam a funcionar depois de um registro. A tela de progresso substitui o `innerHTML` do modal; o formulário original agora é guardado na primeira abertura e restaurado nas seguintes, em vez de exigir reload da página.
+- Validação da linha atual passou a se guiar pela cidade: depois de "Adicionar", UF e profissional continuam preenchidos de propósito e não disparam mais "linha atual incompleta". Cidade digitada mas não escolhida na lista agora é erro explícito, em vez de ser ignorada em silêncio. Mesmo ajuste no formulário do painel do caso.
+
+### v23.14 (2026-08-07)
+
+**Bloqueio passa a ter precedência sobre a praça no PDF de disponibilidade.** Um caso bloqueado agora entra sempre na segunda lista, tenha ou não uso registrado na praça — não está disponível em lugar nenhum. A lista foi renomeada de "Em uso em <praça>" para **"Indisponíveis em <praça>"**, que cobre os dois motivos sem distinguir qual é qual (informação interna). O modal mostra quantos dos indisponíveis vêm de bloqueio.
+
+Com isso a classificação virou exaustiva: todo caso do profissional cai em exatamente uma das duas listas. Antes, a regra espelhava o `usoPredicate()` de `casos.js` — correta para a grade, onde "o bloqueio não apaga o uso" —, e o resultado era inconsistente: bloqueado fora da praça sumia do documento, bloqueado dentro da praça ia para "Em uso" com a foto, e o aviso de casos omitidos contava só os primeiros.
+
+### v23.13 (2026-08-07)
+
+**Qualidade das imagens no PDF de disponibilidade.** O modal passou a perguntar entre "Alta (~1600px)" — padrão, e reposta a cada abertura — e "Rápida (miniaturas)". Em alta as imagens vêm de `previewSrc()` (action `view_preview`), a mesma rendição do visualizador; a primeira geração materializa cada arquivo no servidor, então há uma fase de aquecimento com concorrência 4 antes de abrir a janela de impressão, para não disparar dezenas de downloads do Drive de uma vez. Em alta também entram fotos que ainda não têm miniatura no cache local, já que a rendição é gerada sob demanda.
+
+Antes o exportador usava `preview_url || thumb_url`, e como `preview_url` só é preenchido quando o arquivo **já** está materializado (`file_exists` em `previewUrl()`), na prática caía quase sempre na miniatura — daí a baixa qualidade.
+
+**Separação entre as listas.** Cada seção começa em página nova no impresso (`break-before: page`) e, na tela, ganha linha tracejada e respiro; o cabeçalho ficou maior, com régua e uma linha declarando o critério ("Nenhum uso registrado em SP." / "Já em uso em SP.").
+
+### v23.12 (2026-08-07)
+
+**PDF de disponibilidade por praça** (`assets/disponibilidade.js`). Com profissional e estado filtrados, o botão "📍 PDF de disponibilidade" gera um documento imprimível separando os casos do profissional em duas listas — livres e em uso na praça — e o usuário escolhe se leva as duas ou só uma. Serve ao cliente que vai passar a atuar em outro estado e precisa saber o que pode levar.
+
+O recorte é o mesmo da grade em modo combinado (`filterScope()`): universo = casos do profissional; status = uso na praça, por qualquer profissional. Com cidade selecionada, a classificação é por cidade — que **ignora a regra de raio mínimo** (`DISTANCE_RADIUS_KM`), então um caso usado numa cidade vizinha aparece como livre e ainda assim é barrado no registro. Por estado não há esse risco.
+
+O documento é cego a tudo que não seja o recorte: não sai nome de quem usa, cidade, outro estado nem motivo de bloqueio. A escolha da imagem por versão prioriza a variante **NA** (logo neutra); sem NA, cai em VNI, QNI, QOI; as variantes com logo de cliente (LH/EH/CL) são último recurso e disparam um aviso com os IDs afetados. Sobre o tratamento dos casos bloqueados, ver v23.14.
+
 ### v23
 
 Resumo — detalhes em `DEPLOY.md`, seção "O que mudou na v23": segredos movidos para `secrets.local.php`; proteção CSRF em todas as ações POST; Cloudflare Turnstile opcional no login; gerador de hash `api/gerar-hash.php`; sincronização Drive↔planilha automática pelo cron + botão manual; `index.html` → `index.php` com cache busting automático e verificação de build (`APP_BUILD`); edição concorrente (lock otimista + aviso de presença); export com bibliotecas locais (gif.js, lame, ffmpeg.wasm).
@@ -524,7 +630,7 @@ Resumo — detalhes em `DEPLOY.md`, seção "O que mudou na v23": segredos movid
 **Novos recursos**
 - **Multi-row no formulário "Registrar uso"**: usuário pode adicionar várias linhas (UF/cidade/profissional) antes de submeter. Endpoint atômico `add_uso_batch` valida tudo antes; se uma linha falha, nada é gravado.
 - **Tags canônicas (vocabulário controlado)**: admin gerencia a lista global em `private-config/tags.json` via nova seção em Admin Mode → Gerenciar tags. Usuários só podem aplicar tags que existem na lista. Remoção em cascata: ao apagar uma tag, ela some de todos os casos em todas as bases. Migração automática na primeira execução.
-- **Validação por distância (Haversine)**: ao registrar uso, o backend verifica se há cidades em uso a menos de `DISTANCE_RADIUS_KM` (default 80) da nova cidade, no mesmo caso. Usuário comum é bloqueado; admin recebe warning e confirma. CSV de coordenadas IBGE em `private-config/cidades_coords.csv`. Se o CSV não puder ser carregado, todo registro é bloqueado com erro explícito. **v21.2:** o raio por par passou a ser `min(raioA, raioB)` para acomodar cidades coringa (raio reduzido).
+- **Validação por distância (Haversine)**: ao registrar uso, o backend verifica se há cidades em uso a menos de `DISTANCE_RADIUS_KM` (default 80) da nova cidade, no mesmo caso. Usuário comum é bloqueado; admin recebe warning e confirma. **(v23.21)** Entre o raio mínimo e o raio de atenção o registro passa, mas só depois de o usuário confirmar o aviso. CSV de coordenadas IBGE em `private-config/cidades_coords.csv`. Se o CSV não puder ser carregado, todo registro é bloqueado com erro explícito. **v21.2:** o raio por par passou a ser `min(raioA, raioB)` para acomodar cidades coringa (raio reduzido).
 - **Atomicidade no Registro em massa**: novo endpoint `bulk_preflight` checa todos os casos selecionados ANTES de qualquer write. Se algum falha, nenhum é gravado.
 - **Auditoria de qualidade dos dados** (`audit_data`): admin pode rodar uma varredura completa que identifica UFs inválidas, cidades não reconhecidas (com sugestões fuzzy por Levenshtein), cidades cadastradas em UF errada e duplicatas. Resultado exportável como `.txt`. Ferramenta principal pra limpar a planilha antes da validação por distância funcionar bem.
 
