@@ -170,6 +170,8 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
               </div>
             </div>
             <div id="fpro-chips" style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px"></div>
+            <!-- Aparece só com dois ou mais nomes no filtro: "qualquer um" x "usam juntos" -->
+            <div id="fpro-mode" style="display:none;gap:5px;margin-top:6px"></div>
             <button class="btn bs" id="btn-export-visual" style="display:none;margin-top:8px;width:100%;justify-content:center" onclick="exportVisualizadorPDF()" title="Gera um PDF em grade com todos os casos em uso pelos profissionais filtrados (todas as versões, formato VNI/QNI ou NA)">📄 Exportar PDF dos casos</button>
             <button class="btn bs" id="btn-export-disp" style="display:none;margin-top:6px;width:100%;justify-content:center" onclick="exportDisponibilidadePDF()" title="Gera um PDF separando os casos do profissional entre livres e em uso na praça selecionada. Não mostra cidades, outros estados nem quem está usando.">📍 PDF de disponibilidade</button>
           </section>
@@ -423,9 +425,15 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
         <div style="background:var(--bg);border-radius:var(--rs);padding:.75rem 1rem;border:1px solid var(--bd);margin-bottom:.75rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <label style="font-size:12px;color:var(--tx2);font-weight:600">Raio mínimo (km):</label>
           <input type="number" id="dist-radius-input" min="1" max="5000" step="1" style="padding:6px 10px;border:1px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none;width:90px">
-          <button class="btn bp" style="padding:6px 12px;font-size:12px" onclick="saveDistanceConfig()">Salvar raio</button>
+          <label style="font-size:12px;color:var(--tx2);font-weight:600">Raio de atenção (km):</label>
+          <input type="number" id="dist-alert-input" min="1" max="5000" step="1" style="padding:6px 10px;border:1px solid var(--bds);border-radius:var(--rs);background:var(--sf);color:var(--tx);font-size:13px;outline:none;width:90px">
+          <button class="btn bp" style="padding:6px 12px;font-size:12px" onclick="saveDistanceConfig()">Salvar raios</button>
           <span id="dist-radius-msg" style="font-size:11px;color:var(--tx3)"></span>
         </div>
+        <p style="font-size:11px;color:var(--tx3);margin:-.4rem 0 .75rem;line-height:1.5">
+          <b>Raio mínimo</b>: dentro dele o registro é bloqueado para usuários comuns e exige confirmação do admin.
+          <b>Raio de atenção</b>: acima do mínimo e até esse valor, qualquer usuário ainda pode registrar, mas só depois de confirmar um aviso. Em branco, vale o dobro do raio mínimo.
+        </p>
         <div style="display:flex;gap:8px;margin-bottom:.75rem">
           <button class="btn bp" style="padding:7px 14px;font-size:13px" onclick="runDistanceAudit()">Executar auditoria de distâncias</button>
           <button class="btn bs" style="padding:7px 14px;font-size:13px;display:none" id="dist-audit-export-btn" onclick="exportDistanceAudit()">Exportar (.txt)</button>

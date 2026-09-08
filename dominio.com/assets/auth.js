@@ -140,7 +140,7 @@ async function switchBase(baseKey){
     _pageGeneration++;
     thumbCache = {};
     casos = []; filtered = [];
-    selUF = ''; selCity = ''; selProf = ''; selProfs.clear(); renderProfFilterChips(); ibgeCities = [];
+    selUF = ''; selCity = ''; selProf = ''; selProfs.clear(); profFilterMode = 'ou'; renderProfFilterChips(); ibgeCities = [];
     selMode = false; selIds = new Set(); bulkSelIds = new Set();
     _highPriorityIds = new Set();
     currentCaso = null;

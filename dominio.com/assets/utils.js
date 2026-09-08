@@ -11,7 +11,7 @@ let CSRF_TOKEN = '';
    cada alteração publicada. O index.php lê este mesmo texto do arquivo no
    servidor e o injeta em window.APP_BUILD_EXPECTED; se o que o navegador
    carregou divergir do que está no servidor, exibimos um aviso de cache. */
-const APP_BUILD = 'v23.19 (2026-08-28)';
+const APP_BUILD = 'v23.21 (2026-09-08)';
 
 (function reportBuild(){
   try {
@@ -193,6 +193,85 @@ function showConfirm(title, desc, changes, onOk){
     }
   };
   modal.classList.add('open');
+}
+
+/* Distância em km no formato do país (15.5 → "15,5"). */
+const fmtKm = n => String(n).replace('.', ',');
+
+/* ── Aviso de proximidade entre cidades ──────────────────────
+   Última porta antes de gravar um uso. Aparece sempre que a cidade nova cai
+   dentro do raio mínimo (bloqueio, vermelho) ou na faixa de atenção logo
+   acima dele (amarelo), em qualquer um dos pontos de registro: painel do
+   caso, registro em massa pela grade e registro por ID. Resolve para
+   true/false conforme a confirmação, então dá pra usar com await. */
+function showDistanceWarn(detalhes, extras){
+  const det    = Array.isArray(detalhes) ? detalhes : [];
+  const outros = (Array.isArray(extras) ? extras : []).filter(Boolean);
+  const bloqueios = det.filter(d => d.tipo === 'bloqueio');
+  const alertas   = det.filter(d => d.tipo !== 'bloqueio');
+  const grave = bloqueios.length > 0;
+  /* Vermelho para bloqueio, âmbar para a faixa de atenção — os dois pares já
+     existem no tema e funcionam no claro e no escuro. O botão de confirmar
+     usa cor fixa: precisa de texto branco legível nos dois temas. */
+  const cor    = grave ? 'var(--rtx)' : 'var(--atx)';
+  const fundo  = grave ? 'var(--rbg)' : 'var(--abg)';
+  const corBtn = grave ? '#b42318'    : '#b45309';
+
+  const MAX = 20;
+  const linha = (d) => {
+    const dentro = d.tipo === 'bloqueio';
+    const corItem = dentro ? 'var(--rtx)' : 'var(--atx)';
+    const selo = dentro
+      ? `dentro do raio mínimo de ${fmtKm(d.raio_km)} km`
+      : `faixa de atenção (até ${fmtKm(d.alerta_km)} km)`;
+    return `<div style="padding:8px 10px;border:1px solid ${corItem};border-radius:var(--rs);background:var(--sf);margin-bottom:6px">
+      <div style="font-size:13px;font-weight:600">${esc(d.caso)} · ${esc(d.uf)} / ${esc(cap(d.cidade))}${d.linha ? ` <span style="font-weight:400;color:var(--tx3)">(linha ${d.linha})</span>` : ''}</div>
+      <div style="font-size:12px;color:var(--tx2);margin-top:2px">a <b style="color:${corItem}">${fmtKm(d.distancia_km)} km</b> de <b>${esc(d.perto_de)}/${esc(d.perto_uf)}</b>, que já usa este caso</div>
+      <div style="font-size:11px;color:${corItem};margin-top:2px;font-weight:600">${selo}</div>
+    </div>`;
+  };
+
+  const lista  = [...bloqueios, ...alertas];
+  const mostra = lista.slice(0, MAX);
+  const resto  = lista.length - mostra.length;
+  const titulo = grave ? 'Cidades perto demais' : 'Cidades muito próximas';
+  const resumo = grave
+    ? `<b>${bloqueios.length}</b> registro(s) violam o raio mínimo${alertas.length ? ` e <b>${alertas.length}</b> estão na faixa de atenção` : ''}.`
+    : `<b>${alertas.length}</b> registro(s) estão na faixa de atenção: fora do raio que bloqueia, mas perto o bastante para conferir antes.`;
+
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.className = 'ov open';
+    ov.style.zIndex = '960';
+    ov.innerHTML = `<div class="modal" style="max-width:520px">
+      <div class="mh" style="background:${fundo}">
+        <div class="mt" style="color:${cor}">⚠️ ${titulo}</div>
+      </div>
+      <div style="padding:1rem 1.25rem;max-height:52vh;overflow-y:auto">
+        <p style="font-size:13px;color:var(--tx2);margin-bottom:.85rem">${resumo}</p>
+        ${mostra.map(linha).join('')}
+        ${resto > 0 ? `<div style="font-size:12px;color:var(--tx3);margin-bottom:6px">… e mais ${resto} aviso(s) do mesmo tipo.</div>` : ''}
+        ${outros.length ? `<div style="margin-top:.75rem;border-top:0.5px solid var(--bds);padding-top:.6rem">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--tx2);font-weight:700;margin-bottom:.35rem">Outros avisos</div>
+          ${outros.slice(0, 10).map(w => `<div style="font-size:12px;color:var(--tx2);padding:1px 0">• ${esc(w)}</div>`).join('')}
+          ${outros.length > 10 ? `<div style="font-size:12px;color:var(--tx3)">… e mais ${outros.length - 10}.</div>` : ''}
+        </div>` : ''}
+        <p style="font-size:13px;font-weight:600;margin-top:.9rem">Tem certeza que quer registrar assim mesmo?</p>
+      </div>
+      <div class="ma">
+        <button class="btn bs" style="flex:1;justify-content:center" data-act="nao">Cancelar</button>
+        <button class="btn bp" style="background:${corBtn};border-color:${corBtn};color:#fff" data-act="sim">Sim, tenho certeza</button>
+      </div>
+    </div>`;
+    const fechar = (v) => { ov.remove(); document.removeEventListener('keydown', onEsc); resolve(v); };
+    const onEsc = (e) => { if(e.key === 'Escape') fechar(false); };
+    ov.querySelector('[data-act="nao"]').onclick = () => fechar(false);
+    ov.querySelector('[data-act="sim"]').onclick = () => fechar(true);
+    ov.onclick = (e) => { if(e.target === ov) fechar(false); };
+    document.addEventListener('keydown', onEsc);
+    document.body.appendChild(ov);
+    ov.querySelector('[data-act="nao"]').focus();
+  });
 }
 
 function renderDD(id, list, q, onSelect){

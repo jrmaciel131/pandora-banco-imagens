@@ -793,6 +793,20 @@ async function submitUsoBatch(batch, force = false){
       if(currentCaso){ renderModalChips(); document.getElementById('addform').style.display = 'none'; }
       bgSyncCaso(currentCaso?.id);
     } else if(r.warn){
+      /* Aviso de distância abre modal próprio, impossível de passar batido.
+         Os demais (estado já em uso) seguem na faixa inline do formulário. */
+      if(Array.isArray(r.warn_detalhes) && r.warn_detalhes.length){
+        btn.innerHTML = orig;
+        btn.disabled = false;
+        const segue = await showDistanceWarn(r.warn_detalhes, r.warns);
+        if(segue){
+          pendingForce = true;
+          return submitUsoBatch(batch, true);
+        }
+        pendingForce = false;
+        updateAddBtnLabel();
+        return;
+      }
       warnEl.style.display = 'block';
       warnEl.innerHTML = `⚠️ ${esc(r.msg)}<div style="display:flex;gap:8px;margin-top:.5rem"><button class="btn bp" style="padding:5px 12px;font-size:12px" id="warn-continue-btn">Sim, continuar</button><button class="btn bs" style="padding:5px 12px;font-size:12px" onclick="document.getElementById('state-warn').style.display='none'">Cancelar</button></div>`;
       document.getElementById('warn-continue-btn').onclick = () => {

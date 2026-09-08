@@ -15,6 +15,10 @@ let _loadingCount = 0;
 let casos = [], filtered = [], page = 1;
 let selUF = '', selCity = '', selProf = '';
 let selProfs = new Set();
+/* Como os nomes do filtro de profissional se combinam:
+   'ou' = casos usados por qualquer um deles (padrão)
+   'e'  = só os casos que TODOS usam ao mesmo tempo (interseção). */
+let profFilterMode = 'ou';
 window._presetRecente = false;
 let density = localStorage.getItem('s-density') || 'normal';
 let viewMode = localStorage.getItem('s-view') || 'grid';
@@ -186,6 +190,9 @@ function onProfSearch(){
   selProf = document.getElementById('fpro').value.trim();
   const q = norm(selProf);
   autoSyncShowFilter();
+  /* O texto ainda digitado conta como mais um nome do filtro, então o seletor
+     de modo pode aparecer ou sumir a cada tecla. */
+  renderProfFilterMode();
   if(!q){ document.getElementById('prodd').classList.remove('open'); applyFilter(); return; }
   /* Debounce 150ms — Levenshtein é O(m*n) e não deve rodar a cada tecla. */
   clearTimeout(_profSearchTimer);
@@ -230,6 +237,28 @@ function renderProfFilterChips(){
   box.innerHTML = [...selProfs].map(p =>
     `<span class="tag-pill">${esc(p)}<span class="x" onclick="removeProfFilter('${esc(p).replace(/'/g,"\\'")}')" title="Remover profissional do filtro">×</span></span>`
   ).join('');
+  renderProfFilterMode();
+}
+
+/* Alterna entre "qualquer um" e "usam juntos". Só aparece com dois ou mais
+   nomes no filtro, que é quando a diferença existe. */
+function setProfFilterMode(m){
+  profFilterMode = m === 'e' ? 'e' : 'ou';
+  renderProfFilterMode();
+  applyFilter();
+}
+
+function renderProfFilterMode(){
+  const box = document.getElementById('fpro-mode');
+  if(!box) return;
+  if(profFilterQueries().length < 2){ box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.style.display = 'flex';
+  const btn = (m, txt, hint) => {
+    const on = profFilterMode === m;
+    return `<button class="btn bs" onclick="setProfFilterMode('${m}')" title="${hint}" style="flex:1;justify-content:center;padding:4px 6px;font-size:11px${on ? ';background:var(--accent);color:#fff;border-color:var(--accent)' : ''}">${txt}</button>`;
+  };
+  box.innerHTML = btn('ou', 'Qualquer um', 'Casos usados por pelo menos um dos profissionais do filtro')
+                + btn('e',  'Usam juntos', 'Só os casos que TODOS os profissionais do filtro usam ao mesmo tempo');
 }
 
 /* Consultas ativas do filtro de profissional (chips + texto digitado),
@@ -241,8 +270,12 @@ function profFilterQueries(){
   return qs;
 }
 
+/* No modo 'e' o caso só passa quando CADA nome do filtro tem alguém
+   correspondente na lista de clientes do caso — é a interseção, útil para
+   achar os poucos casos que dois profissionais usam em comum. */
 function matchesProfFilter(c, qs){
-  return c.clientes.some(p => { const pn = norm(p); return qs.some(q => pn.includes(q)); });
+  const bate = q => c.clientes.some(p => norm(p).includes(q));
+  return profFilterMode === 'e' ? qs.every(bate) : qs.some(bate);
 }
 
 /* Predicado de "em uso". Com filtro de profissional ativo, um caso bloqueado
@@ -277,6 +310,7 @@ function filterScope(){
 
 function clearFilters(){
   selUF = ''; selCity = ''; selProf = ''; selProfs.clear(); selTags.clear();
+  profFilterMode = 'ou';
   ['fuf','fci','fpro','fids','ftag'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
   renderTagFilterChips();
   renderProfFilterChips();
@@ -420,12 +454,19 @@ function renderScopeLabels(scope){
 
   const note = document.getElementById('s-scope-note');
   if(!note) return;
-  if(!scope.combinado){ note.style.display = 'none'; note.innerHTML = ''; return; }
   const nomes = [...selProfs];
   if(selProf.trim()) nomes.push(selProf.trim());
+  /* No modo "usam juntos" a nota aparece mesmo sem praça selecionada: o
+     recorte é bem menor que o normal e precisa ficar explícito. */
+  const juntos = profFilterMode === 'e' && nomes.length > 1;
+  if(!scope.combinado && !juntos){ note.style.display = 'none'; note.innerHTML = ''; return; }
+  const quem = juntos
+    ? `os casos que <b>${esc(nomes.join(' + '))}</b> usam juntos`
+    : `os casos de <b>${esc(nomes.join(', '))}</b>`;
   note.style.display = 'flex';
-  note.innerHTML = `<span>Só os casos de <b>${esc(nomes.join(', '))}</b>, `
-    + `classificados pelo uso em <b>${esc(local)}</b>.</span>`;
+  note.innerHTML = scope.combinado
+    ? `<span>Só ${quem}, classificados pelo uso em <b>${esc(local)}</b>.</span>`
+    : `<span>Só ${quem}.</span>`;
 }
 
 function renderActiveFilterChips(){
@@ -438,6 +479,9 @@ function renderActiveFilterChips(){
   if(selCity) chips.push({ label: 'Cidade: ' + cap(selCity), remove: () => { selCity = ''; document.getElementById('fci').value = ''; }});
   [...selProfs].forEach(p => chips.push({ label: 'Prof: ' + p, remove: () => { selProfs.delete(p); renderProfFilterChips(); }}));
   if(selProf) chips.push({ label: 'Prof: ' + selProf,        remove: () => { selProf = ''; document.getElementById('fpro').value = ''; }});
+  if(profFilterMode === 'e' && profFilterQueries().length > 1){
+    chips.push({ label: 'Profs: usam juntos', remove: () => { profFilterMode = 'ou'; renderProfFilterMode(); }});
+  }
   [...selTags].forEach(t => chips.push({ label: 'Tag: ' + t, remove: () => { selTags.delete(t); renderTagFilterChips(); }}));
   const ids = document.getElementById('fids')?.value?.trim();
   if(ids) chips.push({ label: 'IDs: ' + ids, remove: () => { document.getElementById('fids').value = ''; autoSyncShowFilter(); }});

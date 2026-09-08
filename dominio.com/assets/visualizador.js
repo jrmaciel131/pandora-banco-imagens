@@ -13,8 +13,10 @@ function exportVisualizadorPDF(){
   if(!nomes.length && digitado) nomes.push(digitado);
   if(!nomes.length){ showToast('Selecione ao menos um profissional no filtro.'); return; }
 
+  /* Segue o mesmo modo do filtro da grade: em "usam juntos" o PDF sai só com
+     a interseção, que é o recorte que o usuário está vendo na tela. */
   const qs = nomes.map(norm);
-  const lista = casos.filter(c => c.clientes.some(p => { const pn = norm(p); return qs.some(q => pn.includes(q)); }));
+  const lista = casos.filter(c => matchesProfFilter(c, qs));
   if(!lista.length){ showToast('Nenhum caso em uso por ' + nomes.join(', ') + '.'); return; }
 
   /* Confirmação com a contagem — o export baixa uma imagem por caso (por

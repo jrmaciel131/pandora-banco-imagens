@@ -1019,14 +1019,19 @@ let _distAuditBase = 'all';
 async function loadDistanceConfig(){
   const input = document.getElementById('dist-radius-input');
   if(!input) return;
+  const alerta = document.getElementById('dist-alert-input');
   try{
     const r = await api('get_distance_config');
-    if(r.ok) input.value = r.radius_km;
+    if(r.ok){
+      input.value = r.radius_km;
+      if(alerta) alerta.value = r.alert_radius_km;
+    }
   } catch(e){}
 }
 
 async function saveDistanceConfig(){
   const input = document.getElementById('dist-radius-input');
+  const alerta = document.getElementById('dist-alert-input');
   const msg = document.getElementById('dist-radius-msg');
   const val = parseFloat(input.value);
   if(!(val >= 1 && val <= 5000)){
@@ -1034,15 +1039,26 @@ async function saveDistanceConfig(){
     msg.style.color = 'var(--rtx)';
     return;
   }
+  /* Raio de atenção é opcional; em branco o backend assume o dobro do mínimo. */
+  const alertaTxt = alerta ? alerta.value.trim() : '';
+  const alertaVal = alertaTxt === '' ? null : parseFloat(alertaTxt);
+  if(alertaVal !== null && !(alertaVal >= val && alertaVal <= 5000)){
+    msg.textContent = `Raio de atenção deve ficar entre ${val} e 5000 km.`;
+    msg.style.color = 'var(--rtx)';
+    return;
+  }
   msg.textContent = 'Salvando...';
   msg.style.color = 'var(--tx3)';
   try{
-    const r = await api('set_distance_config', {radius_km: val}, 'POST');
+    const params = {radius_km: val};
+    if(alertaVal !== null) params.alert_radius_km = alertaVal;
+    const r = await api('set_distance_config', params, 'POST');
     if(r.ok){
       input.value = r.radius_km;
-      msg.textContent = r.msg || 'Raio salvo.';
+      if(alerta) alerta.value = r.alert_radius_km;
+      msg.textContent = r.msg || 'Raios salvos.';
       msg.style.color = 'var(--gtx)';
-      showToast(`Raio mínimo atualizado para ${r.radius_km} km`);
+      showToast(`Raio mínimo ${r.radius_km} km, atenção ${r.alert_radius_km} km`);
     } else {
       msg.textContent = r.error || 'Erro ao salvar.';
       msg.style.color = 'var(--rtx)';

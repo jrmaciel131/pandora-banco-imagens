@@ -302,15 +302,44 @@ function cidadeRadiusKm(string $uf, string $cidade): float {
 }
 
 /**
- * Lista TODAS as cidades existentes no caso que estão dentro do raio mínimo
- * da nova cidade. O raio de cada par é o MENOR entre o raio da nova cidade e
- * o da cidade existente — assim uma cidade coringa (raio reduzido) "puxa" para
- * baixo qualquer par de que participe. Retorna:
- *   - array de conflitos [{cidade, uf, distancia_km, raio_km}] — se houver
- *   - [] — se a nova cidade não tem conflito
+ * Raio de atenção (km): faixa ALÉM do raio mínimo em que a cidade nova ainda
+ * está perto o bastante para o registro pedir confirmação explícita, mesmo sem
+ * violar a regra dura. Vem de `alert_radius_km` em `distance_config.json`;
+ * sem valor gravado, vale o dobro do raio mínimo. Nunca fica abaixo dele —
+ * um raio de atenção menor que o de bloqueio não teria faixa nenhuma.
+ */
+function distanceAlertKm(): float {
+    static $cache = null;
+    if ($cache !== null) return $cache;
+    $bloqueio = defined('DISTANCE_RADIUS_KM') ? (float)DISTANCE_RADIUS_KM : 80;
+    $valor = $bloqueio * 2;
+    $path = PRIVATE_CONFIG_PATH . '/distance_config.json';
+    if (is_file($path)) {
+        $d = json_decode(@file_get_contents($path), true);
+        if (is_array($d) && isset($d['alert_radius_km'])
+            && is_numeric($d['alert_radius_km']) && $d['alert_radius_km'] > 0) {
+            $valor = (float)$d['alert_radius_km'];
+        }
+    }
+    $cache = max($valor, $bloqueio);
+    return $cache;
+}
+
+/**
+ * Mede a distância da cidade nova até TODAS as cidades já em uso no caso e
+ * separa o resultado em duas faixas:
+ *   - `bloqueios`: dentro do raio mínimo do par (regra dura)
+ *   - `alertas`:   fora do raio mínimo, mas dentro do raio de atenção
+ * `proxima` traz a cidade mais próxima medida, mesmo quando nada conflita.
+ *
+ * O raio de cada par é o MENOR entre o raio da nova cidade e o da cidade
+ * existente — assim uma cidade coringa (raio reduzido) "puxa" para baixo
+ * qualquer par de que participe.
+ *
  * Lança Exception se o CSV não puder ser carregado.
  */
-function findDistanceConflicts(string $novaUf, string $novaCidade, array $caso): array {
+function findDistanceProximity(string $novaUf, string $novaCidade, array $caso): array {
+    $out = ['bloqueios'=>[], 'alertas'=>[], 'proxima'=>null];
     $coords = loadCidadesCoords();
     if (isset($coords['_error'])) {
         throw new Exception('Validação geográfica indisponível: '.$coords['_error']);
@@ -319,11 +348,12 @@ function findDistanceConflicts(string $novaUf, string $novaCidade, array $caso):
     if (!$alvo) {
         // Cidade nova não encontrada no CSV → não dá pra calcular. Não bloqueia
         // (cidade pode ser rara/recente); a regra do raio simplesmente não se aplica.
-        return [];
+        return $out;
     }
-    $raioNova = cidadeRadiusKm($alvo['uf'], $alvo['name']);
+    $raioNova   = cidadeRadiusKm($alvo['uf'], $alvo['name']);
+    $raioAlerta = distanceAlertKm();
     $candidateUfs = $caso['ufs'] ?? [];
-    $conflitos = [];
+    $menor = null;
     foreach (($caso['cidades'] ?? []) as $cid) {
         if (!$cid) continue;
         if (normalizeCidade($cid) === normalizeCidade($novaCidade)) continue;
@@ -331,11 +361,46 @@ function findDistanceConflicts(string $novaUf, string $novaCidade, array $caso):
         if (!$ex) continue;
         $d = haversineKm($alvo['lat'], $alvo['lng'], $ex['lat'], $ex['lng']);
         $raio = min($raioNova, cidadeRadiusKm($ex['uf'], $ex['name']));
-        if ($d <= $raio) {
-            $conflitos[] = ['cidade'=>$ex['name'], 'uf'=>$ex['uf'], 'distancia_km'=>round($d, 1), 'raio_km'=>$raio];
-        }
+        $par = ['cidade'=>$ex['name'], 'uf'=>$ex['uf'], 'distancia_km'=>round($d, 1),
+                'raio_km'=>$raio, 'alerta_km'=>$raioAlerta];
+        if ($menor === null || $d < $menor) { $menor = $d; $out['proxima'] = $par; }
+        if     ($d <= $raio)       $out['bloqueios'][] = $par;
+        elseif ($d <= $raioAlerta) $out['alertas'][]   = $par;
     }
-    return $conflitos;
+    return $out;
+}
+
+/**
+ * Apenas os pares dentro do raio mínimo (regra dura), no formato antigo.
+ * Atalho para os pontos que não precisam da faixa de atenção.
+ */
+function findDistanceConflicts(string $novaUf, string $novaCidade, array $caso): array {
+    return findDistanceProximity($novaUf, $novaCidade, $caso)['bloqueios'];
+}
+
+/** Texto curto de um par medido, usado nas mensagens de erro e aviso. */
+function fmtDistPar(array $p): string {
+    return "{$p['cidade']}/{$p['uf']} ({$p['distancia_km']} km, limite {$p['raio_km']} km)";
+}
+
+/**
+ * Item estruturado de aviso de distância. O frontend usa esses campos para
+ * montar o alerta de confirmação; as mensagens de texto continuam indo junto
+ * como alternativa para quem não renderiza o detalhe.
+ */
+function distWarnItem(string $tipo, string $casoId, string $ufNova, string $cidadeNova, array $par, ?int $linha = null): array {
+    return [
+        'tipo'         => $tipo,          // 'bloqueio' (dentro do raio) ou 'alerta' (faixa de atenção)
+        'caso'         => $casoId,
+        'linha'        => $linha,
+        'uf'           => $ufNova,
+        'cidade'       => $cidadeNova,
+        'perto_uf'     => $par['uf'],
+        'perto_de'     => $par['cidade'],
+        'distancia_km' => $par['distancia_km'],
+        'raio_km'      => $par['raio_km'],
+        'alerta_km'    => $par['alerta_km'] ?? null,
+    ];
 }
 
 /**
@@ -1377,23 +1442,34 @@ switch ($action) {
 
             // Verificação geográfica: cidades em uso dentro de DISTANCE_RADIUS_KM.
             // Usuário comum é SEMPRE bloqueado (force não bypassa). Admin recebe
-            // warning e confirma com force=1 pra prosseguir.
+            // warning e confirma com force=1 pra prosseguir. Fora do raio mínimo
+            // e dentro do raio de atenção, qualquer usuário pode seguir, mas só
+            // depois de confirmar o aviso.
             try {
-                $conflitos = findDistanceConflicts($nova_uf, $nova_cid, $caso);
+                $prox = findDistanceProximity($nova_uf, $nova_cid, $caso);
             } catch (Throwable $e) {
                 echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine().' Não foi possível validar a distância — tente novamente mais tarde ou contate o administrador.']); break;
             }
+            $conflitos = $prox['bloqueios'];
+            $alertas   = $prox['alertas'];
             if (!empty($conflitos)) {
-                $lista = array_map(fn($c) => "{$c['cidade']}/{$c['uf']} ({$c['distancia_km']}km, limite {$c['raio_km']}km)", $conflitos);
+                $lista = array_map('fmtDistPar', $conflitos);
                 $msg = "Cidades em uso perto demais de ".ucwords(strtolower($nova_cid)).": ".implode(', ', $lista).".";
                 if (!$isAdmin) {
                     echo json_encode(['ok'=>false,'error'=>"{$msg} Apenas administradores podem prosseguir — contate um admin."]);
                     break;
                 }
                 if (!$force) {
-                    echo json_encode(['ok'=>false,'warn'=>true,'msg'=>"⚠️ {$msg} Continuar mesmo assim?"]);
+                    $det = array_map(fn($c) => distWarnItem('bloqueio', $caso_id, $nova_uf, $nova_cid, $c), $conflitos);
+                    echo json_encode(['ok'=>false,'warn'=>true,'msg'=>"⚠️ {$msg} Continuar mesmo assim?",'warn_detalhes'=>$det]);
                     break;
                 }
+            } elseif (!empty($alertas) && !$force) {
+                $lista = array_map('fmtDistPar', $alertas);
+                $msg = "Cidades em uso muito perto de ".ucwords(strtolower($nova_cid)).": ".implode(', ', $lista).".";
+                $det = array_map(fn($c) => distWarnItem('alerta', $caso_id, $nova_uf, $nova_cid, $c), $alertas);
+                echo json_encode(['ok'=>false,'warn'=>true,'msg'=>"⚠️ {$msg} Continuar mesmo assim?",'warn_detalhes'=>$det]);
+                break;
             }
 
             // Estado duplicado dispara warning. Após o fix da v21.1, a UF não é
@@ -1532,19 +1608,33 @@ switch ($action) {
             }
 
             // Verificação geográfica de cada linha. Considera cidades já no caso
-            // E as cidades de linhas anteriores do mesmo batch. Usuário comum é
-            // SEMPRE bloqueado (force não bypassa); admin recebe warn e confirma.
+            // E as cidades de linhas anteriores do mesmo batch. Dentro do raio
+            // mínimo, usuário comum é SEMPRE bloqueado (force não bypassa) e
+            // admin recebe warn; na faixa de atenção, qualquer usuário confirma.
             try {
                 $simulated = ['ufs'=>$caso['ufs'], 'cidades'=>$caso['cidades']];
                 $distErrs = [];
                 $distWarns = [];
+                $distDetalhes = [];
                 foreach ($clean as $i => $e) {
-                    $conf = findDistanceConflicts($e['uf'], $e['cidade'], $simulated);
-                    if (!empty($conf)) {
-                        $lista = array_map(fn($c) => "{$c['cidade']}/{$c['uf']} ({$c['distancia_km']}km, limite {$c['raio_km']}km)", $conf);
+                    $prox = findDistanceProximity($e['uf'], $e['cidade'], $simulated);
+                    if (!empty($prox['bloqueios'])) {
+                        $lista = array_map('fmtDistPar', $prox['bloqueios']);
                         $line = "Linha ".($i+1).": cidades em uso perto demais de ".ucwords(strtolower($e['cidade'])).": ".implode(', ', $lista).".";
                         if (!$isAdmin) $distErrs[] = $line;
-                        else           $distWarns[] = $line;
+                        else {
+                            $distWarns[] = $line;
+                            foreach ($prox['bloqueios'] as $p) {
+                                $distDetalhes[] = distWarnItem('bloqueio', $caso_id, $e['uf'], $e['cidade'], $p, $i + 1);
+                            }
+                        }
+                    }
+                    if (!empty($prox['alertas'])) {
+                        $lista = array_map('fmtDistPar', $prox['alertas']);
+                        $distWarns[] = "Linha ".($i+1).": cidades em uso muito perto de ".ucwords(strtolower($e['cidade'])).": ".implode(', ', $lista).".";
+                        foreach ($prox['alertas'] as $p) {
+                            $distDetalhes[] = distWarnItem('alerta', $caso_id, $e['uf'], $e['cidade'], $p, $i + 1);
+                        }
                     }
                     if (!in_array($e['uf'], $simulated['ufs'], true)) $simulated['ufs'][] = $e['uf'];
                     $simulated['cidades'][] = $e['cidade'];
@@ -1560,7 +1650,8 @@ switch ($action) {
                 $allWarns = array_merge($warns, $distWarns);
                 echo json_encode(['ok'=>false,'warn'=>true,
                     'msg'=>"ATENÇÃO: ".implode(' ', $allWarns)." Deseja continuar mesmo assim?",
-                    'warns'=>$allWarns]);
+                    'warns'=>$allWarns,
+                    'warn_detalhes'=>$distDetalhes]);
                 break;
             }
 
@@ -1633,6 +1724,7 @@ switch ($action) {
         try {
             $errs = [];
             $warns = [];
+            $warnDetalhes = [];
             /* Cidade repetida entre as linhas quebraria todos os casos de uma vez. */
             $vistas = [];
             foreach ($linhas as $e) {
@@ -1662,15 +1754,27 @@ switch ($action) {
                         continue;
                     }
                     try {
-                        $conf = findDistanceConflicts($e['uf'], $e['cidade'], $sim);
+                        $prox = findDistanceProximity($e['uf'], $e['cidade'], $sim);
                     } catch (Throwable $ex) {
                         echo json_encode(['ok'=>false,'error'=>$ex->getMessage(),'error_tipo'=>get_class($ex),'error_origem'=>basename($ex->getFile()).':'.$ex->getLine()]); break 3;
                     }
-                    if (!empty($conf)) {
-                        $lista = array_map(fn($x) => "{$x['cidade']}/{$x['uf']} ({$x['distancia_km']}km, limite {$x['raio_km']}km)", $conf);
+                    if (!empty($prox['bloqueios'])) {
+                        $lista = array_map('fmtDistPar', $prox['bloqueios']);
                         $line = "{$tag}: cidades perto demais: ".implode(', ', $lista);
                         if (!$isAdmin) $errs[] = $line;
-                        else           $warns[] = $line;
+                        else {
+                            $warns[] = $line;
+                            foreach ($prox['bloqueios'] as $p) {
+                                $warnDetalhes[] = distWarnItem('bloqueio', $cid, $e['uf'], $e['cidade'], $p);
+                            }
+                        }
+                    }
+                    if (!empty($prox['alertas'])) {
+                        $lista = array_map('fmtDistPar', $prox['alertas']);
+                        $warns[] = "{$tag}: cidades muito perto: ".implode(', ', $lista);
+                        foreach ($prox['alertas'] as $p) {
+                            $warnDetalhes[] = distWarnItem('alerta', $cid, $e['uf'], $e['cidade'], $p);
+                        }
                     }
                     /* O aviso de UF repetida olha só o que já estava no caso
                        (as demais linhas do próprio lote são intencionais) e sai
@@ -1683,7 +1787,7 @@ switch ($action) {
                     $sim['cidades'][] = $e['cidade'];
                 }
             }
-            echo json_encode(['ok'=>true, 'errors'=>$errs, 'warns'=>$warns]);
+            echo json_encode(['ok'=>true, 'errors'=>$errs, 'warns'=>$warns, 'warn_detalhes'=>$warnDetalhes]);
         } catch (Throwable $e) {
             echo json_encode(['ok'=>false,'error'=>$e->getMessage(),'error_tipo'=>get_class($e),'error_origem'=>basename($e->getFile()).':'.$e->getLine()]);
         }
@@ -2677,6 +2781,10 @@ switch ($action) {
             fn($x) => $x !== '' && preg_match('/^[A-Za-z0-9_-]{10,120}$/', $x)
         )));
 
+        /* Estrutura do pacote: por padrão cada caso vira uma subpasta; com
+           `flat` todos os arquivos ficam soltos na raiz do ZIP. */
+        $flat = !empty($_POST['flat']);
+
         $plano  = [];
         $errors = [];
         $semTamanho = false;
@@ -2696,10 +2804,38 @@ switch ($action) {
                 if (!AssetName::isMedia($nome, $p['mimeType'] ?? '')) continue;
                 if ($filtro && !isset($filtro[$p['id']])) continue;
                 if (!isset($p['size']) || $p['size'] === null) $semTamanho = true;
-                $plano[] = ['caso'=>$cid, 'id'=>$p['id'], 'name'=>$nome,
-                            'entry'=>$cid.'/'.$nome, 'size'=>(int)($p['size'] ?? 0)];
+                $limpo = str_replace(['/', '\\'], '-', $nome);
+                $plano[] = ['caso'=>$cid, 'id'=>$p['id'], 'name'=>$limpo,
+                            'entry'=>$flat ? $limpo : $cid.'/'.$limpo,
+                            'size'=>(int)($p['size'] ?? 0)];
             }
         }
+
+        /* Sem subpastas, dois casos podem trazer arquivos de mesmo nome e um
+           sobrescreveria o outro na extração. O primeiro mantém o nome
+           original; os seguintes ganham o ID do caso na frente, e um sufixo
+           numérico caso ainda assim colidam. */
+        if ($flat) {
+            $usados = [];
+            foreach ($plano as &$item) {
+                $chave = mb_strtolower($item['entry'], 'UTF-8');
+                if (isset($usados[$chave])) {
+                    $ext  = pathinfo($item['name'], PATHINFO_EXTENSION);
+                    $base = $ext !== '' ? substr($item['name'], 0, -(strlen($ext) + 1)) : $item['name'];
+                    $sufixo = $ext !== '' ? '.'.$ext : '';
+                    $n = 1;
+                    do {
+                        $tentativa = $item['caso'].' - '.$base.($n > 1 ? '-'.$n : '').$sufixo;
+                        $chave = mb_strtolower($tentativa, 'UTF-8');
+                        $n++;
+                    } while (isset($usados[$chave]));
+                    $item['entry'] = $tentativa;
+                }
+                $usados[$chave] = true;
+            }
+            unset($item);
+        }
+
         if (!$plano) {
             echo json_encode(['ok'=>false,'error'=>'Nenhum arquivo encontrado para os IDs informados.','details'=>$errors]);
             break;
@@ -2765,6 +2901,7 @@ switch ($action) {
 
         DB::log($me, 'sistema', 'download_bulk', null, [
             'ids'=>$ids, 'files'=>$totalFiles, 'bytes'=>$zip->bytesWritten(), 'errors'=>count($errors),
+            'estrutura'=>$flat ? 'raiz' : 'subpastas',
         ]);
         exit;
 
@@ -2869,19 +3006,21 @@ switch ($action) {
         echo json_encode(['ok'=>true, 'report'=>$report]);
         break;
 
-    // Lê o raio mínimo de distância atualmente em vigor (admin).
+    // Lê os raios de distância atualmente em vigor (admin).
     case 'get_distance_config':
         requireAdmin($isAdmin);
         echo json_encode([
-            'ok'        => true,
-            'radius_km' => defined('DISTANCE_RADIUS_KM') ? (float)DISTANCE_RADIUS_KM : 80,
+            'ok'              => true,
+            'radius_km'       => defined('DISTANCE_RADIUS_KM') ? (float)DISTANCE_RADIUS_KM : 80,
+            'alert_radius_km' => distanceAlertKm(),
         ]);
         break;
 
     /*
-     * Grava o raio mínimo de distância em `distance_config.json` (admin).
-     * O novo valor passa a valer a partir da próxima requisição — a constante
-     * DISTANCE_RADIUS_KM já foi definida no bootstrap deste request.
+     * Grava os raios de distância em `distance_config.json` (admin): o mínimo,
+     * que bloqueia, e o de atenção, que só pede confirmação. O novo valor passa
+     * a valer a partir da próxima requisição — a constante DISTANCE_RADIUS_KM
+     * já foi definida no bootstrap deste request.
      */
     case 'set_distance_config':
         requireAdmin($isAdmin);
@@ -2893,14 +3032,33 @@ switch ($action) {
         if ($novoRaio < 1 || $novoRaio > 5000) {
             echo json_encode(['ok'=>false,'error'=>'Raio fora do intervalo permitido (1–5000 km).']); break;
         }
+        // Raio de atenção é opcional: sem ele, o padrão continua sendo o dobro.
+        $novoAlerta = null;
+        if (isset($_POST['alert_radius_km']) && $_POST['alert_radius_km'] !== '') {
+            if (!is_numeric($_POST['alert_radius_km'])) {
+                echo json_encode(['ok'=>false,'error'=>'Raio de atenção inválido: informe um número em km.']); break;
+            }
+            $novoAlerta = round((float)$_POST['alert_radius_km'], 1);
+            if ($novoAlerta < $novoRaio || $novoAlerta > 5000) {
+                echo json_encode(['ok'=>false,'error'=>"Raio de atenção deve ficar entre {$novoRaio} e 5000 km."]); break;
+            }
+        }
         $antigo = defined('DISTANCE_RADIUS_KM') ? (float)DISTANCE_RADIUS_KM : 80;
-        withJsonLock(PRIVATE_CONFIG_PATH.'/distance_config.json', function($d) use ($novoRaio) {
+        $antigoAlerta = distanceAlertKm();
+        withJsonLock(PRIVATE_CONFIG_PATH.'/distance_config.json', function($d) use ($novoRaio, $novoAlerta) {
             if (!is_array($d)) $d = [];
             $d['radius_km'] = $novoRaio;
+            // Campo em branco apaga o valor gravado e devolve o padrão (o dobro).
+            if ($novoAlerta !== null) $d['alert_radius_km'] = $novoAlerta;
+            else                      unset($d['alert_radius_km']);
             return $d;
         });
-        DB::log($me, 'sistema', 'set_distance_config', ['radius_km'=>$antigo], ['radius_km'=>$novoRaio]);
-        echo json_encode(['ok'=>true,'radius_km'=>$novoRaio,'msg'=>"Raio atualizado para {$novoRaio} km. Vale a partir da próxima ação."]);
+        DB::log($me, 'sistema', 'set_distance_config',
+            ['radius_km'=>$antigo, 'alert_radius_km'=>$antigoAlerta],
+            ['radius_km'=>$novoRaio, 'alert_radius_km'=>$novoAlerta ?? ($novoRaio * 2)]);
+        $alertaFinal = $novoAlerta ?? ($novoRaio * 2);
+        echo json_encode(['ok'=>true,'radius_km'=>$novoRaio,'alert_radius_km'=>$alertaFinal,
+            'msg'=>"Raio mínimo {$novoRaio} km, atenção {$alertaFinal} km. Vale a partir da próxima ação."]);
         break;
 
     // Lista as cidades coringa cadastradas em distance_overrides.json (admin).

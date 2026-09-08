@@ -222,6 +222,17 @@ function bulkClearCache(){
 let dlFiles = null;                    // inventário classificado do lote atual
 let dlSel = {logo:new Set(), formato:new Set(), versao:new Set()};
 
+/* Estrutura do pacote: false = uma subpasta por caso (padrão), true = todos
+   os arquivos soltos na raiz do ZIP. A escolha fica guardada no navegador
+   porque costuma ser a mesma em todo download de um mesmo usuário. */
+let dlFlat = (() => { try { return localStorage.getItem('bi_dl_flat') === '1'; } catch(e){ return false; } })();
+
+function dlSetFlat(v){
+  dlFlat = !!v;
+  try { localStorage.setItem('bi_dl_flat', dlFlat ? '1' : '0'); } catch(e){}
+  renderDownloadPicker();
+}
+
 /* Rótulos legíveis. O que não estiver aqui aparece com o próprio código. */
 const DL_ROTULOS = {
   'SEM LOGO':'Sem logo', 'LH':'LH (Linda Harmonização)', 'EH':'EH (EH Sorriso)', 'NA':'NA',
@@ -347,9 +358,29 @@ function renderDownloadPicker(){
     </div>`;
   };
 
+  /* Estrutura do pacote. Aparece sempre, inclusive com um caso só: a escolha
+     fica guardada no navegador e esconder o controle deixaria o ZIP saindo
+     diferente do esperado sem explicação. */
+  const blocoEstrutura = () => {
+    const opcao = (flat, titulo, desc) => {
+      const on = flat === dlFlat;
+      return `<label style="display:flex;align-items:flex-start;gap:9px;padding:7px 9px;border:0.5px solid var(--bds);border-radius:var(--rs);cursor:pointer;background:${on ? 'var(--accent-soft)' : 'transparent'}">
+        <input type="radio" name="dl-estrutura" ${on ? 'checked' : ''} onchange="dlSetFlat(${flat})" style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer;margin-top:2px">
+        <span style="flex:1"><span style="font-size:13px">${titulo}</span><br><span style="font-size:11px;color:var(--tx3)">${desc}</span></span>
+      </label>`;
+    };
+    return `<div style="margin-bottom:1rem">
+      <div style="font-size:10px;color:var(--tx2);text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:.45rem">Organização do ZIP</div>
+      <div style="display:flex;flex-direction:column;gap:3px">
+        ${opcao(false, 'Uma subpasta por caso', 'CASO-123/arquivo.jpg (cada caso na sua pasta)')}
+        ${opcao(true,  'Tudo solto na raiz',    'todos os arquivos juntos, sem pastas; nome repetido ganha o ID do caso na frente')}
+      </div>
+    </div>`;
+  };
+
   document.getElementById('dl-body').innerHTML =
     `<p style="font-size:12px;color:var(--tx2);margin:.25rem 0 .9rem">${selIds.size} caso(s) selecionado(s). Marque o que deve entrar no ZIP.</p>`
-    + bloco('logo') + bloco('formato') + bloco('versao')
+    + bloco('logo') + bloco('formato') + bloco('versao') + blocoEstrutura()
     + (dlFiles._errors.length ? `<div class="berrs" style="display:block;margin-top:.5rem">${dlFiles._errors.map(e => `<div>• ${esc(e)}</div>`).join('')}</div>` : '');
 
   const sel = dlEscolhidos();
@@ -387,7 +418,7 @@ function dlBaixarSelecao(){
   const sel = dlEscolhidos();
   if(!sel.length){ showToast('Nada marcado para baixar.'); return; }
   document.getElementById('dlv').classList.remove('open');
-  downloadBulkZip(sel.map(f => f.id));
+  downloadBulkZip(sel.map(f => f.id), dlFlat);
 }
 
 /* Download em lote. O backend escreve o ZIP direto na resposta conforme baixa
@@ -395,8 +426,9 @@ function dlBaixarSelecao(){
    já chegou, em vez do cronômetro antigo que não dizia nada.
 
    `fileIds` vem do seletor de versões; sem ele o pacote leva todas as fotos e
-   vídeos dos casos selecionados. */
-async function downloadBulkZip(fileIds){
+   vídeos dos casos selecionados. `flat` empacota tudo na raiz, em vez de uma
+   subpasta por caso. */
+async function downloadBulkZip(fileIds, flat){
   if(!selIds.size){ showToast('Selecione pelo menos 1 caso.'); return; }
   if(selIds.size > 30){ showToast(`Máximo 30 casos por download. Selecionados: ${selIds.size}.`); return; }
   const ids = [...selIds].join(',');
@@ -418,6 +450,7 @@ async function downloadBulkZip(fileIds){
   try{
     const corpo = {ids};
     if(Array.isArray(fileIds) && fileIds.length) corpo.file_ids = fileIds.join(',');
+    if(flat) corpo.flat = '1';
     const resp = await fetch(`${API}?action=download_bulk`, {
       method: 'POST',
       credentials: 'same-origin',
@@ -648,12 +681,19 @@ async function runBulkRegister(t){
     return;
   }
   if(pre.warns && pre.warns.length){
-    /* Com vários locais × vários casos a lista de avisos cresce rápido; o
-       alerta mostra os primeiros e resume o resto. */
-    const shown = pre.warns.slice(0, 15);
-    const rest  = pre.warns.length - shown.length;
-    const proceed = confirm(`Atenção (${pre.warns.length} aviso(s)):\n\n${shown.join('\n')}${rest > 0 ? `\n… e mais ${rest}.` : ''}\n\nDeseja continuar mesmo assim?`);
-    if(!proceed) return;
+    /* Aviso de distância vai no modal dedicado, que mostra cada par de cidades
+       e a distância medida. Sem detalhe de distância (só estado repetido, por
+       exemplo) o aviso continua no confirm do navegador, já resumido. */
+    if(Array.isArray(pre.warn_detalhes) && pre.warn_detalhes.length){
+      const outros = pre.warns.filter(w => !/perto/i.test(w));
+      const segue = await showDistanceWarn(pre.warn_detalhes, outros);
+      if(!segue) return;
+    } else {
+      const shown = pre.warns.slice(0, 15);
+      const rest  = pre.warns.length - shown.length;
+      const proceed = confirm(`Atenção (${pre.warns.length} aviso(s)):\n\n${shown.join('\n')}${rest > 0 ? `\n… e mais ${rest}.` : ''}\n\nDeseja continuar mesmo assim?`);
+      if(!proceed) return;
+    }
   }
 
   const modal = document.querySelector(`#${f.ov} .modal`);
