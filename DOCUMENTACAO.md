@@ -223,6 +223,7 @@ Todas as requisições são despachadas pelo front controller `api/handler.php`.
 | `list_distance_overrides`  | GET    | **(v21.2, admin)** Lista as cidades coringa cadastradas em `distance_overrides.json`, já resolvendo o nome canônico pelo CSV de coordenadas. |
 | `add_distance_override`    | POST   | **(v21.2, admin)** Cadastra/atualiza uma cidade coringa (UF + cidade do CSV + raio em km). Recusa raio maior que o padrão. |
 | `remove_distance_override` | POST   | **(v21.2, admin)** Remove uma cidade coringa pela chave `UF\|CIDADE_NORMALIZADA`. |
+| `cities_near`   | POST   | **(v23.22)** Cidades dentro do raio mínimo de cada praça consultada (até 20 por chamada), com a distância de cada uma e o raio aplicado. Usa o mesmo `min(raioA, raioB)` do registro. Alimenta a classificação "livre na praça" do filtro da grade e do PDF de disponibilidade. Qualquer usuário logado. |
 | `remove_uso`    | POST   | Remove uma entrada inteira por índice.                                                 |
 | `remove_item`   | POST   | Remove uma única UF, cidade ou cliente, opcionalmente por índice.                      |
 | `set_block`     | POST   | Bloqueia caso adicionando o marcador `NA` e gravando o motivo.                         |
@@ -498,6 +499,18 @@ O endpoint `diagnostico` (admin) verifica:
 
 ## 11. Histórico de mudanças
 
+### v23.22 (2026-11-25)
+
+**O filtro de praça passa a valer várias cidades e a respeitar o raio mínimo.**
+
+O campo Cidade virou lista de chips: dá para marcar São Paulo, Piracicaba e Campinas de uma vez, inclusive de UFs diferentes (as praças já escolhidas sobrevivem à troca do estado). Com várias cidades marcadas, "Disponíveis" é o que está livre em **todas** elas e "Em uso" é o usado em pelo menos uma.
+
+Mais importante, a classificação por cidade deixou de ignorar o raio mínimo. Até aqui o status era só "existe uso registrado nesta cidade", então um caso em uso em Osasco aparecia como disponível em São Paulo (15,5 km) e o registro barrava logo depois; com o raio em 25 km a armadilha ficou maior. Agora o filtro usa a mesma régua do registro: conta como em uso na praça também o uso em qualquer cidade dentro do raio do par, `min(raio da praça, raio da vizinha)`, de modo que cidade coringa também encurta o alcance. O card diz **"Em uso perto"** nesse caso, com a cidade, a distância e a praça no título, para o status não parecer defeito.
+
+O novo endpoint `cities_near` devolve as cidades dentro do raio de cada praça (uma passada pelo CSV de coordenadas, ~12 ms para três cidades) e o frontend guarda o resultado em cache por praça. Falha de rede não trava a tela: a praça volta a valer só pelo nome exato e a nota de escopo avisa que o raio não está sendo aplicado.
+
+O PDF de disponibilidade por praça segue a mesma regra, e o texto das seções passou a dizer que "livre" inclui as cidades vizinhas dentro do raio.
+
 ### v23.21 (2026-09-08)
 
 **Estrutura do ZIP, faixa de atenção na regra de distância e filtro de interseção por profissional.**
@@ -600,7 +613,7 @@ Antes o exportador usava `preview_url || thumb_url`, e como `preview_url` só é
 
 **PDF de disponibilidade por praça** (`assets/disponibilidade.js`). Com profissional e estado filtrados, o botão "📍 PDF de disponibilidade" gera um documento imprimível separando os casos do profissional em duas listas — livres e em uso na praça — e o usuário escolhe se leva as duas ou só uma. Serve ao cliente que vai passar a atuar em outro estado e precisa saber o que pode levar.
 
-O recorte é o mesmo da grade em modo combinado (`filterScope()`): universo = casos do profissional; status = uso na praça, por qualquer profissional. Com cidade selecionada, a classificação é por cidade — que **ignora a regra de raio mínimo** (`DISTANCE_RADIUS_KM`), então um caso usado numa cidade vizinha aparece como livre e ainda assim é barrado no registro. Por estado não há esse risco.
+O recorte é o mesmo da grade em modo combinado (`filterScope()`): universo = casos do profissional; status = uso na praça, por qualquer profissional. **(v23.22)** Com cidades selecionadas, a classificação aplica o raio mínimo como o registro: conta como em uso também o uso em cidade vizinha dentro do raio do par. Antes disso o status era só o nome exato da cidade, e um caso usado na vizinhança aparecia como livre para depois ser barrado no registro.
 
 O documento é cego a tudo que não seja o recorte: não sai nome de quem usa, cidade, outro estado nem motivo de bloqueio. A escolha da imagem por versão prioriza a variante **NA** (logo neutra); sem NA, cai em VNI, QNI, QOI; as variantes com logo de cliente (LH/EH/CL) são último recurso e disparam um aviso com os IDs afetados. Sobre o tratamento dos casos bloqueados, ver v23.14.
 

@@ -14,10 +14,11 @@
    nome de quem usa, nem as cidades dos usos, nem estado algum além da praça
    consultada, nem motivo de bloqueio.
 
-   Atenção ao classificar por cidade: o status é apenas "existe uso registrado
-   nesta cidade", sem a regra de raio mínimo (`DISTANCE_RADIUS_KM`). Um caso em
-   uso numa cidade vizinha aparece como livre aqui e ainda assim é barrado no
-   registro. Por estado não há essa lacuna.
+   Classificando por cidade, o status segue a mesma régua do registro: além do
+   uso na própria cidade conta o uso em qualquer cidade dentro do raio mínimo
+   (`DISTANCE_RADIUS_KM`, com os raios reduzidos das cidades coringa). Assim o
+   documento não promete como livre um caso que o registro barraria. Por estado
+   a pergunta não se coloca.
 
    Cada caso entra com TODAS as versões existentes (V1, V2, V3...), e por versão
    é escolhida uma única imagem, preferindo a variante NA (logo neutra, que não
@@ -45,7 +46,7 @@ function exportDisponibilidadePDF(){
   if(!selUF){ showToast('Selecione o estado da praça no filtro.'); return; }
 
   const qs = nomes.map(norm);
-  const local = selCity ? cap(selCity) : selUF;
+  const local = localLabel();
   const doProf = casos.filter(c => matchesProfFilter(c, qs));
   if(!doProf.length){ showToast('Nenhum caso de ' + nomes.join(', ') + '.'); return; }
 
@@ -57,10 +58,13 @@ function exportDisponibilidadePDF(){
      mesmo sem uso registrado aqui. Com isso a classificação é exaustiva — todo
      caso do profissional cai em exatamente uma das duas listas, e nenhum some
      do documento sem explicação. */
-  const naPraca = c => selCity ? c.cidades.includes(selCity) : c.ufs.includes(selUF);
+  const naPraca = selCities.length
+    ? buildLocalMatcher()
+    : (c => c.ufs.includes(selUF));
   _dispGrupos = {
     nomes,
     local,
+    raioKm:     localRaioKm(),
     livres:     doProf.filter(c => !c.bloqueado && !naPraca(c)),
     emUso:      doProf.filter(c =>  c.bloqueado ||  naPraca(c)),
     bloqueados: doProf.filter(c =>  c.bloqueado).length
@@ -72,7 +76,8 @@ function exportDisponibilidadePDF(){
 function abrirModalDisponibilidade(){
   const g = _dispGrupos;
   const set = (id, txt) => { const el = document.getElementById(id); if(el) el.textContent = txt; };
-  set('disp-info', `Casos de ${g.nomes.join(', ')}, classificados pelo uso em ${g.local}.`);
+  set('disp-info', `Casos de ${g.nomes.join(', ')}, classificados pelo uso em ${g.local}`
+    + (g.raioKm ? ` e em cidades a até ${fmtKm(g.raioKm)} km de lá.` : '.'));
   set('disp-livres-l', `Livres em ${g.local} (${g.livres.length})`);
   set('disp-uso-l', `Indisponíveis em ${g.local} (${g.emUso.length})`);
   set('disp-err', '');
@@ -117,7 +122,11 @@ async function submitDisponibilidadePDF(){
   const secoes = [];
   /* "Indisponíveis" cobre os dois motivos — uso na praça e bloqueio — sem
      distinguir qual é qual, que é informação interna. */
-  if(querLivres) secoes.push({titulo: 'Livres em ' + g.local,        descricao: `Nenhum uso registrado em ${g.local}.`,  casos: g.livres});
+  if(querLivres) secoes.push({titulo: 'Livres em ' + g.local,
+    descricao: g.raioKm
+      ? `Nenhum uso registrado em ${g.local} nem em cidades a até ${fmtKm(g.raioKm)} km de lá.`
+      : `Nenhum uso registrado em ${g.local}.`,
+    casos: g.livres});
   if(querUso)    secoes.push({titulo: 'Indisponíveis em ' + g.local, descricao: 'Não podem ser usados nesta praça.',     casos: g.emUso});
 
   const total = secoes.reduce((n, s) => n + s.casos.length, 0);

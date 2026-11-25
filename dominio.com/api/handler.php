@@ -1400,6 +1400,66 @@ switch ($action) {
         echo json_encode(['ok'=>true,'uf'=>$uf,'cities'=>$cities,'count'=>count($cities)]);
         break;
 
+    /*
+     * Cidades dentro do raio mínimo de cada praça consultada.
+     *
+     * O filtro da grade usa isto para classificar "livre na praça" com a mesma
+     * régua do registro: um caso em uso numa cidade vizinha dentro do raio não
+     * está livre ali, ainda que o nome da cidade não bata. Sem isso a tela diz
+     * "disponível" e o registro barra logo depois.
+     *
+     * O raio de cada par é o mesmo do registro, `min(raio da praça, raio da
+     * vizinha)`, então cidade coringa também encurta o alcance aqui. Liberado a
+     * qualquer usuário logado: é a informação que a própria grade exibe.
+     */
+    case 'cities_near':
+        $locais = json_decode((string)($_POST['locais'] ?? $_GET['locais'] ?? ''), true);
+        if (!is_array($locais) || !$locais) {
+            echo json_encode(['ok'=>false,'error'=>'Informe ao menos uma cidade.']); break;
+        }
+        if (count($locais) > 20) {
+            echo json_encode(['ok'=>false,'error'=>'Máximo de 20 cidades por consulta.']); break;
+        }
+        $coords = loadCidadesCoords();
+        if (isset($coords['_error'])) {
+            echo json_encode(['ok'=>false,'error'=>$coords['_error']]); break;
+        }
+        $saida = [];
+        foreach ($locais as $l) {
+            if (!is_array($l)) continue;
+            $ufL  = strtoupper(trim($l['uf'] ?? ''));
+            $cidL = trim($l['cidade'] ?? '');
+            if ($ufL === '' || $cidL === '') continue;
+            $alvo = findCidadeCoords($ufL, $cidL);
+            if (!$alvo) {
+                // Cidade fora do CSV: o registro também não aplica o raio nela.
+                $saida[] = ['uf'=>$ufL, 'cidade'=>$cidL, 'conhecida'=>false, 'raio_km'=>null, 'vizinhas'=>[]];
+                continue;
+            }
+            $raioAlvo = cidadeRadiusKm($alvo['uf'], $alvo['name']);
+            $alvoNorm = normalizeCidade($alvo['name']);
+            $vizinhas = [];
+            foreach ($coords['_uf_name'] as $entry) {
+                if ($entry['uf'] === $alvo['uf'] && normalizeCidade($entry['name']) === $alvoNorm) continue;
+                $d = haversineKm($alvo['lat'], $alvo['lng'], $entry['lat'], $entry['lng']);
+                // O raio do par nunca passa do raio da praça, então isto poda cedo.
+                if ($d > $raioAlvo) continue;
+                $raio = min($raioAlvo, cidadeRadiusKm($entry['uf'], $entry['name']));
+                if ($d <= $raio) {
+                    $vizinhas[] = ['cidade'=>$entry['name'], 'uf'=>$entry['uf'], 'km'=>round($d, 1)];
+                }
+            }
+            usort($vizinhas, fn($a, $b) => $a['km'] <=> $b['km']);
+            $saida[] = ['uf'=>$alvo['uf'], 'cidade'=>$alvo['name'], 'conhecida'=>true,
+                        'raio_km'=>$raioAlvo, 'vizinhas'=>$vizinhas];
+        }
+        echo json_encode([
+            'ok'         => true,
+            'default_km' => defined('DISTANCE_RADIUS_KM') ? (float)DISTANCE_RADIUS_KM : 80,
+            'locais'     => $saida,
+        ]);
+        break;
+
     // ── Add uso ───────────────────────────────────────────
     case 'add_uso':
         $caso_id  = preg_replace('/[^A-Z0-9\-]/','',strtoupper($_POST['caso_id']??''));

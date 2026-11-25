@@ -13,7 +13,14 @@ let _pageGeneration = 0;
 let _highPriorityIds = new Set();
 let _loadingCount = 0;
 let casos = [], filtered = [], page = 1;
-let selUF = '', selCity = '', selProf = '';
+let selUF = '', selProf = '';
+/* Praças do filtro: várias cidades ao mesmo tempo, cada uma com a sua UF, o
+   que permite combinar cidades de estados diferentes na mesma consulta. */
+let selCities = [];
+/* Cidades dentro do raio mínimo de cada praça, vindas de `cities_near`. É o
+   que faz o filtro classificar igual ao registro: um caso em uso numa cidade
+   vizinha não está livre na praça. */
+let _nearCache = {};
 let selProfs = new Set();
 /* Como os nomes do filtro de profissional se combinam:
    'ou' = casos usados por qualquer um deles (padrão)
@@ -122,34 +129,134 @@ async function checkNewFiles(){
 
 async function onUFChange(){
   selUF = document.getElementById('fuf').value;
-  selCity = '';
   ibgeCities = [];
   document.getElementById('fci').value = '';
   document.getElementById('cdd').classList.remove('open');
-  document.getElementById('cw').style.display = selUF ? 'block' : 'none';
+  /* As praças já escolhidas continuam valendo ao trocar de estado: é assim que
+     dá para juntar cidades de UFs diferentes na mesma consulta. */
+  syncCityBox();
   if(selUF) await loadIBGE(selUF, 'filter');
   autoSyncShowFilter();
   applyFilter();
 }
 
+/* A seção de cidade some sem estado escolhido, mas continua visível enquanto
+   houver praça marcada: os chips não podem sumir da tela ainda filtrando. */
+function syncCityBox(){
+  const cw = document.getElementById('cw');
+  if(cw) cw.style.display = (selUF || selCities.length) ? 'block' : 'none';
+  const inp = document.getElementById('fci');
+  if(inp){
+    inp.disabled = !selUF;
+    inp.placeholder = selUF ? 'Pesquise a cidade...' : 'Escolha um estado para somar cidades';
+  }
+}
+
 function onCityInput(){
   const q = document.getElementById('fci').value;
-  renderDD('cdd', ibgeCities, q, c => {
-    selCity = c;
-    document.getElementById('fci').value = cap(c);
-    document.getElementById('cdd').classList.remove('open');
-    applyFilter();
-  });
-  if(!q){ selCity = ''; applyFilter(); }
+  renderDD('cdd', ibgeCities, q, c => addCityFilter(c));
 }
 
 function openCityDD(){
-  renderDD('cdd', ibgeCities, document.getElementById('fci').value, c => {
-    selCity = c;
-    document.getElementById('fci').value = cap(c);
-    document.getElementById('cdd').classList.remove('open');
-    applyFilter();
+  renderDD('cdd', ibgeCities, document.getElementById('fci').value, c => addCityFilter(c));
+}
+
+/* ── Praças (cidades) do filtro ──────────────────────────────
+   Cada cidade escolhida vira um chip. O status "em uso na praça" considera a
+   própria cidade e as vizinhas dentro do raio mínimo, então "Disponíveis" com
+   três cidades marcadas é o que está livre nas três de verdade, sem o caso que
+   o registro barraria por proximidade. */
+
+function cityKey(uf, cidade){ return `${uf}|${norm(cidade)}`; }
+
+async function addCityFilter(cidade){
+  const uf = selUF;
+  const inp = document.getElementById('fci');
+  if(inp) inp.value = '';
+  document.getElementById('cdd').classList.remove('open');
+  if(!uf || !cidade) return;
+  const key = cityKey(uf, cidade);
+  if(!selCities.some(c => cityKey(c.uf, c.cidade) === key)){
+    selCities.push({uf, cidade});
+    renderCityFilterChips();
+    autoSyncShowFilter();
+    applyFilter();                 // resposta imediata pelo nome exato
+    await loadNearCities();        // e refina com o raio assim que chegar
+    renderCityFilterChips();
+    applyFilter(true);
+  }
+}
+
+function removeCityFilter(key){
+  selCities = selCities.filter(c => cityKey(c.uf, c.cidade) !== key);
+  renderCityFilterChips();
+  syncCityBox();
+  autoSyncShowFilter();
+  applyFilter();
+}
+
+function renderCityFilterChips(){
+  const box = document.getElementById('fci-chips');
+  if(!box) return;
+  box.innerHTML = selCities.map(c => {
+    const key = cityKey(c.uf, c.cidade);
+    const near = _nearCache[key];
+    const dica = near && near.conhecida
+      ? `${cap(c.cidade)}/${c.uf} e cidades a até ${fmtKm(near.raio_km)} km (${near.vizinhas.length})`
+      : `${cap(c.cidade)}/${c.uf}`;
+    return `<span class="tag-pill" title="${esc(dica)}">${esc(cap(c.cidade))} <span style="opacity:.65">${esc(c.uf)}</span><span class="x" onclick="removeCityFilter('${esc(key).replace(/'/g,"\\'")}')" title="Remover cidade do filtro">×</span></span>`;
+  }).join('');
+}
+
+/* Busca as vizinhas das praças que ainda não estão em cache. Falha de rede não
+   trava o filtro: sem a lista, a praça volta a valer só pelo nome exato e o
+   rodapé avisa. */
+async function loadNearCities(){
+  const faltam = selCities.filter(c => !_nearCache[cityKey(c.uf, c.cidade)]);
+  if(!faltam.length) return;
+  try{
+    const r = await api('cities_near', {locais: JSON.stringify(faltam.map(c => ({uf:c.uf, cidade:c.cidade})))}, 'POST');
+    if(!r.ok) return;
+    (r.locais || []).forEach((l, i) => {
+      const origem = faltam[i];
+      if(!origem) return;
+      _nearCache[cityKey(origem.uf, origem.cidade)] = l;
+    });
+  } catch(e){}
+}
+
+/* Monta uma vez por filtragem os índices de nome usados na classificação, em
+   vez de normalizar cidade por cidade dentro do laço dos casos. */
+function buildLocalMatcher(){
+  const exatas = new Set(selCities.map(c => norm(c.cidade)));
+  const vizinhas = new Map();   // nome normalizado → {cidade, uf, km, praca}
+  let semRaio = false;
+  selCities.forEach(sc => {
+    const near = _nearCache[cityKey(sc.uf, sc.cidade)];
+    if(!near){ semRaio = true; return; }
+    (near.vizinhas || []).forEach(v => {
+      const k = norm(v.cidade);
+      if(exatas.has(k)) return;                       // praça explícita vence
+      const atual = vizinhas.get(k);
+      if(!atual || v.km < atual.km) vizinhas.set(k, {...v, praca: sc.cidade});
+    });
   });
+  const fn = c => {
+    const cids = (c.cidades || []).map(norm);
+    for(const nome of cids){
+      if(exatas.has(nome)) return {via:'cidade'};
+    }
+    for(const nome of cids){
+      const v = vizinhas.get(nome);
+      /* A UF entra na conferência pelo mesmo motivo do backend: nomes de
+         cidade se repetem entre estados, e o caso só está perto se ele usa a
+         UF daquela vizinha. */
+      if(v && (c.ufs || []).includes(v.uf)) return {via:'vizinha', ...v};
+    }
+    return null;
+  };
+  fn.semRaio = semRaio;
+  return fn;
 }
 
 function onShowFilterChange(){ _userTouchedShow = true; applyFilter(); }
@@ -160,7 +267,7 @@ function autoSyncShowFilter(){
   if(!fshow) return;
   const hasIds = !!(document.getElementById('fids')?.value || '').trim();
   const temProf = !!(selProf || selProfs.size);
-  if(hasIds || (temProf && selUF)){
+  if(hasIds || (temProf && (selUF || selCities.length))){
     /* Com IDs colados, todos eles devem aparecer. Com profissional + local, o
        universo já é só o dos casos do profissional e o que interessa é ver
        quais deles estão em uso e quais estão livres no estado/cidade. Nos dois
@@ -299,21 +406,29 @@ function filterScope(){
   const profQs = profFilterQueries();
   const idSet = parseIdFilter((document.getElementById('fids')?.value || '').trim());
   const base = idSet ? casos.filter(c => idSet.has(c.id)) : casos;
-  const matchLocal = c => selCity ? c.cidades.includes(selCity) : c.ufs.includes(selUF);
-  const combinado = !!(profQs.length && selUF);
+  /* Com cidades marcadas, a praça é a cidade mais o raio; sem elas, o estado.
+     O retorno é um objeto (ou null) em vez de booleano para o card poder dizer
+     que o uso está numa cidade vizinha, e não na praça consultada. */
+  const matchLocal = selCities.length
+    ? buildLocalMatcher()
+    : (c => c.ufs.includes(selUF) ? {via:'uf'} : null);
+  const temLocal = !!(selUF || selCities.length);
+  const combinado = !!(profQs.length && temLocal);
 
-  if(combinado)     return {profQs, combinado, universe: base.filter(c => matchesProfFilter(c, profQs)), statusOf: matchLocal};
-  if(profQs.length) return {profQs, combinado, universe: base, statusOf: c => matchesProfFilter(c, profQs)};
-  if(selUF)         return {profQs, combinado, universe: base, statusOf: matchLocal};
-  return {profQs, combinado, universe: base, statusOf: () => false};
+  if(combinado)     return {profQs, combinado, temLocal, matchLocal, universe: base.filter(c => matchesProfFilter(c, profQs)), statusOf: matchLocal};
+  if(profQs.length) return {profQs, combinado, temLocal, matchLocal, universe: base, statusOf: c => matchesProfFilter(c, profQs)};
+  if(temLocal)      return {profQs, combinado, temLocal, matchLocal, universe: base, statusOf: matchLocal};
+  return {profQs, combinado, temLocal, matchLocal, universe: base, statusOf: () => false};
 }
 
 function clearFilters(){
-  selUF = ''; selCity = ''; selProf = ''; selProfs.clear(); selTags.clear();
+  selUF = ''; selProf = ''; selProfs.clear(); selTags.clear();
+  selCities = [];
   profFilterMode = 'ou';
   ['fuf','fci','fpro','fids','ftag'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
   renderTagFilterChips();
   renderProfFilterChips();
+  renderCityFilterChips();
   _userTouchedShow = false;
   document.getElementById('fshow').value = 'disponivel';
   document.getElementById('cw').style.display = 'none';
@@ -396,7 +511,7 @@ function applyFilter(keepPage = false){
   const scope = filterScope();
   const profQs = scope.profQs;
   const idsRaw = (document.getElementById('fids')?.value || '').trim();
-  const hasStatusFilter = !!(selUF || profQs.length);
+  const hasStatusFilter = !!(scope.temLocal || profQs.length);
   const hasTagFilter = selTags.size > 0;
   const hasFilter = !!(hasStatusFilter || idsRaw || hasTagFilter);
   document.getElementById('btn-clf').style.display = hasFilter ? 'inline-flex' : 'none';
@@ -409,7 +524,12 @@ function applyFilter(keepPage = false){
 
   const matchesTags = c => !hasTagFilter || [...selTags].every(t => (c.tags||[]).includes(t));
 
-  const allWithStatus = scope.universe.map(c => ({...c, emUso: scope.statusOf(c)}));
+  /* `usoDet` guarda por que o caso conta como em uso na praça — a própria
+     cidade ou uma vizinha dentro do raio —, que é o que o card mostra. */
+  const allWithStatus = scope.universe.map(c => {
+    const det = scope.statusOf(c);
+    return {...c, emUso: !!det, usoDet: (det && typeof det === 'object') ? det : null};
+  });
 
   const tagFiltered = hasTagFilter ? allWithStatus.filter(matchesTags) : allWithStatus;
 
@@ -439,12 +559,29 @@ function applyFilter(keepPage = false){
   renderGrid();
 }
 
+/* Nome da praça para rótulos: as cidades marcadas, ou o estado. */
+function localLabel(){
+  if(selCities.length) return selCities.map(c => cap(c.cidade)).join(', ');
+  return selUF;
+}
+
+/* Raio em vigor nas praças marcadas. Quando todas usam o mesmo valor sai um
+   número só; com cidade coringa no meio, sai o maior, que é o teto real. */
+function localRaioKm(){
+  const raios = selCities
+    .map(c => _nearCache[cityKey(c.uf, c.cidade)])
+    .filter(n => n && n.conhecida)
+    .map(n => n.raio_km);
+  if(!raios.length) return null;
+  return Math.max(...raios);
+}
+
 /* Rótulos dos contadores. Em modo combinado (profissional + local) eles ganham
    o sufixo do estado/cidade, porque "disponível" e "em uso" passam a ser lidos
    dentro do local, sobre um universo que já é só o do profissional. A nota
    acima dos números explica o recorte por extenso. */
 function renderScopeLabels(scope){
-  const local = selCity ? cap(selCity) : selUF;
+  const local = localLabel();
   const sufixo = scope.combinado ? ' em ' + local : '';
   const set = (id, txt) => { const el = document.getElementById(id); if(el) el.textContent = txt; };
   set('sd-l', 'Disponíveis' + sufixo);
@@ -457,16 +594,43 @@ function renderScopeLabels(scope){
   const nomes = [...selProfs];
   if(selProf.trim()) nomes.push(selProf.trim());
   /* No modo "usam juntos" a nota aparece mesmo sem praça selecionada: o
-     recorte é bem menor que o normal e precisa ficar explícito. */
+     recorte é bem menor que o normal e precisa ficar explícito. O mesmo vale
+     para as cidades, onde a conta de "livre" inclui as vizinhas. */
   const juntos = profFilterMode === 'e' && nomes.length > 1;
-  if(!scope.combinado && !juntos){ note.style.display = 'none'; note.innerHTML = ''; return; }
-  const quem = juntos
-    ? `os casos que <b>${esc(nomes.join(' + '))}</b> usam juntos`
-    : `os casos de <b>${esc(nomes.join(', '))}</b>`;
+  const raio = localRaioKm();
+  const partes = [];
+  if(scope.combinado || juntos){
+    const quem = juntos
+      ? `os casos que <b>${esc(nomes.join(' + '))}</b> usam juntos`
+      : `os casos de <b>${esc(nomes.join(', '))}</b>`;
+    partes.push(scope.combinado
+      ? `Só ${quem}, classificados pelo uso em <b>${esc(local)}</b>.`
+      : `Só ${quem}.`);
+  }
+  if(selCities.length){
+    const quantas = selCities.length > 1
+      ? `nas <b>${selCities.length}</b> cidades marcadas`
+      : `em <b>${esc(local)}</b>`;
+    partes.push(raio
+      ? `Disponível aqui é livre ${quantas} e em qualquer cidade a até <b>${fmtKm(raio)} km</b> delas, a mesma régua do registro.`
+      : `Disponível aqui é livre ${quantas}.`);
+    /* Duas razões diferentes para o raio não entrar na conta, e o usuário
+       precisa saber qual é: a consulta não respondeu, ou a cidade não existe
+       no CSV de coordenadas (aí o registro também não aplica raio nela). */
+    if(selCities.some(c => !_nearCache[cityKey(c.uf, c.cidade)])){
+      partes.push('Não foi possível carregar as cidades vizinhas de alguma praça, então o raio mínimo não entrou nesta conta.');
+    }
+    const semCoord = selCities.filter(c => {
+      const n = _nearCache[cityKey(c.uf, c.cidade)];
+      return n && !n.conhecida;
+    });
+    if(semCoord.length){
+      partes.push(`Sem coordenadas no CSV para ${esc(semCoord.map(c => cap(c.cidade)).join(', '))}, então o raio não se aplica a essa praça.`);
+    }
+  }
+  if(!partes.length){ note.style.display = 'none'; note.innerHTML = ''; return; }
   note.style.display = 'flex';
-  note.innerHTML = scope.combinado
-    ? `<span>Só ${quem}, classificados pelo uso em <b>${esc(local)}</b>.</span>`
-    : `<span>Só ${quem}.</span>`;
+  note.innerHTML = `<span>${partes.join(' ')}</span>`;
 }
 
 function renderActiveFilterChips(){
@@ -475,8 +639,11 @@ function renderActiveFilterChips(){
   if(!wrap || !list) return;
 
   const chips = [];
-  if(selUF)   chips.push({ label: 'UF: ' + selUF,           remove: () => { selUF = ''; document.getElementById('fuf').value = ''; }});
-  if(selCity) chips.push({ label: 'Cidade: ' + cap(selCity), remove: () => { selCity = ''; document.getElementById('fci').value = ''; }});
+  if(selUF)   chips.push({ label: 'UF: ' + selUF,           remove: () => { selUF = ''; document.getElementById('fuf').value = ''; syncCityBox(); }});
+  selCities.forEach(c => chips.push({
+    label: 'Cidade: ' + cap(c.cidade) + '/' + c.uf,
+    remove: () => { removeCityFilter(cityKey(c.uf, c.cidade)); }
+  }));
   [...selProfs].forEach(p => chips.push({ label: 'Prof: ' + p, remove: () => { selProfs.delete(p); renderProfFilterChips(); }}));
   if(selProf) chips.push({ label: 'Prof: ' + selProf,        remove: () => { selProf = ''; document.getElementById('fpro').value = ''; }});
   if(profFilterMode === 'e' && profFilterQueries().length > 1){
@@ -517,7 +684,7 @@ function _getRecentes(arr){
 function updateQuickTabCounts(){
   const scope = filterScope();
   const universe = scope.universe;
-  const withStatus = universe.map(c => ({...c, emUso: scope.statusOf(c)}));
+  const withStatus = universe.map(c => ({...c, emUso: !!scope.statusOf(c)}));
   const el = id => document.getElementById(id);
   if(el('qt-c-todos')) el('qt-c-todos').textContent = universe.length;
   if(el('qt-c-disp'))  el('qt-c-disp').textContent  = withStatus.filter(c => !c.emUso && !c.bloqueado).length;
@@ -622,16 +789,22 @@ function renderGrid(){
   const slice = filtered.slice((page-1)*PER, page*PER);
   if(!slice.length){ grid.innerHTML = ''; empty.style.display = 'block'; renderPager(0); return; }
   empty.style.display = 'none';
-  const hasFilter = !!(selUF || selProf || selProfs.size);
+  const hasFilter = !!(selUF || selCities.length || selProf || selProfs.size);
   pageLoadStart = performance.now();
 
   grid.innerHTML = slice.map(c => {
     const isBlocked = !!c.bloqueado;
     const nv = !isBlocked && !c.ufs.length && !c.cidades.length;
+    /* Uso numa cidade vizinha é dito com todas as letras: sem isso o caso
+       apareceria como "Em uso" numa praça onde ninguém registrou nada. */
+    const viz = (c.usoDet && c.usoDet.via === 'vizinha') ? c.usoDet : null;
+    const vizTitle = viz
+      ? `Em uso em ${cap(viz.cidade)}/${viz.uf}, a ${fmtKm(viz.km)} km de ${cap(viz.praca)}: dentro do raio mínimo, o registro seria barrado.`
+      : '';
     let cls, lbl;
     if(isBlocked){ cls = 'bblock'; lbl = c.emUso ? '🔒 Bloqueado · Em uso' : '🔒 Bloqueado'; }
     else if(nv){ cls = 'bfree'; lbl = 'Nunca usado'; }
-    else if(c.emUso){ cls = 'bused'; lbl = 'Em uso'; }
+    else if(c.emUso){ cls = 'bused'; lbl = viz ? 'Em uso perto' : 'Em uso'; }
     else { cls = 'bok'; lbl = 'Disponível'; }
     const realUfs = (c.ufs||[]).filter(u => !isBlockMarker(u));
     const sub = (isBlocked && !c.emUso) ? 'Bloqueado'
@@ -682,7 +855,7 @@ function renderGrid(){
         ${selMode ? `<div class="csel csel-list">${isSel?'✓':''}</div>` : ''}
         <div class="ct" id="ct-${c.id}">${innerHtml}</div>
         <div class="cl-id"><span class="ci">${c.id}</span></div>
-        <div class="cl-status"><span class="badge ${cls}">${lbl}</span></div>
+        <div class="cl-status"><span class="badge ${cls}"${vizTitle ? ` title="${esc(vizTitle)}"` : ''}>${lbl}</span></div>
         <div class="cl-field">${listField(realUfs)}</div>
         <div class="cl-field">${listField(cids, cap)}</div>
         <div class="cl-field">${listField(profs)}</div>
@@ -697,7 +870,7 @@ function renderGrid(){
       <div class="cb">
         <div class="ci">${c.id}</div>
         <div class="cs" title="${esc(sub)}">${esc(sub)}</div>
-        ${hasFilter || isBlocked ? `<span class="badge ${cls}">${lbl}</span>` : ''}
+        ${hasFilter || isBlocked ? `<span class="badge ${cls}"${vizTitle ? ` title="${esc(vizTitle)}"` : ''}>${lbl}</span>` : ''}
         ${tagChips}
       </div>
     </div>`;

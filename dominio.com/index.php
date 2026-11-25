@@ -159,6 +159,8 @@ $TURNSTILE_SITE_KEY = defined('TURNSTILE_SITE_KEY') ? TURNSTILE_SITE_KEY : '';
                 <div class="dd" id="cdd"></div>
               </div>
             </div>
+            <!-- Praças escolhidas: várias cidades ao mesmo tempo, cada uma com a sua UF -->
+            <div id="fci-chips" style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px"></div>
           </section>
 
           <section class="s-rail-section">
